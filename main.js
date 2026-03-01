@@ -514,6 +514,40 @@ function followCar(carId, shouldScroll) {
 // player
 
 const playerMarkers = new Map();
+// loco zoom-based scaling controls
+const locoScaleEnable = document.getElementById('locoScaleEnable');
+let locoMarkerFactor = 1;
+let locoZoomEnabled = locoScaleEnable ? locoScaleEnable.checked : false;
+if (locoScaleEnable) {
+    locoScaleEnable.addEventListener('input', e => {
+    locoZoomEnabled = e.target.checked;
+    updateLocoMarkerFactor();
+  });
+}
+map.on('zoomend', function () {
+  updateLocoMarkerFactor();
+});
+
+function updateLocoMarkerFactor() {
+  if (locoZoomEnabled) {
+    const zoom = map.getZoom();
+    locoMarkerFactor = zoom > initialZoom ? 1 : (1 << (initialZoom - zoom));
+    console.info('Zoom Loco:', locoZoomEnabled, 'Map Zoom:', zoom, 'Loco Factor:', locoMarkerFactor);
+  } else {
+    locoMarkerFactor = 1;
+    console.info('Zoom Loco:', locoZoomEnabled, 'Loco Factor:', locoMarkerFactor);
+  }
+
+  // update bounds for visible loco markers
+  Array.from(carMarkers.keys())
+    .filter(id => id.slice(0,2) == 'L-')
+    .forEach(id => {
+      const marker = carMarkers.get(id);
+      const carData = allCarData.get(id);
+      if (marker && carData)
+        marker.setBounds(getCarOverlayBounds(id, carData));
+    });
+}
 
 function getPlayerOverlayBounds(position) {
   const size = metersToDegrees * 2;
@@ -835,16 +869,18 @@ function updateCarMarker(carId) {
   if (!marker)
     return;
   const carData = allCarData.get(carId);
-  marker.setBounds(getCarOverlayBounds(carData));
+  marker.setBounds(getCarOverlayBounds(carId, carData));
   marker.setRotationAngle(carData.rotation - 90);
   marker.getElement().innerHTML = createCarShape(carId, carData) + createCarLabel(carId, carData);
   updateCarColor(carId);
 }
 
-function getCarOverlayBounds(carData) {
+function getCarOverlayBounds(carId, carData) {
   const position = carData.position;
-  const length = metersToDegrees * carData.length;
-  const width = metersToDegrees * carWidthMeters;
+  const isLoco = carId && carId.slice(0,2) == 'L-';
+  const factor = isLoco ? locoMarkerFactor : 1;
+  const length = metersToDegrees * carData.length * factor;
+  const width = metersToDegrees * carWidthMeters * factor;
   return [ [ position[0] - width/2, position[1] - length/2], [position[0] + width/2, position[1] + length/2] ];
 }
 
@@ -853,7 +889,7 @@ function createNewCar(carId, carData) {
   createCarRow(carId);
   const overlay = L.svgOverlay(
     createCarOverlay(carId, carData),
-    getCarOverlayBounds(carData),
+    getCarOverlayBounds(carId, carData),
     { interactive: true, bubblingMouseEvents: false })
     .addEventListener('mouseup', e => followCar(carId, true))
     .addTo(map);

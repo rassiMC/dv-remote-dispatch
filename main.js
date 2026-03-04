@@ -82,6 +82,7 @@ const sidebar = L.control.sidebar({ autopan: true, container: 'sidebar' }).addTo
 
 const tablesort = new Tablesort(document.getElementById('carList'));
 const carListBody = document.getElementById('carListBody');
+const locoListBody = document.getElementById('locoListBody');
 
 function createCarRow(carId) {
   const row = document.createElement('tr');
@@ -514,40 +515,6 @@ function followCar(carId, shouldScroll) {
 // player
 
 const playerMarkers = new Map();
-// loco zoom-based scaling controls
-const locoScaleEnable = document.getElementById('locoScaleEnable');
-let locoMarkerFactor = 1;
-let locoZoomEnabled = locoScaleEnable ? locoScaleEnable.checked : false;
-if (locoScaleEnable) {
-    locoScaleEnable.addEventListener('input', e => {
-    locoZoomEnabled = e.target.checked;
-    updateLocoMarkerFactor();
-  });
-}
-map.on('zoomend', function () {
-  updateLocoMarkerFactor();
-});
-
-function updateLocoMarkerFactor() {
-  if (locoZoomEnabled) {
-    const zoom = map.getZoom();
-    locoMarkerFactor = zoom > initialZoom ? 1 : (1 << (initialZoom - zoom));
-    console.info('Zoom Loco:', locoZoomEnabled, 'Map Zoom:', zoom, 'Loco Factor:', locoMarkerFactor);
-  } else {
-    locoMarkerFactor = 1;
-    console.info('Zoom Loco:', locoZoomEnabled, 'Loco Factor:', locoMarkerFactor);
-  }
-
-  // update bounds for visible loco markers
-  Array.from(carMarkers.keys())
-    .filter(id => id.slice(0,2) == 'L-')
-    .forEach(id => {
-      const marker = carMarkers.get(id);
-      const carData = allCarData.get(id);
-      if (marker && carData)
-        marker.setBounds(getCarOverlayBounds(id, carData));
-    });
-}
 
 function getPlayerOverlayBounds(position) {
   const size = metersToDegrees * 2;
@@ -796,6 +763,8 @@ const svgPixelsPerMeter = carWidthPx / 3;
 
 const allCarData = new Map();
 const carMarkers = new Map();
+// selected locos for zoom-based scaling
+const selectedLocos = new Set();
 
 function getCarColor(carId) {
   const jobId = carJobIds.get(carId);
@@ -877,8 +846,9 @@ function updateCarMarker(carId) {
 
 function getCarOverlayBounds(carId, carData) {
   const position = carData.position;
-  const isLoco = carId && carId.slice(0,2) == 'L-';
-  const factor = isLoco ? locoMarkerFactor : 1;
+  // If this is a selected loco, apply zoom-based scaling factor to make it more visible
+  // We dont need to check if it's a loco here because only locos can (should) be in selectedLocos, so non-locos will always have a factor of 1
+  const factor = selectedLocos.has(carId) ? locoMarkerFactor : 1;
   const length = metersToDegrees * carData.length * factor;
   const width = metersToDegrees * carWidthMeters * factor;
   return [ [ position[0] - width/2, position[1] - length/2], [position[0] + width/2, position[1] + length/2] ];
@@ -924,11 +894,81 @@ function updateAllCars(updateCarData) {
     if (!updateCarData[carId])
       removeCar(carId);
   updateLocoList();
+  updateLocoListSidebar();
+  // Remove any selected locos that are no longer present
+  for (const id of Array.from(selectedLocos))
+    if (!allCarData.has(id))
+      selectedLocos.delete(id);
 }
 
 function updateCars(cars) {
   Object.entries(cars).forEach(([carId, carData]) =>
     updateCar(carId, carData));
+}
+
+/////////////////////
+// locos
+
+let locoMarkerFactor = 1;
+map.on('zoomend', function () {
+  updateLocoMarkerFactor();
+});
+
+function updateLocoMarkerFactor() {
+  const zoom = map.getZoom();
+  // Note, after _much fiddling_ with different formulas, (including bitwise operators)
+  // Simple 2 to the power of "zoom difference" seemed the best
+  locoMarkerFactor = zoom > initialZoom ? 1 : (2 ** (initialZoom - zoom));
+  console.info('Map Zoom:', zoom, 'Loco Factor:', locoMarkerFactor);
+
+  // update bounds only for selected locos to minimize work and avoid changing non-selected markers
+  Array.from(selectedLocos).forEach(id => {
+    const marker = carMarkers.get(id);
+    const carData = allCarData.get(id);
+    if (marker && carData)
+      marker.setBounds(getCarOverlayBounds(id, carData));
+  });
+}
+
+// Update the loco selection sidebar. Shows ordered list of L- IDs with checkboxes.
+function updateLocoListSidebar() {
+  if (!locoListBody)
+    return;
+  // clear existing
+  locoListBody.replaceChildren();
+
+  const locoIds = Array.from(allCarData.keys())
+    .filter(id => id.slice(0, 2) == 'L-')
+    .sort((a, b) => a.localeCompare(b));
+  // build rows using simple HTML to keep logic concise
+  const frag = document.createDocumentFragment();
+  for (const locoId of locoIds) {
+    const row = document.createElement('tr');
+    const idCell = document.createElement('td');
+    idCell.textContent = locoId;
+    const selectCell = document.createElement('td');
+    selectCell.innerHTML = `<input type="checkbox" data-loco-id="${locoId}" ${selectedLocos.has(locoId) ? 'checked' : ''}>`;
+    row.appendChild(idCell);
+    row.appendChild(selectCell);
+    frag.appendChild(row);
+  }
+  locoListBody.appendChild(frag);
+
+  // use event delegation for checkbox changes (single listener)
+  if (!locoListBody._hasDelegatedLocoListener) {
+    locoListBody.addEventListener('change', e => {
+      const target = e.target;
+      if (target && target.matches('input[type=checkbox][data-loco-id]')) {
+        const locoId = target.getAttribute('data-loco-id');
+        if (target.checked) selectedLocos.add(locoId); else selectedLocos.delete(locoId);
+        const marker = carMarkers.get(locoId);
+        const carData = allCarData.get(locoId);
+        console.info('Loco data', carData)
+        if (marker && carData) marker.setBounds(getCarOverlayBounds(locoId, carData));
+      }
+    });
+    locoListBody._hasDelegatedLocoListener = true;
+  }
 }
 
 /////////////////////

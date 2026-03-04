@@ -2,11 +2,12 @@
   "Id": "RemoteDispatch",
   "DisplayName": "Remote Dispatch",
   "Author": "Zeibach",
-  "Version": "1.2.1",
+  "Version": "1.3.0",
   "AssemblyName": "RemoteDispatch.dll",
   "EntryMethod": "DvMod.RemoteDispatch.Main.Load",
   "LoadAfter": [ "PersistentJobsMod" ],
   "ManagerVersion": "0.27.3",
+  "MultiplayerCompatibility": "Host",
   "HomePage": "https://www.nexusmods.com/derailvalley/mods/328",
   "Repository": "https://raw.githubusercontent.com/mspielberg/dv-remote-dispatch/master/resources/repository.json"
 }

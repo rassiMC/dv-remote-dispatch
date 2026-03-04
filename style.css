@@ -76,7 +76,8 @@ table tbody:first-child > tr:first-child td {
 }
 
 .leaflet-sidebar.collapsed {
-  max-height: 160px;
+  /* Each icon is 40 px in height */
+  max-height: 200px;
 }
 .leaflet-sidebar {
   max-height: 100%;

@@ -18,6 +18,7 @@
   <div class="leaflet-sidebar-tabs">
     <ul role="tablist">
       <li><a href="#carsTab" role="tab"><i class="fas fa-train" title="Cars"></i></a></li>
+      <li><a href="#locoFilterTab" role="tab"><i class="fas fa-eye" title="Loco select"></i></a></li>
       <li><a href="#jobsTab" role="tab"><i class="fas fa-clipboard-list" title="Jobs"></i></a></li>
       <li><a href="#locoControlTab" role="tab"><i class="fas fa-gamepad" title="Loco Control"></i></a></li>
       <li><a href="#settingsTab" role="tab"><i class="fas fa-cog" title="Settings"></i></a></li>
@@ -30,6 +31,14 @@
           <tr><th>ID</th><th>Job</th><th>Dest</th></tr>
         </thead>
         <tbody id="carListBody"></tbody>
+      </table>
+    </div>
+    <div class="leaflet-sidebar-pane" id="locoFilterTab">
+      <table id="locoList">
+        <thead>
+          <tr><th>ID</th><th>Highlight</th></tr>
+        </thead>
+        <tbody id="locoListBody"></tbody>
       </table>
     </div>
     <div class="leaflet-sidebar-pane" id="jobsTab">
@@ -93,12 +102,6 @@
               <option value="destination">by destination</option>
               <option value="carType">by car type</option>
             </select>
-          </td>
-        </tr>
-        <tr>
-          <th><label for="locoScaleEnable">Loco icon scaling</label></th>
-          <td>
-            <input id="locoScaleEnable" type="checkbox" checked>
           </td>
         </tr>
     </table>

@@ -1,6 +1,7 @@
-using System;
+using Steamworks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System;
 
 namespace DvMod.RemoteDispatch
 {
@@ -33,6 +34,19 @@ namespace DvMod.RemoteDispatch
             return delta > -1e-3 && delta < 1e-3;
         }
 
+        private static string GetLocalSteamName()
+        {
+            try
+            {
+                // https://wiki.facepunch.com/steamworks/SteamClient
+                return Steamworks.SteamClient.Name ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
         public static JObject GetPlayerData()
         {
             CheckTransform();
@@ -40,7 +54,8 @@ namespace DvMod.RemoteDispatch
                 new JProperty("player", new JObject(
                     new JProperty("color", "aqua"),
                     new JProperty("position", previousPosition.ToLatLon().ToJson()),
-                    new JProperty("rotation", Math.Round(previousRotation, 2))
+                    new JProperty("rotation", Math.Round(previousRotation, 2)),
+                    new JProperty("name", GetLocalSteamName()) // Todo, custom names and non-steam names
                 ))
             );
         }

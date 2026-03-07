@@ -43,9 +43,10 @@ function stopFollowing() {
 }
 
 function zoomToAllPlayers() {
-  const bounds = new L.LatLngBounds();
-  playerMarkers.forEach(marker => bounds.extend(marker.getBounds()));
-  map.fitBounds(bounds, { maxZoom: initialZoom });
+  const bounds = [];
+  // Cant get bounds of the tooltip, so just get overlay
+  playerMarkers.forEach(marker => { bounds.push(marker.overlay.getBounds()) });
+  map.fitBounds(L.latLngBounds(bounds), { maxZoom: initialZoom });
 }
 
 map.addEventListener('zoomhome', () => {
@@ -538,12 +539,20 @@ function updatePlayerOverlays(data) {
   Object.entries(data).forEach(([id, playerData]) => {
     const polygonElem = document.getElementById(`playerPolygon-${id}`);
     polygonElem.setAttribute('transform', `rotate(${playerData.rotation})`);
-    playerMarkers.get(id).setBounds(getPlayerOverlayBounds(playerData.position));
+    const marker = playerMarkers.get(id);
+    marker.overlay.setBounds(getPlayerOverlayBounds(playerData.position));
+    marker.playerLabel.setLatLng(playerData.position);
   });
 }
 
 function removePlayerOverlay(id) {
   document.getElementById(`playerPolygon-${id}`)?.remove();
+  const marker = playerMarkers.get(id);
+  if (marker) {
+    // cleanup
+    marker.overlay.remove();
+    marker.playerlabel.remove();
+  }
   playerMarkers.delete(id);
 }
 
@@ -562,12 +571,36 @@ function createPlayerOverlay(id, playerData) {
 }
 
 function createPlayerMarker(id, playerData) {
-  playerMarkers.set(id, L.svgOverlay(
+  const overlay = L.svgOverlay(
     createPlayerOverlay(id, playerData),
     getPlayerOverlayBounds(playerData.position),
-    { interactive: true, bubblingMouseEvents: false })
+    { interactive: true, bubblingMouseEvents: false }
+  )
     .addEventListener('click', e => setMarkerToFollow(e.target))
-    .addTo(map));
+    .addTo(map);
+
+  // For reasons that are not entirely clear to me, this does not work, the tooltip contains no text...
+  // I am obviously missing something...
+  //const playerLabel = L.tooltip(
+  //  { permanent: true, direction: 'top', offset: [0, -10] }
+  //)
+  //  .setTooltipContent(playerData.name)
+  //  .setLatLng(playerData.position)
+  //  .addTo(map);
+
+  // Workaround: use a marker with a div icon as a tooltip
+  const playerLabel = L.marker(playerData.position, {
+    icon: L.divIcon({
+      className: 'player-name-label',
+      html: `<div style="background: rgba(0,0,0,0.7); color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; white-space: nowrap;">${playerData.name}</div>`,
+      iconSize: null,
+      iconAnchor: [0, -20]
+    })
+  })
+    .addEventListener('click', () => setMarkerToFollow(overlay))
+    .addTo(map);
+
+  playerMarkers.set(id, { overlay, playerLabel });
 }
 
 function scrollToTrack(trackId) {
@@ -578,11 +611,12 @@ function scrollToTrack(trackId) {
 }
 
 fetch(new URL('/player', location))
-.then(resp => resp.json())
-.then(data => {
-  updatePlayerOverlays(data);
-  zoomToAllPlayers();
-});
+  .then(resp => resp.json())
+  .then(data => {
+    updatePlayerOverlays(data);
+    zoomToAllPlayers();
+  }
+);
 
 /////////////////////
 // loco control

@@ -551,7 +551,7 @@ function removePlayerOverlay(id) {
   if (marker) {
     // cleanup
     marker.overlay.remove();
-    marker.playerlabel.remove();
+    marker.playerLabel.remove();
   }
   playerMarkers.delete(id);
 }

@@ -76,6 +76,15 @@ document.getElementById('carColorDropdown')
     updateJobListColors();
   });
 
+document.getElementById('playerScalingCheckbox')
+  .addEventListener('change', e => {
+    playerScalingEnabled = e.target.checked;
+    // immediately reapply bounds to all player markers
+    playerMarkers.forEach(({ overlay, position }) => {
+      overlay.setBounds(getPlayerOverlayBounds(position));
+    });
+  });
+
 /////////////////////
 // sidebar
 
@@ -516,9 +525,11 @@ function followCar(carId, shouldScroll) {
 // player
 
 const playerMarkers = new Map();
+let playerScalingEnabled = false;
 
 function getPlayerOverlayBounds(position) {
-  const size = metersToDegrees * 2;
+  const playerScaleFactor = playerScalingEnabled ? scaleMarkerFactor : 1;
+  const size = metersToDegrees * 2 * playerScaleFactor;
   return [ [ position[0] - size, position[1] - size], [position[0] + size, position[1] + size] ];
 }
 
@@ -540,6 +551,7 @@ function updatePlayerOverlays(data) {
     const polygonElem = document.getElementById(`playerPolygon-${id}`);
     polygonElem.setAttribute('transform', `rotate(${playerData.rotation})`);
     const marker = playerMarkers.get(id);
+    marker.position = playerData.position;
     marker.overlay.setBounds(getPlayerOverlayBounds(playerData.position));
     marker.playerLabel.setLatLng(playerData.position);
   });
@@ -552,6 +564,7 @@ function removePlayerOverlay(id) {
     // cleanup
     marker.overlay.remove();
     marker.playerLabel.remove();
+    marker.position.remove()
   }
   playerMarkers.delete(id);
 }
@@ -600,7 +613,7 @@ function createPlayerMarker(id, playerData) {
     .addEventListener('click', () => setMarkerToFollow(overlay))
     .addTo(map);
 
-  playerMarkers.set(id, { overlay, playerLabel });
+  playerMarkers.set(id, { overlay, playerLabel, position: playerData.position });
 }
 
 function scrollToTrack(trackId) {
@@ -882,7 +895,7 @@ function getCarOverlayBounds(carId, carData) {
   const position = carData.position;
   // If this is a selected loco, apply zoom-based scaling factor to make it more visible
   // We dont need to check if it's a loco here because only locos can (should) be in selectedLocos, so non-locos will always have a factor of 1
-  const factor = selectedLocos.has(carId) ? locoMarkerFactor : 1;
+  const factor = selectedLocos.has(carId) ? scaleMarkerFactor : 1;
   const length = metersToDegrees * carData.length * factor;
   const width = metersToDegrees * carWidthMeters * factor;
   return [ [ position[0] - width/2, position[1] - length/2], [position[0] + width/2, position[1] + length/2] ];
@@ -943,17 +956,17 @@ function updateCars(cars) {
 /////////////////////
 // locos
 
-let locoMarkerFactor = 1;
+let scaleMarkerFactor = 1;
 map.on('zoomend', function () {
-  updateLocoMarkerFactor();
+  updatescaleMarkerFactor();
 });
 
-function updateLocoMarkerFactor() {
+function updatescaleMarkerFactor() {
   const zoom = map.getZoom();
   // Note, after _much fiddling_ with different formulas, (including bitwise operators)
   // Simple 2 to the power of "zoom difference" seemed the best
-  locoMarkerFactor = zoom > initialZoom ? 1 : (2 ** (initialZoom - zoom));
-  console.info('Map Zoom:', zoom, 'Loco Factor:', locoMarkerFactor);
+  scaleMarkerFactor = zoom > initialZoom ? 1 : (2 ** (initialZoom - zoom));
+  console.info('Map Zoom:', zoom, 'Scale Factor:', scaleMarkerFactor);
 
   // update bounds only for selected locos to minimize work and avoid changing non-selected markers
   Array.from(selectedLocos).forEach(id => {
@@ -962,6 +975,12 @@ function updateLocoMarkerFactor() {
     if (marker && carData)
       marker.setBounds(getCarOverlayBounds(id, carData));
   });
+
+  if (playerScalingEnabled) {
+    playerMarkers.forEach(({ overlay, position }) => {
+      overlay.setBounds(getPlayerOverlayBounds(position));
+    });
+  }
 }
 
 // Update the loco selection sidebar. Shows ordered list of L- IDs with checkboxes.

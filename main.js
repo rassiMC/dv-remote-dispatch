@@ -85,6 +85,15 @@ document.getElementById('playerScalingCheckbox')
     });
   });
 
+document.getElementById('playerNameCheckbox')
+  .addEventListener('change', e => {
+    playerTooltipEnabled = e.target.checked;
+    // immediately toggle tooltip visibility for all player markers
+    playerMarkers.forEach(({ playerLabel }) => {
+      playerLabel.getElement().style.display = playerTooltipEnabled ? '' : 'none';
+    });
+  });
+
 /////////////////////
 // sidebar
 
@@ -525,7 +534,7 @@ function followCar(carId, shouldScroll) {
 // player
 
 const playerMarkers = new Map();
-let playerScalingEnabled = false;
+let playerScalingEnabled = true;
 
 function getPlayerOverlayBounds(position) {
   const playerScaleFactor = playerScalingEnabled ? scaleMarkerFactor : 1;
@@ -537,16 +546,16 @@ function updatePlayerOverlays(data) {
   const existingPlayerIds = Array.from(playerMarkers.keys());
   // Remove markers from disconnected players
   existingPlayerIds
-  .filter(id => !data.hasOwnProperty(id))
-  .forEach(id => {
-    removePlayerOverlay(id);
-  });
+    .filter(id => !data.hasOwnProperty(id))
+    .forEach(id => {
+      removePlayerOverlay(id);
+    });
   // Add markers for new players
   Object.entries(data)
-  .filter(([id]) => !existingPlayerIds.includes(id))
-  .forEach(([id, playerData]) => {
-    createPlayerMarker(id, playerData);
-  });
+    .filter(([id]) => !existingPlayerIds.includes(id))
+    .forEach(([id, playerData]) => {
+      createPlayerMarker(id, playerData);
+    });
   Object.entries(data).forEach(([id, playerData]) => {
     const polygonElem = document.getElementById(`playerPolygon-${id}`);
     polygonElem.setAttribute('transform', `rotate(${playerData.rotation})`);
@@ -563,8 +572,8 @@ function removePlayerOverlay(id) {
   if (marker) {
     // cleanup
     marker.overlay.remove();
-    marker.playerLabel.remove();
     marker.position.remove()
+    marker.playerLabel.remove();
   }
   playerMarkers.delete(id);
 }
@@ -592,21 +601,11 @@ function createPlayerMarker(id, playerData) {
     .addEventListener('click', e => setMarkerToFollow(e.target))
     .addTo(map);
 
-  // For reasons that are not entirely clear to me, this does not work, the tooltip contains no text...
-  // I am obviously missing something...
-  //const playerLabel = L.tooltip(
-  //  { permanent: true, direction: 'top', offset: [0, -10] }
-  //)
-  //  .setTooltipContent(playerData.name)
-  //  .setLatLng(playerData.position)
-  //  .addTo(map);
-
-  // Workaround: use a marker with a div icon as a tooltip
+  // If a tooltip is used, it cannot be bound properly to the overlay as the overlay doesnt have a latlng, so create a separate marker just for the tooltip
   const playerLabel = L.marker(playerData.position, {
     icon: L.divIcon({
-      className: 'player-name-label',
-      html: `<div style="background: rgba(0,0,0,0.7); color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; white-space: nowrap;">${playerData.name}</div>`,
-      iconSize: null,
+      html: `<div style="background: rgba(0,0,0,0.7); color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; white-space: nowrap; opacity: 0.7;">${id}</div>`,
+      iconSize: null, // let size scale with content
       iconAnchor: [0, -20]
     })
   })

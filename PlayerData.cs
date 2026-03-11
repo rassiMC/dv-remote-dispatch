@@ -43,11 +43,11 @@ namespace DvMod.RemoteDispatch
             try
             {
                 // https://wiki.facepunch.com/steamworks/SteamClient
-                return Steamworks.SteamClient.Name ?? string.Empty;
+                return Steamworks.SteamClient.Name ?? "steam name unknown";
             }
             catch
             {
-                return string.Empty;
+                return "unknown";
             }
         }
 
@@ -56,48 +56,12 @@ namespace DvMod.RemoteDispatch
             CheckTransform();
             var res = new JObject();
 
-            res["host"] = new JObject(
+            res[GetLocalSteamName()] = new JObject(
+                // Do not change this format, it gets patched by the MP mod to add all client players
                 new JProperty("color", "aqua"),
                 new JProperty("position", previousPosition.ToLatLon().ToJson()),
-                new JProperty("rotation", Math.Round(previousRotation, 2)),
-                new JProperty("name", $"{GetLocalSteamName()} - host")
+                new JProperty("rotation", Math.Round(previousRotation, 2))
             );
-
-            IEnumerable<object> otherPlayers;
-            try
-            {
-                otherPlayers = MultiplayerHook.GetServerPlayers();
-            }
-            catch (Exception e)
-            {
-                Main.DebugLog(() => $"Error getting server players: {e.Message}");
-                return res;
-            }
-            Main.DebugLog(() => $"Player count: {MultiplayerHook.GetPlayerCount()}");
-
-            if (otherPlayers != null)
-            {
-                Main.DebugLog(() => $"Other players found!");
-                foreach (var player in otherPlayers)
-                {
-                    var type = player.GetType();
-                     Main.DebugLog(() => $"Player properties: {string.Join(", ", type.GetProperties().Select(p => p.Name))}");
-                    // https://github.com/AMacro/dv-multiplayer/blob/beta/Multiplayer/Networking/Data/ServerPlayer.cs
-                    var absPos = (Vector3)type.GetProperty("AbsoluteWorldPosition").GetValue(player);
-                    var position = new World.Position(absPos - WorldMover.currentMove);
-                    var rotY = (float)type.GetProperty("WorldRotationY").GetValue(player);
-                    var name = (string)type.GetProperty("Username").GetValue(player);
-                    var guid = (Guid)type.GetProperty("Guid").GetValue(player);
-                    var playerId = (byte)type.GetProperty("PlayerId").GetValue(player);
-
-                    res[guid.ToString()] = new JObject(
-                        new JProperty("color", "orange"),
-                        new JProperty("position", position.ToLatLon().ToJson()),
-                        new JProperty("rotation", Math.Round(rotY, 2)),
-                        new JProperty("name", name ?? string.Empty)
-                    );
-                }
-            }
             return res;
         }
 

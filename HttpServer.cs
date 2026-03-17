@@ -81,7 +81,7 @@ namespace DvMod.RemoteDispatch
 			if (request.Url.Segments.Length < 2)
 			{
 				context.Response.ContentType = ContentTypes.Html;
-				RenderResource(context, "index.html");
+				RenderResource(context, "frontend.index.html");
 				return;
 			}
 
@@ -256,7 +256,7 @@ namespace DvMod.RemoteDispatch
 			var resourceName = context.Request.Url.Segments[2];
 			var extension = Path.GetExtension(resourceName);
 			context.Response.ContentType = ContentTypes.ForExtension(extension);
-			RenderResource(context, resourceName);
+			RenderResource(context, $"frontend.{resourceName}");
 		}
 
 		private static void RenderResource(HttpListenerContext context, string resourceName)

@@ -1038,7 +1038,10 @@ let updateStart;
 function updateOnce() {
   updateStart = performance.now();
   return fetch(new URL(`/updates/${sessionId}`, location))
-  .then(resp => resp.json())
+  .then(resp => {
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json();
+  })
   .then(updateData => {
     Object.entries(updateData).forEach(([tag, data]) => {
       switch (tag) {
@@ -1070,11 +1073,14 @@ function updateOnce() {
 }
 
 function updateLoop() {
-  updateOnce()
-  .then(_ => {
-    const timeToNextUpdate = (updateStart + updateInterval) - performance.now();
-    setTimeout(updateLoop, timeToNextUpdate);
-  });
+    updateOnce()
+    .catch(err => {
+        console.error('Update failed:', err);
+    })
+    .then(_ => {
+        const timeToNextUpdate = (updateStart + updateInterval) - performance.now();
+        setTimeout(updateLoop, timeToNextUpdate);
+    });
 }
 
 junctionsReady.then(_ => {

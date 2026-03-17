@@ -4,3 +4,5 @@
 /dv
 /.idea/
 Directory.Build.targets
+/build
+/dist/**

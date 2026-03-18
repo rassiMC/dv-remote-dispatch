@@ -9,19 +9,19 @@ const canvasRenderer = L.canvas();
 const mapBounds = [[0, 0], [0.15, 0.15]];
 const maxBounds = [[-0.02, -0.02], [0.17, 0.17]];
 const map = L.map('map', {
-  minZoom: 13,
-  maxBounds: maxBounds,
-  tap: false,
-  zoomControl: false,
+    minZoom: 13,
+    maxBounds: maxBounds,
+    tap: false,
+    zoomControl: false,
 })
-.fitBounds(mapBounds);
+    .fitBounds(mapBounds);
 L.control.scale().addTo(map);
 const zoomHome = new L.Control.ZoomHome({
-  position: 'topleft',
-  zoomInText: '<i class="fas fa-search-plus"></i>',
-  zoomHomeText: '<i class="fas fa-user"></i>',
-  zoomHomeTitle: 'Zoom to player(s)',
-  zoomOutText: '<i class="fas fa-search-minus"></i>',
+    position: 'topleft',
+    zoomInText: '<i class="fas fa-search-plus"></i>',
+    zoomHomeText: '<i class="fas fa-user"></i>',
+    zoomHomeTitle: 'Zoom to player(s)',
+    zoomOutText: '<i class="fas fa-search-minus"></i>',
 }).addTo(map);
 
 let markerToFollow;
@@ -34,65 +34,65 @@ map.on('zoomanim', () => {
 });
 
 function setMarkerToFollow(marker) {
-  markerToFollow = marker;
-  map.panTo(marker.getBounds().getCenter());
+    markerToFollow = marker;
+    map.panTo(marker.getBounds().getCenter());
 }
 
 function stopFollowing() {
-  markerToFollow = undefined;
+    markerToFollow = undefined;
 }
 
 function zoomToAllPlayers() {
-  const bounds = [];
-  // Cant get bounds of the tooltip, so just get overlay
-  playerMarkers.forEach(marker => { bounds.push(marker.overlay.getBounds()) });
-  map.fitBounds(L.latLngBounds(bounds), { maxZoom: initialZoom });
+    const bounds = [];
+    // Cant get bounds of the tooltip, so just get overlay
+    playerMarkers.forEach(marker => { bounds.push(marker.overlay.getBounds()) });
+    map.fitBounds(L.latLngBounds(bounds), { maxZoom: initialZoom });
 }
 
 map.addEventListener('zoomhome', () => {
-  stopFollowing();
-  zoomToAllPlayers();
+    stopFollowing();
+    zoomToAllPlayers();
 });
 
 /////////////////////
 // settings
 
 document.getElementById('themeDropdown')
-  .addEventListener('input', e => {
-    if (e.target.value === 'dark') {
-      document.getElementById('map').classList.add('dark');
-    } else {
-      document.getElementById('map').classList.remove('dark');
-    }
-  });
+    .addEventListener('input', e => {
+        if (e.target.value === 'dark') {
+            document.getElementById('map').classList.add('dark');
+        } else {
+            document.getElementById('map').classList.remove('dark');
+        }
+    });
 
 function getCarColorMode() {
-  return document.getElementById('carColorDropdown').value;
+    return document.getElementById('carColorDropdown').value;
 }
 
 document.getElementById('carColorDropdown')
-  .addEventListener('input', () => {
-    updateAllCarColors();
-    updateJobListColors();
-  });
+    .addEventListener('input', () => {
+        updateAllCarColors();
+        updateJobListColors();
+    });
 
 document.getElementById('playerScalingCheckbox')
-  .addEventListener('change', e => {
-    playerScalingEnabled = e.target.checked;
-    // immediately reapply bounds to all player markers
-    playerMarkers.forEach(({ overlay, position }) => {
-      overlay.setBounds(getPlayerOverlayBounds(position));
+    .addEventListener('change', e => {
+        playerScalingEnabled = e.target.checked;
+        // immediately reapply bounds to all player markers
+        playerMarkers.forEach(({ overlay, position }) => {
+            overlay.setBounds(getPlayerOverlayBounds(position));
+        });
     });
-  });
 
 document.getElementById('playerNameCheckbox')
-  .addEventListener('change', e => {
-    playerTooltipEnabled = e.target.checked;
-    // immediately toggle tooltip visibility for all player markers
-    playerMarkers.forEach(({ playerLabel }) => {
-      playerLabel.getElement().style.display = playerTooltipEnabled ? '' : 'none';
+    .addEventListener('change', e => {
+        playerTooltipEnabled = e.target.checked;
+        // immediately toggle tooltip visibility for all player markers
+        playerMarkers.forEach(({ playerLabel }) => {
+            playerLabel.getElement().style.display = playerTooltipEnabled ? '' : 'none';
+        });
     });
-  });
 
 /////////////////////
 // sidebar
@@ -104,28 +104,28 @@ const carListBody = document.getElementById('carListBody');
 const locoListBody = document.getElementById('locoListBody');
 
 function createCarRow(carId) {
-  const row = document.createElement('tr');
-  row.setAttribute('id', `carList-${carId}`);
-  row.classList.add('interactive');
-  carListBody.append(row);
-  updateCarRow(carId);
-  row.addEventListener('click', _ => followCar(carId, false) );
+    const row = document.createElement('tr');
+    row.setAttribute('id', `carList-${carId}`);
+    row.classList.add('interactive');
+    carListBody.append(row);
+    updateCarRow(carId);
+    row.addEventListener('click', _ => followCar(carId, false));
 }
 
 function removeCarRow(carId) {
-  const row = document.getElementById(`carList-${carId}`);
-  if (row)
-    row.remove();
+    const row = document.getElementById(`carList-${carId}`);
+    if (row)
+        row.remove();
 }
 
 function updateCarRow(carId) {
-  const row = document.getElementById(`carList-${carId}`);
-  if (!row)
-    return;
-  const jobId = carJobIds.has(carId) ? carJobIds.get(carId) : '';
-  const destinationYardId = allJobData.has(jobId) ? allJobData.get(jobId).destinationYardId : '';
-  row.innerHTML = `<td>${carId}</td><td>${jobId}</td><td>${destinationYardId}</td>`;
-  tablesort.refresh();
+    const row = document.getElementById(`carList-${carId}`);
+    if (!row)
+        return;
+    const jobId = carJobIds.has(carId) ? carJobIds.get(carId) : '';
+    const destinationYardId = allJobData.has(jobId) ? allJobData.get(jobId).destinationYardId : '';
+    row.innerHTML = `<td>${carId}</td><td>${jobId}</td><td>${destinationYardId}</td>`;
+    tablesort.refresh();
 }
 
 /////////////////////
@@ -138,181 +138,181 @@ const jobListBody = document.getElementById('jobListBody');
 
 // https://www.npmjs.com/package/string-hash
 function stringHash(str) {
-  let hash = 5381, i = str.length;
-  while(i) {
-    hash = (hash * 33) ^ str.charCodeAt(--i);
-  }
-  return hash >>> 0;
+    let hash = 5381, i = str.length;
+    while (i) {
+        hash = (hash * 33) ^ str.charCodeAt(--i);
+    }
+    return hash >>> 0;
 }
 
 // http://vrl.cs.brown.edu/color
 const carColors = [
-  '#52ef99', '#c95e9f', '#b1e632', '#7574f5', '#799d10', '#fd3fbe', '#2cf52b', '#d130ff', '#21a708', '#fd2b31',
-  '#3eeaef', '#ffc4de', '#069668', '#f9793b', '#5884c9', '#e5d75e', '#96ccfe', '#bb8801', '#6a8b7b', '#a8777c',
+    '#52ef99', '#c95e9f', '#b1e632', '#7574f5', '#799d10', '#fd3fbe', '#2cf52b', '#d130ff', '#21a708', '#fd2b31',
+    '#3eeaef', '#ffc4de', '#069668', '#f9793b', '#5884c9', '#e5d75e', '#96ccfe', '#bb8801', '#6a8b7b', '#a8777c',
 ];
 
 function colorByHashing(str) {
-  return carColors[stringHash(str) % carColors.length];
+    return carColors[stringHash(str) % carColors.length];
 }
 
 function colorForJobDestination(jobId) {
-  const jobData = allJobData.get(jobId);
-  if (!jobData)
-    return 'gray';
-  return colorForYardId(jobData.destinationYardId);
+    const jobData = allJobData.get(jobId);
+    if (!jobData)
+        return 'gray';
+    return colorForYardId(jobData.destinationYardId);
 }
 
 function colorForJobType(jobId) {
-  const segments = jobId.split('-');
-  if (segments.length == 2)
-    return 'cornflowerblue';
-  const jobType = segments[1];
-  switch (jobType) {
-  case 'FH': return 'lightgreen';
-  case 'LH': return 'khaki';
-  case 'PC':
-  case 'PE': return 'cornflowerblue';
-  case 'PR': return 'mediumpurple';
-  case 'SL':
-  case 'SU': return 'lightcoral';
-  }
+    const segments = jobId.split('-');
+    if (segments.length == 2)
+        return 'cornflowerblue';
+    const jobType = segments[1];
+    switch (jobType) {
+        case 'FH': return 'lightgreen';
+        case 'LH': return 'khaki';
+        case 'PC':
+        case 'PE': return 'cornflowerblue';
+        case 'PR': return 'mediumpurple';
+        case 'SL':
+        case 'SU': return 'lightcoral';
+    }
 }
 
 function colorForJobId(jobId) {
-  switch (getCarColorMode()) {
-    case 'jobId': return colorByHashing(jobId);
-    case 'carType':
-    case 'jobType': return colorForJobType(jobId);
-    case 'destination': return colorForJobDestination(jobId);
-  }
+    switch (getCarColorMode()) {
+        case 'jobId': return colorByHashing(jobId);
+        case 'carType':
+        case 'jobType': return colorForJobType(jobId);
+        case 'destination': return colorForJobDestination(jobId);
+    }
 }
 
 function yardIdForTrack(trackId) {
-  return trackId.split('-')[0];
+    return trackId.split('-')[0];
 }
 
 function jobMatchesFilter(jobId, jobData) {
     const testText = document.getElementById('jobSearchText').value.toUpperCase();
     const activeOnly = document.getElementById('jobActiveOnly').checked;
-  function taskFields(task) { return [task.startTrack, task.destinationTrack].concat(task.cars); }
-  const fields = [jobId].concat(jobData.tasks.flatMap(taskFields));
-  return fields.some(field => field.includes(testText)) && (!activeOnly || jobData.isActive);
+    function taskFields(task) { return [task.startTrack, task.destinationTrack].concat(task.cars); }
+    const fields = [jobId].concat(jobData.tasks.flatMap(taskFields));
+    return fields.some(field => field.includes(testText)) && (!activeOnly || jobData.isActive);
 }
 
 function jobElem(jobId, jobData) {
-  function replaceHyphens(s) { return s.replaceAll('-', '\u2011'); }
+    function replaceHyphens(s) { return s.replaceAll('-', '\u2011'); }
 
-  const tbody = document.createElement('tbody');
-  tbody.setAttribute('id', `jobList-${jobId}`);
+    const tbody = document.createElement('tbody');
+    tbody.setAttribute('id', `jobList-${jobId}`);
 
-  let row = document.createElement('tr');
-  const jobIdCell = document.createElement('th'); 
-  jobIdCell.setAttribute('colspan', CarsPerRow);
-  jobIdCell.classList.add("jobList-jobHeader");
-  jobIdCell.style.background = colorForJobId(jobId);
-  jobIdCell.textContent = jobId;
+    let row = document.createElement('tr');
+    const jobIdCell = document.createElement('th');
+    jobIdCell.setAttribute('colspan', CarsPerRow);
+    jobIdCell.classList.add("jobList-jobHeader");
+    jobIdCell.style.background = colorForJobId(jobId);
+    jobIdCell.textContent = jobId;
 
-  jobLicensesDiv = document.createElement('div');
-  jobLicensesDiv.classList.add('jobList-licenses');
-  for (const license of jobData.requiredLicenses) {
-      jobLicensesDiv.innerHTML += `<span class="jobList-license"><div class="jobList-licenseBackground"></div><img src="res/licenses.${license}.png" title="${license}"></span>`;
-  }
-  jobIdCell.appendChild(jobLicensesDiv);
-
-  row.appendChild(jobIdCell);
-  tbody.appendChild(row);
-
-  row = document.createElement('tr');
-  jobMassCell = document.createElement('th');
-  jobMassCell.textContent = `${jobData.mass.toFixed(0)} t`;
-  jobLengthCell = document.createElement('th');
-  jobLengthCell.textContent = `${jobData.length.toFixed(0)} m`;
-  jobPaymentCell = document.createElement('th');
-  jobPaymentCell.textContent =
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
-    .format(jobData.basePayment);
-  row.append(jobMassCell, jobLengthCell, jobPaymentCell);
-  tbody.appendChild(row);
-
-  jobData.tasks.forEach(task => {
-    row = document.createElement('tr');
-    const startTrackCell = document.createElement('th');
-    startTrackCell.classList.add('interactive');
-    startTrackCell.textContent = replaceHyphens(task.startTrack);
-    startTrackCell.style.background = colorForYardId(yardIdForTrack(task.startTrack));
-    startTrackCell.addEventListener('click', () => scrollToTrack(task.startTrack));
-    row.appendChild(startTrackCell);
-
-    const arrowCell = document.createElement('th');
-    arrowCell.textContent = "\u279C";
-    arrowCell.classList.add('jobList-trackSeparator');
-    row.appendChild(arrowCell);
-
-    const destinationTrackCell = document.createElement('th');
-    destinationTrackCell.classList.add('interactive');
-    destinationTrackCell.textContent = replaceHyphens(task.destinationTrack);
-    destinationTrackCell.style.background = colorForYardId(yardIdForTrack(task.destinationTrack));
-    destinationTrackCell.addEventListener('click', () => scrollToTrack(task.destinationTrack));
-    row.appendChild(destinationTrackCell);
-
-    for (let carIndex = 0; carIndex < task.cars.length; carIndex++) {
-      if (carIndex % CarsPerRow == 0) {
-        tbody.appendChild(row);
-        row = document.createElement('tr');
-      }
-      const carId = task.cars[carIndex];
-      const carCell = document.createElement('td');
-      carCell.classList.add(`jobList-carCell-${carId}`);
-      carCell.classList.add('interactive');
-      carCell.textContent = carId;
-      carCell.addEventListener('click', () => followCar(carId, false));
-      row.appendChild(carCell);
+    jobLicensesDiv = document.createElement('div');
+    jobLicensesDiv.classList.add('jobList-licenses');
+    for (const license of jobData.requiredLicenses) {
+        jobLicensesDiv.innerHTML += `<span class="jobList-license"><div class="jobList-licenseBackground"></div><img src="res/licenses.${license}.png" title="${license}"></span>`;
     }
-    if (row.children.length < CarsPerRow)
-      // add filler cells
-      for (let i = 0; i < CarsPerRow - (task.cars.length % CarsPerRow); i++)
-        row.appendChild(document.createElement('td'));
-    tbody.appendChild(row);
-  });
+    jobIdCell.appendChild(jobLicensesDiv);
 
-  return tbody;
+    row.appendChild(jobIdCell);
+    tbody.appendChild(row);
+
+    row = document.createElement('tr');
+    jobMassCell = document.createElement('th');
+    jobMassCell.textContent = `${jobData.mass.toFixed(0)} t`;
+    jobLengthCell = document.createElement('th');
+    jobLengthCell.textContent = `${jobData.length.toFixed(0)} m`;
+    jobPaymentCell = document.createElement('th');
+    jobPaymentCell.textContent =
+        new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+            .format(jobData.basePayment);
+    row.append(jobMassCell, jobLengthCell, jobPaymentCell);
+    tbody.appendChild(row);
+
+    jobData.tasks.forEach(task => {
+        row = document.createElement('tr');
+        const startTrackCell = document.createElement('th');
+        startTrackCell.classList.add('interactive');
+        startTrackCell.textContent = replaceHyphens(task.startTrack);
+        startTrackCell.style.background = colorForYardId(yardIdForTrack(task.startTrack));
+        startTrackCell.addEventListener('click', () => scrollToTrack(task.startTrack));
+        row.appendChild(startTrackCell);
+
+        const arrowCell = document.createElement('th');
+        arrowCell.textContent = "\u279C";
+        arrowCell.classList.add('jobList-trackSeparator');
+        row.appendChild(arrowCell);
+
+        const destinationTrackCell = document.createElement('th');
+        destinationTrackCell.classList.add('interactive');
+        destinationTrackCell.textContent = replaceHyphens(task.destinationTrack);
+        destinationTrackCell.style.background = colorForYardId(yardIdForTrack(task.destinationTrack));
+        destinationTrackCell.addEventListener('click', () => scrollToTrack(task.destinationTrack));
+        row.appendChild(destinationTrackCell);
+
+        for (let carIndex = 0; carIndex < task.cars.length; carIndex++) {
+            if (carIndex % CarsPerRow == 0) {
+                tbody.appendChild(row);
+                row = document.createElement('tr');
+            }
+            const carId = task.cars[carIndex];
+            const carCell = document.createElement('td');
+            carCell.classList.add(`jobList-carCell-${carId}`);
+            carCell.classList.add('interactive');
+            carCell.textContent = carId;
+            carCell.addEventListener('click', () => followCar(carId, false));
+            row.appendChild(carCell);
+        }
+        if (row.children.length < CarsPerRow)
+            // add filler cells
+            for (let i = 0; i < CarsPerRow - (task.cars.length % CarsPerRow); i++)
+                row.appendChild(document.createElement('td'));
+        tbody.appendChild(row);
+    });
+
+    return tbody;
 }
 
 function updateCarJobs() {
-  carJobIds.clear();
-  allJobData.forEach((jobData, jobId) => {
-    jobData.tasks.forEach(task => {
-      task.cars.forEach(carId => {
-        carJobIds.set(carId, jobId);
-      });
-    })
-  });
-  for ([carId, _] of allCarData) {
-    updateCarRow(carId);
-    updateCarMarker(carId);
-  }
+    carJobIds.clear();
+    allJobData.forEach((jobData, jobId) => {
+        jobData.tasks.forEach(task => {
+            task.cars.forEach(carId => {
+                carJobIds.set(carId, jobId);
+            });
+        })
+    });
+    for ([carId, _] of allCarData) {
+        updateCarRow(carId);
+        updateCarMarker(carId);
+    }
 }
 
 function updateJobListColors() {
-  for (const elem of jobListBody.querySelectorAll('th.jobList-jobHeader')) {
-    elem.style.background = colorForJobId(elem.textContent);
-  }
+    for (const elem of jobListBody.querySelectorAll('th.jobList-jobHeader')) {
+        elem.style.background = colorForJobId(elem.textContent);
+    }
 }
 
 function updateJobList() {
-  for (const elem of Array.from(jobListBody.childNodes))
-    elem.remove();
-  const sortedJobs = Array.from(allJobData.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  sortedJobs
-    .filter(([jobId, jobData]) => jobMatchesFilter(jobId, jobData))
-    .forEach(([jobId, jobData]) => jobListBody.appendChild(jobElem(jobId, jobData)));
+    for (const elem of Array.from(jobListBody.childNodes))
+        elem.remove();
+    const sortedJobs = Array.from(allJobData.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    sortedJobs
+        .filter(([jobId, jobData]) => jobMatchesFilter(jobId, jobData))
+        .forEach(([jobId, jobData]) => jobListBody.appendChild(jobElem(jobId, jobData)));
 }
 
 function updateAllJobs(jobs) {
-  allJobData.clear();
-  Object.entries(jobs).forEach(([jobId, jobData]) => allJobData.set(jobId, jobData));
-  updateJobList();
-  updateCarJobs();
+    allJobData.clear();
+    Object.entries(jobs).forEach(([jobId, jobData]) => allJobData.set(jobId, jobData));
+    updateJobList();
+    updateCarJobs();
 }
 
 let jobSearchTimeoutId;
@@ -334,200 +334,199 @@ document.getElementById('jobActiveOnly').addEventListener('change', e => {
 const trackPolyLines = new Map();
 
 function colorForYardId(yardId) {
-  switch (yardId) {
-    case 'CME': return '#686868';
-    case 'CMS': return '#4e554e';
-    case 'CP': return '#583d3d';
-    case 'CS': return '#97adc2';
-    case 'CW': return '#a7a7a7';
-    case 'FF': return '#77a6e3';
-    case 'FM': return '#ddaa4d';
-    case 'FRC': return '#92b66a';
-    case 'FRS': return '#609161';
-    case 'GF': return '#c97fa2';
-    case 'HB': return '#816c94';
-    case 'HMB': return '#816c94';
-    case 'IME': return '#b66861';
-    case 'IMW': return '#9a5847';
-    case 'MB': return '#988c5f';
-    case 'MF': return '#dc885b';
-    case 'MFMB': return '#dc885b';
-    case 'OR': return '#935478';
-    case 'OWC': return '#555a62';
-    case 'OWN': return '#625d55';
-    case 'SM': return '#7b8394';
-    case 'SW': return '#cda888';
-  }
+    switch (yardId) {
+        case 'CME': return '#686868';
+        case 'CMS': return '#4e554e';
+        case 'CP': return '#583d3d';
+        case 'CS': return '#97adc2';
+        case 'CW': return '#a7a7a7';
+        case 'FF': return '#77a6e3';
+        case 'FM': return '#ddaa4d';
+        case 'FRC': return '#92b66a';
+        case 'FRS': return '#609161';
+        case 'GF': return '#c97fa2';
+        case 'HB': return '#816c94';
+        case 'HMB': return '#816c94';
+        case 'IME': return '#b66861';
+        case 'IMW': return '#9a5847';
+        case 'MB': return '#988c5f';
+        case 'MF': return '#dc885b';
+        case 'MFMB': return '#dc885b';
+        case 'OR': return '#935478';
+        case 'OWC': return '#555a62';
+        case 'OWN': return '#625d55';
+        case 'SM': return '#7b8394';
+        case 'SW': return '#cda888';
+    }
 }
 
 function createTrackLabel(trackId, position, angle) {
-  const size = 0.0002;
-  const bounds = [[position[0] - size, position[1] - size], [position[0] + size, position[1] + size]];
-  const rotation = `rotate(${-angle})`;
+    const size = 0.0002;
+    const bounds = [[position[0] - size, position[1] - size], [position[0] + size, position[1] + size]];
+    const rotation = `rotate(${-angle})`;
 
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('id', trackId)
-  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  svg.setAttribute('viewBox', '-50 -10 100 20');
-  svg.innerHTML =
-    `<text text-anchor="middle" dominant-baseline="central" transform="${rotation}" font-family="Arial" font-weight="bold" fill="steelblue" stroke="black" stroke-width="0.25px">${trackId.slice(trackId.indexOf('-') + 1)}</text>`;
-  L.svgOverlay(svg, bounds, { renderer: canvasRenderer })
-  .addTo(map)
-  .setZIndex(1000);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('id', trackId)
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    svg.setAttribute('viewBox', '-50 -10 100 20');
+    svg.innerHTML = `<text text-anchor="middle" dominant-baseline="central" transform="${rotation}" font-family="Arial" font-weight="bold" fill="steelblue" stroke="black" stroke-width="0.25px">${trackId.slice(trackId.indexOf('-') + 1)}</text>`;
+    L.svgOverlay(svg, bounds, { renderer: canvasRenderer })
+        .addTo(map)
+        .setZIndex(1000);
 }
 
 function pointDistance(p1, p2) {
-  const d0 = p1[0] - p2[0];
-  const d1 = p1[1] - p2[1];
-  return Math.sqrt(d0 * d0 + d1 * d1);
+    const d0 = p1[0] - p2[0];
+    const d1 = p1[1] - p2[1];
+    return Math.sqrt(d0 * d0 + d1 * d1);
 }
 
 function pointLerp(p1, p2, a) {
-  return [
-    (p2[0] - p1[0]) * a + p1[0],
-    (p2[1] - p1[1]) * a + p1[1]
-  ];
+    return [
+        (p2[0] - p1[0]) * a + p1[0],
+        (p2[1] - p1[1]) * a + p1[1]
+    ];
 }
 
 function createLocation(start, end, mid, a) {
-  return [
-    (end[0] - start[0]) * a + mid[0],
-    (end[1] - start[1]) * a + mid[1]
-  ];
+    return [
+        (end[0] - start[0]) * a + mid[0],
+        (end[1] - start[1]) * a + mid[1]
+    ];
 }
 
 function createTrackLabels(trackId, coords) {
-  const length = pointDistance(coords[0], coords[coords.length - 1]);
-  const midIndex = Math.floor(coords.length / 2); 
-  const beforeMid = (midIndex % 2 == 1) ? coords[midIndex] : coords[midIndex - 1];
-  const mid = (midIndex % 2 == 1) ? coords[midIndex] : pointLerp(coords[midIndex - 1], coords[midIndex], 0.5);
-  const afterMid = (midIndex % 2 == 1) ? coords[midIndex + 1] : coords[midIndex];
-  const midGap = pointDistance(beforeMid, afterMid);
+    const length = pointDistance(coords[0], coords[coords.length - 1]);
+    const midIndex = Math.floor(coords.length / 2);
+    const beforeMid = (midIndex % 2 == 1) ? coords[midIndex] : coords[midIndex - 1];
+    const mid = (midIndex % 2 == 1) ? coords[midIndex] : pointLerp(coords[midIndex - 1], coords[midIndex], 0.5);
+    const afterMid = (midIndex % 2 == 1) ? coords[midIndex + 1] : coords[midIndex];
+    const midGap = pointDistance(beforeMid, afterMid);
 
-  const angle = ((Math.atan2(afterMid[0] - beforeMid[0], afterMid[1] - beforeMid[1]) * 180 / Math.PI) + 270) % 180 - 90;
+    const angle = ((Math.atan2(afterMid[0] - beforeMid[0], afterMid[1] - beforeMid[1]) * 180 / Math.PI) + 270) % 180 - 90;
 
-  if (coords.length > 5) {
-    createTrackLabel(trackId, createLocation(beforeMid, afterMid, mid, length / midGap *  0.3), angle);
-    createTrackLabel(trackId, createLocation(beforeMid, afterMid, mid, length / midGap * -0.3), angle);
-  } else {
-    createTrackLabel(trackId, mid, angle);
-  }
+    if (coords.length > 5) {
+        createTrackLabel(trackId, createLocation(beforeMid, afterMid, mid, length / midGap * 0.3), angle);
+        createTrackLabel(trackId, createLocation(beforeMid, afterMid, mid, length / midGap * -0.3), angle);
+    } else {
+        createTrackLabel(trackId, mid, angle);
+    }
 }
 
 const tracksReady = fetch(new URL('/track', location))
-.then(resp => resp.json())
-.then(tracks => {
-  Object.entries(tracks).forEach(([trackId, coords]) => {
-    const isSiding = !trackId.includes('#');
-    const polyline = L.polyline(coords, {
-      color: isSiding ? 'slategray' : 'lightsteelblue',
-      interactive: false,
-      renderer: canvasRenderer,
-    }).addTo(map);
-    trackPolyLines.set(trackId, polyline);
-    if (isSiding)
-      createTrackLabels(trackId, coords)
-  });
-});
+    .then(resp => resp.json())
+    .then(tracks => {
+        Object.entries(tracks).forEach(([trackId, coords]) => {
+            const isSiding = !trackId.includes('#');
+            const polyline = L.polyline(coords, {
+                color: isSiding ? 'slategray' : 'lightsteelblue',
+                interactive: false,
+                renderer: canvasRenderer,
+            }).addTo(map);
+            trackPolyLines.set(trackId, polyline);
+            if (isSiding)
+                createTrackLabels(trackId, coords)
+        });
+    });
 
 /////////////////////
 // junctions
 
 let junctions = [];
 const junctionsReady = tracksReady
-.then(_ => fetch(new URL('/junction', location)))
-.then(resp => resp.json())
-.then(allJunctionData =>
-  junctions = allJunctionData.map((data, index) => ({
-    marker: createJunctionMarker(data.position, index),
-    branches: data.branches,
-  }))
-);
+    .then(_ => fetch(new URL('/junction', location)))
+    .then(resp => resp.json())
+    .then(allJunctionData =>
+        junctions = allJunctionData.map((data, index) => ({
+            marker: createJunctionMarker(data.position, index),
+            branches: data.branches,
+        }))
+    );
 
 function toggleJunction(junctionId) {
-  fetch(new URL(`/junction/${junctionId}/toggle`, location), { method: 'POST' })
-  .then(resp => resp.json())
-  .then(selectedBranch => updateJunctionOverlay(junctionId, selectedBranch))
-  .catch(err => {});
+    fetch(new URL(`/junction/${junctionId}/toggle`, location), { method: 'POST' })
+        .then(resp => resp.json())
+        .then(selectedBranch => updateJunctionOverlay(junctionId, selectedBranch))
+        .catch(err => { });
 }
 
 const junctionCanvasSize = 30;
 
 function createJunctionShape(selectedBranch) {
-  return `<g opacity="70%"><rect x="${-junctionCanvasSize/2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize*2}" fill="red"/>` +
-    (
-      selectedBranch == 0 ? `<line x1="${junctionCanvasSize/2}" y1="${junctionCanvasSize}" x2="${-junctionCanvasSize/2}" y2="${-junctionCanvasSize}" stroke="white" stroke-width="10"/>` :
-      selectedBranch == 1 ? `<line x1="${-junctionCanvasSize/2}" y1="${junctionCanvasSize}" x2="${junctionCanvasSize/2}" y2="${-junctionCanvasSize}" stroke="white" stroke-width="10"/>`
-      : ''
-    ) +
-    `<rect x="${-junctionCanvasSize/2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize*2}" fill="none" stroke="black" stroke-width="2%"/></g>`;
+    return `<g opacity="70%"><rect x="${-junctionCanvasSize / 2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize * 2}" fill="red"/>` +
+        (
+            selectedBranch == 0 ? `<line x1="${junctionCanvasSize / 2}" y1="${junctionCanvasSize}" x2="${-junctionCanvasSize / 2}" y2="${-junctionCanvasSize}" stroke="white" stroke-width="10"/>` :
+                selectedBranch == 1 ? `<line x1="${-junctionCanvasSize / 2}" y1="${junctionCanvasSize}" x2="${junctionCanvasSize / 2}" y2="${-junctionCanvasSize}" stroke="white" stroke-width="10"/>`
+                    : ''
+        ) +
+        `<rect x="${-junctionCanvasSize / 2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize * 2}" fill="none" stroke="black" stroke-width="2%"/></g>`;
 }
 
 function createJunctionLabel(junctionId) {
-  return `<text x="${-junctionCanvasSize/2+5}" y="${junctionCanvasSize-5}">${junctionId}</text>`
+    return `<text x="${-junctionCanvasSize / 2 + 5}" y="${junctionCanvasSize - 5}">${junctionId}</text>`
 }
 
 function createJunctionOverlay(junctionId) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('id', `J-${junctionId}`)
-  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  svg.setAttribute('viewBox', `${-junctionCanvasSize/2} ${-junctionCanvasSize} ${junctionCanvasSize} ${junctionCanvasSize*2}`);
-  svg.innerHTML = createJunctionShape(null) + createJunctionLabel(junctionId);
-  return svg;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('id', `J-${junctionId}`)
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    svg.setAttribute('viewBox', `${-junctionCanvasSize / 2} ${-junctionCanvasSize} ${junctionCanvasSize} ${junctionCanvasSize * 2}`);
+    svg.innerHTML = createJunctionShape(null) + createJunctionLabel(junctionId);
+    return svg;
 }
 
 function updateJunctionOverlay(junctionId, selectedBranch) {
-  const junction = junctions[junctionId]
-  junction.marker.getElement().innerHTML = createJunctionShape(selectedBranch) + createJunctionLabel(junctionId);
-  const selectedTrackId = junction.branches[selectedBranch]
-  trackPolyLines.get(selectedTrackId).setStyle({ color: 'steelblue', dashArray: null });
-  const unselectedTrackPolyLine = trackPolyLines.get(junction.branches[1-selectedBranch]);
-  unselectedTrackPolyLine
-    .setStyle({ color: 'lightsteelblue', dashArray: "6 12" })
-    .bringToBack();
+    const junction = junctions[junctionId]
+    junction.marker.getElement().innerHTML = createJunctionShape(selectedBranch) + createJunctionLabel(junctionId);
+    const selectedTrackId = junction.branches[selectedBranch]
+    trackPolyLines.get(selectedTrackId).setStyle({ color: 'steelblue', dashArray: null });
+    const unselectedTrackPolyLine = trackPolyLines.get(junction.branches[1 - selectedBranch]);
+    unselectedTrackPolyLine
+        .setStyle({ color: 'lightsteelblue', dashArray: "6 12" })
+        .bringToBack();
 }
 
 function getJunctionOverlayBounds(position) {
-  const size = metersToDegrees * 5;
-  return [ [ position[0] - size, position[1] - size/2], [position[0] + size, position[1] + size/2] ];
+    const size = metersToDegrees * 5;
+    return [[position[0] - size, position[1] - size / 2], [position[0] + size, position[1] + size / 2]];
 }
 
 function createJunctionMarker(p, junctionId) {
-  return L.svgOverlay(
-    createJunctionOverlay(junctionId),
-    getJunctionOverlayBounds(p),
-    { interactive: true, renderer: canvasRenderer })
-    .addEventListener('click', () => toggleJunction(junctionId) )
-    .addTo(map)
-    .setZIndex(Math.floor(p[0] * 100000 + p[1] * 100000));
+    return L.svgOverlay(
+        createJunctionOverlay(junctionId),
+        getJunctionOverlayBounds(p),
+        { interactive: true, renderer: canvasRenderer })
+        .addEventListener('click', () => toggleJunction(junctionId))
+        .addTo(map)
+        .setZIndex(Math.floor(p[0] * 100000 + p[1] * 100000));
 }
 
 function updateAllJunctions(states) {
-  states.forEach((state, index) => updateJunctionOverlay(index, state))
+    states.forEach((state, index) => updateJunctionOverlay(index, state))
 }
 
 /////////////////////
 // following
 
 function followCar(carId, shouldScroll) {
-  setMarkerToFollow(carMarkers.get(carId));
+    setMarkerToFollow(carMarkers.get(carId));
 
-  for (const row of carListBody.querySelectorAll('.following'))
-    row.classList.remove('following');
-  const carListRow = document.getElementById(`carList-${carId}`)
-  carListRow.classList.add('following');
-  if (shouldScroll)
-    carListRow.scrollIntoView({ block: 'center' });
+    for (const row of carListBody.querySelectorAll('.following'))
+        row.classList.remove('following');
+    const carListRow = document.getElementById(`carList-${carId}`)
+    carListRow.classList.add('following');
+    if (shouldScroll)
+        carListRow.scrollIntoView({ block: 'center' });
 
-  for (const elem of jobListBody.querySelectorAll('.following'))
-    elem.classList.remove('following');
-  const jobListElems = jobListBody.querySelectorAll(`.jobList-carCell-${carId}`);
-  for (const elem of jobListElems) {
-    elem.classList.add('following');
-    elem.closest('tbody').classList.add('following');
-  }
-  if (shouldScroll && jobListElems.length > 0)
-    jobListElems[0].scrollIntoView({ block: 'center' });
+    for (const elem of jobListBody.querySelectorAll('.following'))
+        elem.classList.remove('following');
+    const jobListElems = jobListBody.querySelectorAll(`.jobList-carCell-${carId}`);
+    for (const elem of jobListElems) {
+        elem.classList.add('following');
+        elem.closest('tbody').classList.add('following');
+    }
+    if (shouldScroll && jobListElems.length > 0)
+        jobListElems[0].scrollIntoView({ block: 'center' });
 }
 
 /////////////////////
@@ -537,131 +536,130 @@ const playerMarkers = new Map();
 let playerScalingEnabled = true;
 
 function getPlayerOverlayBounds(position) {
-  const playerScaleFactor = playerScalingEnabled ? scaleMarkerFactor : 1;
-  const size = metersToDegrees * 2 * playerScaleFactor;
-  return [ [ position[0] - size, position[1] - size], [position[0] + size, position[1] + size] ];
+    const playerScaleFactor = playerScalingEnabled ? scaleMarkerFactor : 1;
+    const size = metersToDegrees * 2 * playerScaleFactor;
+    return [[position[0] - size, position[1] - size], [position[0] + size, position[1] + size]];
 }
 
 function updatePlayerOverlays(data) {
-  const existingPlayerIds = Array.from(playerMarkers.keys());
-  // Remove markers from disconnected players
-  existingPlayerIds
-    .filter(id => !data.hasOwnProperty(id))
-    .forEach(id => {
-      removePlayerOverlay(id);
+    const existingPlayerIds = Array.from(playerMarkers.keys());
+    // Remove markers from disconnected players
+    existingPlayerIds
+        .filter(id => !data.hasOwnProperty(id))
+        .forEach(id => {
+            removePlayerOverlay(id);
+        });
+    // Add markers for new players
+    Object.entries(data)
+        .filter(([id]) => !existingPlayerIds.includes(id))
+        .forEach(([id, playerData]) => {
+            createPlayerMarker(id, playerData);
+        });
+    Object.entries(data).forEach(([id, playerData]) => {
+        const polygonElem = document.getElementById(`playerPolygon-${id}`);
+        polygonElem.setAttribute('transform', `rotate(${playerData.rotation})`);
+        const marker = playerMarkers.get(id);
+        marker.position = playerData.position;
+        marker.overlay.setBounds(getPlayerOverlayBounds(playerData.position));
+        marker.playerLabel.setLatLng(playerData.position);
     });
-  // Add markers for new players
-  Object.entries(data)
-    .filter(([id]) => !existingPlayerIds.includes(id))
-    .forEach(([id, playerData]) => {
-      createPlayerMarker(id, playerData);
-    });
-  Object.entries(data).forEach(([id, playerData]) => {
-    const polygonElem = document.getElementById(`playerPolygon-${id}`);
-    polygonElem.setAttribute('transform', `rotate(${playerData.rotation})`);
-    const marker = playerMarkers.get(id);
-    marker.position = playerData.position;
-    marker.overlay.setBounds(getPlayerOverlayBounds(playerData.position));
-    marker.playerLabel.setLatLng(playerData.position);
-  });
 }
 
 function removePlayerOverlay(id) {
-  document.getElementById(`playerPolygon-${id}`)?.remove();
-  const marker = playerMarkers.get(id);
-  if (marker) {
-    // cleanup
-    marker.overlay.remove();
-    marker.position.remove()
-    marker.playerLabel.remove();
-  }
-  playerMarkers.delete(id);
+    document.getElementById(`playerPolygon-${id}`)?.remove();
+    const marker = playerMarkers.get(id);
+    if (marker) {
+        // cleanup
+        marker.overlay.remove();
+        marker.playerLabel.remove();
+    }
+    playerMarkers.delete(id);
 }
 
 function createPlayerOverlay(id, playerData) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '-15 -15 30 30');
-  const polygon = document.createElementNS(svg.namespaceURI, 'polygon');
-  polygon.setAttribute('id', `playerPolygon-${id}`);
-  polygon.setAttribute('fill', playerData.color);
-  polygon.setAttribute('fill-opacity', '70%');
-  polygon.setAttribute('stroke', 'black');
-  polygon.setAttribute('stroke-width', '1%');
-  polygon.setAttribute('points', '0,-10 10,10 0,5 -10,10');
-  svg.appendChild(polygon);
-  return svg;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '-15 -15 30 30');
+    const polygon = document.createElementNS(svg.namespaceURI, 'polygon');
+    polygon.setAttribute('id', `playerPolygon-${id}`);
+    polygon.setAttribute('fill', playerData.color);
+    polygon.setAttribute('fill-opacity', '70%');
+    polygon.setAttribute('stroke', 'black');
+    polygon.setAttribute('stroke-width', '1%');
+    polygon.setAttribute('points', '0,-10 10,10 0,5 -10,10');
+    svg.appendChild(polygon);
+    return svg;
 }
 
 function createPlayerMarker(id, playerData) {
-  const overlay = L.svgOverlay(
-    createPlayerOverlay(id, playerData),
-    getPlayerOverlayBounds(playerData.position),
-    { interactive: true, bubblingMouseEvents: false }
-  )
-    .addEventListener('click', e => setMarkerToFollow(e.target))
-    .addTo(map);
+    const overlay = L.svgOverlay(
+        createPlayerOverlay(id, playerData),
+        getPlayerOverlayBounds(playerData.position),
+        { interactive: true, bubblingMouseEvents: false }
+    )
+        .addEventListener('click', e => setMarkerToFollow(e.target))
+        .addTo(map);
 
-  // If a tooltip is used, it cannot be bound properly to the overlay as the overlay doesnt have a latlng, so create a separate marker just for the tooltip
-  const playerLabel = L.marker(playerData.position, {
-    icon: L.divIcon({
-      html: `<div style="background: rgba(0,0,0,0.7); color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; white-space: nowrap; opacity: 0.7;">${id}</div>`,
-      iconSize: null, // let size scale with content
-      iconAnchor: [0, -20]
+    // If a tooltip is used, it cannot be bound properly to the overlay as the overlay doesnt have a latlng, so create a separate marker just for the tooltip
+    const playerLabel = L.marker(playerData.position, {
+        icon: L.divIcon({
+            html: `<div style="background: rgba(0,0,0,0.7); color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; white-space: nowrap; opacity: 0.7;">${id}</div>`,
+            iconSize: null, // let size scale with content
+            iconAnchor: [0, -20]
+        })
     })
-  })
-    .addEventListener('click', () => setMarkerToFollow(overlay))
-    .addTo(map);
+        .addEventListener('click', () => setMarkerToFollow(overlay))
+        .addTo(map);
 
-  playerMarkers.set(id, { overlay, playerLabel, position: playerData.position });
+    playerMarkers.set(id, { overlay, playerLabel, position: playerData.position });
 }
 
 function scrollToTrack(trackId) {
-  stopFollowing();
-  const polyLine = trackPolyLines.get(trackId);
-  if (polyLine)
-    map.panTo(polyLine.getCenter());
+    stopFollowing();
+    const polyLine = trackPolyLines.get(trackId);
+    if (polyLine)
+        map.panTo(polyLine.getCenter());
 }
 
 fetch(new URL('/player', location))
-  .then(resp => resp.json())
-  .then(data => {
-    updatePlayerOverlays(data);
-    zoomToAllPlayers();
-  }
-);
+    .then(resp => resp.json())
+    .then(data => {
+        updatePlayerOverlays(data);
+        zoomToAllPlayers();
+    }
+    );
 
 /////////////////////
 // loco control
 
 const locoIdSelect = document.getElementById('locoControlLocoId');
 function updateLocoList() {
-  for (const elem of Array.from(locoIdSelect.children))
-    elem.remove();
-  const locoIds = Array.from(allCarData.entries())
-    .filter(([_, carData]) => carData.canBeControlled)
-    .map(([id, _]) => id.slice(2));
-  locoIds.sort();
-  for (const id of locoIds) {
-    const option = document.createElement('option');
-    option.textContent = id;
-    locoIdSelect.appendChild(option);
-  }
+    for (const elem of Array.from(locoIdSelect.children))
+        elem.remove();
+    const locoIds = Array.from(allCarData.entries())
+        .filter(([_, carData]) => carData.canBeControlled)
+        .map(([id, _]) => id.slice(2));
+    locoIds.sort();
+    for (const id of locoIds) {
+        const option = document.createElement('option');
+        option.textContent = id;
+        locoIdSelect.appendChild(option);
+    }
 }
 
 function isReverserButtonActive(faButton) {
-  return faButton.querySelector('svg').getAttribute('data-prefix') == 'fas';
+    return faButton.querySelector('svg').getAttribute('data-prefix') == 'fas';
 }
 
 function updateReverserButtons(reverser) {
-  const reverseButton = document.querySelector('#locoControlReverserReverseButton svg');
-  const newReverseStyle = reverser < 0.5 ? 'fas' : 'far';
-  if (reverseButton.getAttribute('data-prefix') != newReverseStyle)
-    reverseButton.setAttribute('data-prefix', newReverseStyle);
+    const reverseButton = document.querySelector('#locoControlReverserReverseButton svg');
+    const newReverseStyle = reverser < 0.5 ? 'fas' : 'far';
+    if (reverseButton.getAttribute('data-prefix') != newReverseStyle)
+        reverseButton.setAttribute('data-prefix', newReverseStyle);
 
-  const forwardButton = document.querySelector('#locoControlReverserForwardButton svg');
-  const newForwardStyle = reverser > 0.5 ? 'fas' : 'far';
-  if (forwardButton.getAttribute('data-prefix') != newForwardStyle)
-    forwardButton.setAttribute('data-prefix', newForwardStyle);
+    const forwardButton = document.querySelector('#locoControlReverserForwardButton svg');
+    const newForwardStyle = reverser > 0.5 ? 'fas' : 'far';
+    if (forwardButton.getAttribute('data-prefix') != newForwardStyle)
+        forwardButton.setAttribute('data-prefix', newForwardStyle);
 }
 
 const locoBrakePipeDisplay = document.getElementById('locoControlBrakePipe');
@@ -676,40 +674,40 @@ const locoControlUncoupleButton = document.getElementById('locoControlUncoupleBu
 const locoControlUncoupleSelect = document.getElementById('locoControlUncoupleSelect');
 
 function updateCouplingControls(carData) {
-  const canCouple = carData.canCouple;
-  const carsInFront = carData.carsInFront;
-  const carsInRear = carData.carsInRear;
+    const canCouple = carData.canCouple;
+    const carsInFront = carData.carsInFront;
+    const carsInRear = carData.carsInRear;
 
-  locoControlCoupleButton.disabled = !canCouple;
-  locoControlUncoupleButton.disabled = carsInFront == 0 && carsInRear && 0;
+    locoControlCoupleButton.disabled = !canCouple;
+    locoControlUncoupleButton.disabled = carsInFront == 0 && carsInRear && 0;
 
-  if (locoControlUncoupleSelect.childElementCount == carsInFront + carsInRear) {
-    return;
-  }
+    if (locoControlUncoupleSelect.childElementCount == carsInFront + carsInRear) {
+        return;
+    }
 
-  const options = [];
-  for (let i = carsInFront; i >= 1; i--)
-    options.push(i);
-  for (let i = 1; i <= carsInRear; i++)
-    options.push(-i);
-  locoControlUncoupleSelect.replaceChildren(...options.map(i => {
-    const option = document.createElement('option');
-    option.setAttribute('value', i);
-    option.textContent = i >= 0 ? `\u002b${i}` : `\u2212${-i}`;
-    return option;
-  }));
+    const options = [];
+    for (let i = carsInFront; i >= 1; i--)
+        options.push(i);
+    for (let i = 1; i <= carsInRear; i++)
+        options.push(-i);
+    locoControlUncoupleSelect.replaceChildren(...options.map(i => {
+        const option = document.createElement('option');
+        option.setAttribute('value', i);
+        option.textContent = i >= 0 ? `\u002b${i}` : `\u2212${-i}`;
+        return option;
+    }));
 }
 
 function getControlledLocoGuid() {
-  return allCarData.get(`L-${locoIdSelect.value}`)?.guid;
+    return allCarData.get(`L-${locoIdSelect.value}`)?.guid;
 }
 
 function getControlledLocoData() {
-  const guid = getControlledLocoGuid();
-  if (guid) {
-    return fetch(`/car/${guid}`, location)
-    .then(resp => resp.json());
-  }
+    const guid = getControlledLocoGuid();
+    if (guid) {
+        return fetch(`/car/${guid}`, location)
+            .then(resp => resp.json());
+    }
 }
 
 let locoTrainBrakeEditing = false;
@@ -717,86 +715,86 @@ let locoIndependentBrakeEditing = false;
 let locoThrottleEditing = false;
 
 function updateLocoTrainBrakeInput(carData) {
-  if (locoTrainBrakeEditing)
-    return;
-  locoTrainBrakeInput.value = carData.trainBrake * 100;
+    if (locoTrainBrakeEditing)
+        return;
+    locoTrainBrakeInput.value = carData.trainBrake * 100;
 }
 
 function updateLocoIndependentBrakeInput(carData) {
-  if (locoIndependentBrakeEditing)
-    return;
-  locoIndependentBrakeInput.value = carData.independentBrake * 100;
+    if (locoIndependentBrakeEditing)
+        return;
+    locoIndependentBrakeInput.value = carData.independentBrake * 100;
 }
 
 function updateLocoThrottleInput(carData) {
-  if (locoThrottleEditing)
-    return;
-  locoThrottleInput.value = carData.throttle * 100;
+    if (locoThrottleEditing)
+        return;
+    locoThrottleInput.value = carData.throttle * 100;
 }
 
 function updateLocoDisplay() {
-  getControlledLocoData()
-  .then(carData => {
-    locoBrakePipeDisplay.textContent = carData.brakePipe.toFixed(1);
-    locoSpeedDisplay.textContent = carData.forwardSpeed.toFixed(0);
-    updateLocoTrainBrakeInput(carData);
-    updateLocoIndependentBrakeInput(carData);
-    updateReverserButtons(carData.reverser);
-    updateLocoThrottleInput(carData);
-    updateCouplingControls(carData);
-  });
+    getControlledLocoData()
+        .then(carData => {
+            locoBrakePipeDisplay.textContent = carData.brakePipe.toFixed(1);
+            locoSpeedDisplay.textContent = carData.forwardSpeed.toFixed(0);
+            updateLocoTrainBrakeInput(carData);
+            updateLocoIndependentBrakeInput(carData);
+            updateReverserButtons(carData.reverser);
+            updateLocoThrottleInput(carData);
+            updateCouplingControls(carData);
+        });
 }
 
 let locoControlRefreshIntervalId;
 locoIdSelect.addEventListener('change', updateLocoDisplay);
 sidebar.on("content", e => {
-  clearInterval(locoControlRefreshIntervalId);
-  if (e.id == "locoControlTab") {
-    locoControlRefreshIntervalId = setInterval(updateLocoDisplay, 1000 / 9);
-  }
+    clearInterval(locoControlRefreshIntervalId);
+    if (e.id == "locoControlTab") {
+        locoControlRefreshIntervalId = setInterval(updateLocoDisplay, 1000 / 9);
+    }
 });
 sidebar.on("closing", e => {
-  clearInterval(locoControlRefreshIntervalId);
-  locoControlRefreshIntervalId = undefined;
+    clearInterval(locoControlRefreshIntervalId);
+    locoControlRefreshIntervalId = undefined;
 })
 
 function sendLocoCommand(command) {
-  const guid = getControlledLocoGuid();
-  if (guid) {
-    fetch(new URL(`/car/${guid}/control?${command}`, location), { method: 'POST' });
-  }
+    const guid = getControlledLocoGuid();
+    if (guid) {
+        fetch(new URL(`/car/${guid}/control?${command}`, location), { method: 'POST' });
+    }
 }
 
 function rangeCommandSender(parameter) {
-  return e => sendLocoCommand(`${parameter}=${e.target.value / 100}`);
+    return e => sendLocoCommand(`${parameter}=${e.target.value / 100}`);
 }
 
 locoTrainBrakeInput.addEventListener('input', rangeCommandSender('trainBrake'));
 locoIndependentBrakeInput.addEventListener('input', rangeCommandSender('independentBrake'));
 locoReverserReverseButton.addEventListener('click', e =>
-  sendLocoCommand(`reverser=${isReverserButtonActive(locoReverserReverseButton) ? 0.5 : 0}`));
+    sendLocoCommand(`reverser=${isReverserButtonActive(locoReverserReverseButton) ? 0.5 : 0}`));
 locoReverserForwardButton.addEventListener('click', e =>
-  sendLocoCommand(`reverser=${isReverserButtonActive(locoReverserForwardButton) ? 0.5 : 1}`));
+    sendLocoCommand(`reverser=${isReverserButtonActive(locoReverserForwardButton) ? 0.5 : 1}`));
 locoThrottleInput.addEventListener('input', rangeCommandSender('throttle'));
 locoControlCoupleButton.addEventListener('click', e =>
-  sendLocoCommand('couple=0'));
+    sendLocoCommand('couple=0'));
 locoControlUncoupleButton.addEventListener('click', e =>
-  sendLocoCommand(`uncouple=${locoControlUncoupleSelect.value}`));
+    sendLocoCommand(`uncouple=${locoControlUncoupleSelect.value}`));
 
 locoTrainBrakeInput.addEventListener("mousedown", () => locoTrainBrakeEditing = true);
 locoTrainBrakeInput.addEventListener("mouseup", () => {
-  locoTrainBrakeEditing = false;
-  updateLocoDisplay();
+    locoTrainBrakeEditing = false;
+    updateLocoDisplay();
 });
 locoIndependentBrakeInput.addEventListener("mousedown", () => locoIndependentBrakeEditing = true);
 locoIndependentBrakeInput.addEventListener("mouseup", () => {
-  locoIndependentBrakeEditing = false;
-  updateLocoDisplay();
+    locoIndependentBrakeEditing = false;
+    updateLocoDisplay();
 });
 locoThrottleInput.addEventListener("mousedown", () => locoThrottleEditing = true);
 locoThrottleInput.addEventListener("mouseup", () => {
-  locoThrottleEditing = false;
-  updateLocoDisplay();
+    locoThrottleEditing = false;
+    updateLocoDisplay();
 });
 
 
@@ -813,143 +811,143 @@ const carMarkers = new Map();
 const selectedLocos = new Set();
 
 function getCarColor(carId) {
-  const jobId = carJobIds.get(carId);
+    const jobId = carJobIds.get(carId);
 
-  switch (getCarColorMode()) {
-  case 'jobId':
-    return jobId ? colorByHashing(jobId) : 'gray';
-  case 'jobType':
-    return jobId ? colorForJobType(jobId) : 'gray';
-  case 'destination':
-    return jobId ? colorForJobDestination(jobId) : 'gray';
-  case 'carType':
-    return colorByHashing(carId.slice(0,3));
-  }
+    switch (getCarColorMode()) {
+        case 'jobId':
+            return jobId ? colorByHashing(jobId) : 'gray';
+        case 'jobType':
+            return jobId ? colorForJobType(jobId) : 'gray';
+        case 'destination':
+            return jobId ? colorForJobDestination(jobId) : 'gray';
+        case 'carType':
+            return colorByHashing(carId.slice(0, 3));
+    }
 }
 
 function updateCarColor(carId) {
-  const carMarker = carMarkers.get(carId);
-  const rect = carMarker.getElement().querySelector('rect');
-  if (rect)
-    rect.setAttribute('fill', getCarColor(carId));
+    const carMarker = carMarkers.get(carId);
+    const rect = carMarker.getElement().querySelector('rect');
+    if (rect)
+        rect.setAttribute('fill', getCarColor(carId));
 }
 
 function updateAllCarColors() {
-  carMarkers.forEach((_, carId) => updateCarColor(carId));
+    carMarkers.forEach((_, carId) => updateCarColor(carId));
 }
 
 const locoShapeNoseDepth = 10;
 
 function createCarShape(carId, carData) {
-  const isLoco = carId.slice(0,2) == 'L-';
-  const lengthPx = carData.length * svgPixelsPerMeter;
-  const svg = isLoco
-    ? `<polygon points="${-lengthPx/2},-${carWidthPx/2} ${-lengthPx/2},${carWidthPx/2} ${lengthPx/2-locoShapeNoseDepth},${carWidthPx/2} ${lengthPx/2},0 ${lengthPx/2-locoShapeNoseDepth},-${carWidthPx/2}" fill="goldenrod" fill-opacity="70%" stroke="black" stroke-width="1%"/>`
-    : `<rect x="${-lengthPx/2}" y="-10" width="${lengthPx}" height="20" fill-opacity="70%" stroke="black" stroke-width="1%"/>`;
-  return svg;
+    const isLoco = carId.slice(0, 2) == 'L-';
+    const lengthPx = carData.length * svgPixelsPerMeter;
+    const svg = isLoco
+        ? `<polygon points="${-lengthPx / 2},-${carWidthPx / 2} ${-lengthPx / 2},${carWidthPx / 2} ${lengthPx / 2 - locoShapeNoseDepth},${carWidthPx / 2} ${lengthPx / 2},0 ${lengthPx / 2 - locoShapeNoseDepth},-${carWidthPx / 2}" fill="goldenrod" fill-opacity="70%" stroke="black" stroke-width="1%"/>`
+        : `<rect x="${-lengthPx / 2}" y="-10" width="${lengthPx}" height="20" fill-opacity="70%" stroke="black" stroke-width="1%"/>`;
+    return svg;
 }
 
 function createCarLabel(carId, carData) {
-  const isLoco = carId.slice(0,2) == 'L-';
-  const jobId = carJobIds.get(carId);
-  const lengthPx = carData.length * svgPixelsPerMeter;
-  const rotation = carData.rotation >= 180 ? 'rotate(180)' : '';
-  if (isLoco)
-    return `<text transform="translate(-3 0) ${rotation}" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="bold">${carId}</text>`;
-  const jobIdLabel =
-    !jobId ? ""
-    : jobId.split('-').length == 3 ? jobId.slice(-5,-3) + jobId.slice(-2)
-    : jobId.split('-').join('');
-  const jobIdText = `<text x="${-lengthPx/2 + 5}" transform="${rotation}" dominant-baseline="central" font-size="16">${jobIdLabel}</text>`
-  const carIdText =
-    `<text y="-0.5em" y="1" transform="${rotation} translate(${lengthPx/2 - 5})" dominant-baseline="central" text-anchor="end" font-size="8" font-family="monospace" font-weight="bold">` +
-      `<tspan x="0">${carId.slice(0,-3).replaceAll('-', '')}</tspan>` +
-      `<tspan x="0" dy="1em">${carId.slice(-3)}</tspan>` +
-    '</text>';
-  return jobIdText + carIdText;
+    const isLoco = carId.slice(0, 2) == 'L-';
+    const jobId = carJobIds.get(carId);
+    const lengthPx = carData.length * svgPixelsPerMeter;
+    const rotation = carData.rotation >= 180 ? 'rotate(180)' : '';
+    if (isLoco)
+        return `<text transform="translate(-3 0) ${rotation}" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="bold">${carId}</text>`;
+    const jobIdLabel =
+        !jobId ? ""
+            : jobId.split('-').length == 3 ? jobId.slice(-5, -3) + jobId.slice(-2)
+                : jobId.split('-').join('');
+    const jobIdText = `<text x="${-lengthPx / 2 + 5}" transform="${rotation}" dominant-baseline="central" font-size="16">${jobIdLabel}</text>`
+    const carIdText =
+        `<text y="-0.5em" y="1" transform="${rotation} translate(${lengthPx / 2 - 5})" dominant-baseline="central" text-anchor="end" font-size="8" font-family="monospace" font-weight="bold">` +
+        `<tspan x="0">${carId.slice(0, -3).replaceAll('-', '')}</tspan>` +
+        `<tspan x="0" dy="1em">${carId.slice(-3)}</tspan>` +
+        '</text>';
+    return jobIdText + carIdText;
 }
 
 function createCarOverlay(carId, carData) {
-  const lengthPx = carData.length * svgPixelsPerMeter;
-  const carCanvasMajor = Math.sqrt(lengthPx / 2 * lengthPx / 2 + carWidthPx / 2 * carWidthPx / 2);
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('id', carId);
-  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  svg.setAttribute('viewBox', `${-carCanvasMajor} ${-carWidthPx/2} ${carCanvasMajor*2} ${carWidthPx}`);
-  return svg
+    const lengthPx = carData.length * svgPixelsPerMeter;
+    const carCanvasMajor = Math.sqrt(lengthPx / 2 * lengthPx / 2 + carWidthPx / 2 * carWidthPx / 2);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('id', carId);
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    svg.setAttribute('viewBox', `${-carCanvasMajor} ${-carWidthPx / 2} ${carCanvasMajor * 2} ${carWidthPx}`);
+    return svg
 }
 
 function updateCarMarker(carId) {
-  const marker = carMarkers.get(carId);
-  if (!marker)
-    return;
-  const carData = allCarData.get(carId);
-  marker.setBounds(getCarOverlayBounds(carId, carData));
-  marker.setRotationAngle(carData.rotation - 90);
-  marker.getElement().innerHTML = createCarShape(carId, carData) + createCarLabel(carId, carData);
-  updateCarColor(carId);
+    const marker = carMarkers.get(carId);
+    if (!marker)
+        return;
+    const carData = allCarData.get(carId);
+    marker.setBounds(getCarOverlayBounds(carId, carData));
+    marker.setRotationAngle(carData.rotation - 90);
+    marker.getElement().innerHTML = createCarShape(carId, carData) + createCarLabel(carId, carData);
+    updateCarColor(carId);
 }
 
 function getCarOverlayBounds(carId, carData) {
-  const position = carData.position;
-  // If this is a selected loco, apply zoom-based scaling factor to make it more visible
-  // We dont need to check if it's a loco here because only locos can (should) be in selectedLocos, so non-locos will always have a factor of 1
-  const factor = selectedLocos.has(carId) ? scaleMarkerFactor : 1;
-  const length = metersToDegrees * carData.length * factor;
-  const width = metersToDegrees * carWidthMeters * factor;
-  return [ [ position[0] - width/2, position[1] - length/2], [position[0] + width/2, position[1] + length/2] ];
+    const position = carData.position;
+    // If this is a selected loco, apply zoom-based scaling factor to make it more visible
+    // We dont need to check if it's a loco here because only locos can (should) be in selectedLocos, so non-locos will always have a factor of 1
+    const factor = selectedLocos.has(carId) ? scaleMarkerFactor : 1;
+    const length = metersToDegrees * carData.length * factor;
+    const width = metersToDegrees * carWidthMeters * factor;
+    return [[position[0] - width / 2, position[1] - length / 2], [position[0] + width / 2, position[1] + length / 2]];
 }
 
 function createNewCar(carId, carData) {
-  allCarData.set(carId, carData);
-  createCarRow(carId);
-  const overlay = L.svgOverlay(
-    createCarOverlay(carId, carData),
-    getCarOverlayBounds(carId, carData),
-    { interactive: true, bubblingMouseEvents: false })
-    .addEventListener('mouseup', e => followCar(carId, true))
-    .addTo(map);
-  carMarkers.set(carId, overlay);
-  updateCarMarker(carId);
+    allCarData.set(carId, carData);
+    createCarRow(carId);
+    const overlay = L.svgOverlay(
+        createCarOverlay(carId, carData),
+        getCarOverlayBounds(carId, carData),
+        { interactive: true, bubblingMouseEvents: false })
+        .addEventListener('mouseup', e => followCar(carId, true))
+        .addTo(map);
+    carMarkers.set(carId, overlay);
+    updateCarMarker(carId);
 }
 
 function updateCar(carId, carData) {
-  allCarData.set(carId, carData);
-  updateCarRow(carId);
-  updateCarMarker(carId);
+    allCarData.set(carId, carData);
+    updateCarRow(carId);
+    updateCarMarker(carId);
 }
 
 function removeCar(carId) {
-  removeCarRow(carId);
-  const marker = carMarkers.get(carId);
-  if (marker) {
-    marker.remove();
-    carMarkers.delete(carId);
-  }
-  allCarData.delete(carId);
+    removeCarRow(carId);
+    const marker = carMarkers.get(carId);
+    if (marker) {
+        marker.remove();
+        carMarkers.delete(carId);
+    }
+    allCarData.delete(carId);
 }
 
 function updateAllCars(updateCarData) {
-  Object.entries(updateCarData).forEach(([carId, carData]) => {
-    if (!carMarkers.has(carId))
-      createNewCar(carId, carData);
-    else
-      updateCar(carId, carData);
-  });
-  for ([carId, _] of carMarkers)
-    if (!updateCarData[carId])
-      removeCar(carId);
-  updateLocoList();
-  updateLocoListSidebar();
-  // Remove any selected locos that are no longer present
-  for (const id of Array.from(selectedLocos))
-    if (!allCarData.has(id))
-      selectedLocos.delete(id);
+    Object.entries(updateCarData).forEach(([carId, carData]) => {
+        if (!carMarkers.has(carId))
+            createNewCar(carId, carData);
+        else
+            updateCar(carId, carData);
+    });
+    for ([carId, _] of carMarkers)
+        if (!updateCarData[carId])
+            removeCar(carId);
+    updateLocoList();
+    updateLocoListSidebar();
+    // Remove any selected locos that are no longer present
+    for (const id of Array.from(selectedLocos))
+        if (!allCarData.has(id))
+            selectedLocos.delete(id);
 }
 
 function updateCars(cars) {
-  Object.entries(cars).forEach(([carId, carData]) =>
-    updateCar(carId, carData));
+    Object.entries(cars).forEach(([carId, carData]) =>
+        updateCar(carId, carData));
 }
 
 /////////////////////
@@ -957,132 +955,132 @@ function updateCars(cars) {
 
 let scaleMarkerFactor = 1;
 map.on('zoomend', function () {
-  updatescaleMarkerFactor();
+    updatescaleMarkerFactor();
 });
 
 function updatescaleMarkerFactor() {
-  const zoom = map.getZoom();
-  // Note, after _much fiddling_ with different formulas, (including bitwise operators)
-  // Simple 2 to the power of "zoom difference" seemed the best
-  scaleMarkerFactor = zoom > initialZoom ? 1 : (2 ** (initialZoom - zoom));
-  console.info('Map Zoom:', zoom, 'Scale Factor:', scaleMarkerFactor);
+    const zoom = map.getZoom();
+    // Note, after _much fiddling_ with different formulas, (including bitwise operators)
+    // Simple 2 to the power of "zoom difference" seemed the best
+    scaleMarkerFactor = zoom > initialZoom ? 1 : (2 ** (initialZoom - zoom));
+    console.info('Map Zoom:', zoom, 'Scale Factor:', scaleMarkerFactor);
 
-  // update bounds only for selected locos to minimize work and avoid changing non-selected markers
-  Array.from(selectedLocos).forEach(id => {
-    const marker = carMarkers.get(id);
-    const carData = allCarData.get(id);
-    if (marker && carData)
-      marker.setBounds(getCarOverlayBounds(id, carData));
-  });
-
-  if (playerScalingEnabled) {
-    playerMarkers.forEach(({ overlay, position }) => {
-      overlay.setBounds(getPlayerOverlayBounds(position));
+    // update bounds only for selected locos to minimize work and avoid changing non-selected markers
+    Array.from(selectedLocos).forEach(id => {
+        const marker = carMarkers.get(id);
+        const carData = allCarData.get(id);
+        if (marker && carData)
+            marker.setBounds(getCarOverlayBounds(id, carData));
     });
-  }
+
+    if (playerScalingEnabled) {
+        playerMarkers.forEach(({ overlay, position }) => {
+            overlay.setBounds(getPlayerOverlayBounds(position));
+        });
+    }
 }
 
 // Update the loco selection sidebar. Shows ordered list of L- IDs with checkboxes.
 function updateLocoListSidebar() {
-  if (!locoListBody)
-    return;
-  // clear existing
-  locoListBody.replaceChildren();
+    if (!locoListBody)
+        return;
+    // clear existing
+    locoListBody.replaceChildren();
 
-  const locoIds = Array.from(allCarData.keys())
-    .filter(id => id.slice(0, 2) == 'L-')
-    .sort((a, b) => a.localeCompare(b));
-  // build rows using simple HTML to keep logic concise
-  const frag = document.createDocumentFragment();
-  for (const locoId of locoIds) {
-    const row = document.createElement('tr');
-    const idCell = document.createElement('td');
-    idCell.textContent = locoId;
-    const selectCell = document.createElement('td');
-    selectCell.innerHTML = `<input type="checkbox" data-loco-id="${locoId}" ${selectedLocos.has(locoId) ? 'checked' : ''}>`;
-    row.appendChild(idCell);
-    row.appendChild(selectCell);
-    frag.appendChild(row);
-  }
-  locoListBody.appendChild(frag);
+    const locoIds = Array.from(allCarData.keys())
+        .filter(id => id.slice(0, 2) == 'L-')
+        .sort((a, b) => a.localeCompare(b));
+    // build rows using simple HTML to keep logic concise
+    const frag = document.createDocumentFragment();
+    for (const locoId of locoIds) {
+        const row = document.createElement('tr');
+        const idCell = document.createElement('td');
+        idCell.textContent = locoId;
+        const selectCell = document.createElement('td');
+        selectCell.innerHTML = `<input type="checkbox" data-loco-id="${locoId}" ${selectedLocos.has(locoId) ? 'checked' : ''}>`;
+        row.appendChild(idCell);
+        row.appendChild(selectCell);
+        frag.appendChild(row);
+    }
+    locoListBody.appendChild(frag);
 
-  // use event delegation for checkbox changes (single listener)
-  if (!locoListBody._hasDelegatedLocoListener) {
-    locoListBody.addEventListener('change', e => {
-      const target = e.target;
-      if (target && target.matches('input[type=checkbox][data-loco-id]')) {
-        const locoId = target.getAttribute('data-loco-id');
-        if (target.checked) selectedLocos.add(locoId); else selectedLocos.delete(locoId);
-        const marker = carMarkers.get(locoId);
-        const carData = allCarData.get(locoId);
-        console.info('Loco data', carData)
-        if (marker && carData) marker.setBounds(getCarOverlayBounds(locoId, carData));
-      }
-    });
-    locoListBody._hasDelegatedLocoListener = true;
-  }
+    // use event delegation for checkbox changes (single listener)
+    if (!locoListBody._hasDelegatedLocoListener) {
+        locoListBody.addEventListener('change', e => {
+            const target = e.target;
+            if (target && target.matches('input[type=checkbox][data-loco-id]')) {
+                const locoId = target.getAttribute('data-loco-id');
+                if (target.checked) selectedLocos.add(locoId); else selectedLocos.delete(locoId);
+                const marker = carMarkers.get(locoId);
+                const carData = allCarData.get(locoId);
+                console.info('Loco data', carData)
+                if (marker && carData) marker.setBounds(getCarOverlayBounds(locoId, carData));
+            }
+        });
+        locoListBody._hasDelegatedLocoListener = true;
+    }
 }
 
 /////////////////////
 // events
 
 function uuidv4() {
-  return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
-    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
-  );
+    return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+    );
 }
 const sessionId = uuidv4();
 const updateInterval = 100;
 let updateStart;
 
 function updateOnce() {
-  updateStart = performance.now();
-  return fetch(new URL(`/updates/${sessionId}`, location))
-  .then(resp => {
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return resp.json();
-  })
-  .then(updateData => {
-    Object.entries(updateData).forEach(([tag, data]) => {
-      switch (tag) {
-      case 'cars':
-        updateAllCars(data);
-        break;
-      case 'jobs':
-        updateAllJobs(data);
-        break;
-      case 'junctions':
-        updateAllJunctions(data);
-        break;
-      case 'player':
-        updatePlayerOverlays(data);
-        break;
-      default:
-        const segments = tag.split('-');
-        switch (segments[0]) {
-        case 'trainset': updateCars(data); break;
-        case 'carguid': updateCar(data.id, data); break;
-        }
-      }
-    });
-  })
-  .then(_ => {
-    if (markerToFollow)
-      map.panTo(markerToFollow.getBounds().getCenter());
-  });
+    updateStart = performance.now();
+    return fetch(new URL(`/updates/${sessionId}`, location))
+        .then(resp => {
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return resp.json();
+        })
+        .then(updateData => {
+            Object.entries(updateData).forEach(([tag, data]) => {
+                switch (tag) {
+                    case 'cars':
+                        updateAllCars(data);
+                        break;
+                    case 'jobs':
+                        updateAllJobs(data);
+                        break;
+                    case 'junctions':
+                        updateAllJunctions(data);
+                        break;
+                    case 'player':
+                        updatePlayerOverlays(data);
+                        break;
+                    default:
+                        const segments = tag.split('-');
+                        switch (segments[0]) {
+                            case 'trainset': updateCars(data); break;
+                            case 'carguid': updateCar(data.id, data); break;
+                        }
+                }
+            });
+        })
+        .then(_ => {
+            if (markerToFollow)
+                map.panTo(markerToFollow.getBounds().getCenter());
+        });
 }
 
 function updateLoop() {
     updateOnce()
-    .catch(err => {
-        console.error('Update failed:', err);
-    })
-    .then(_ => {
-        const timeToNextUpdate = (updateStart + updateInterval) - performance.now();
-        setTimeout(updateLoop, timeToNextUpdate);
-    });
+        .catch(err => {
+            console.error('Update failed:', err);
+        })
+        .then(_ => {
+            const timeToNextUpdate = (updateStart + updateInterval) - performance.now();
+            setTimeout(updateLoop, timeToNextUpdate);
+        });
 }
 
 junctionsReady.then(_ => {
-  updateLoop();
+    updateLoop();
 });

@@ -1,8 +1,8 @@
 /.vs/
-/bin/
-/obj/
-/dv
-/.idea/
+**/bin/
+**/obj/
+**/dv
+**/.idea/
 Directory.Build.targets
-/build
-/dist/**
+**/build
+**/dist/**

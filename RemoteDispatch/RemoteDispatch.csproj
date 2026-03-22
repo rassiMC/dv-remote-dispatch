@@ -40,7 +40,7 @@
 		<EmbeddedResource Include="frontend/index.html" />
 		<EmbeddedResource Include="frontend/*.js" />
 		<EmbeddedResource Include="frontend/style.css" />
-		<EmbeddedResource Include="licenses/*.png" />
+		<EmbeddedResource Include="frontend/licenses/*.png" />
 	</ItemGroup>
 
 	<Target Name="PostBuild" AfterTargets="PostBuildEvent">

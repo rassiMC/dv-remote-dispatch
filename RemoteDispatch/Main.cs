@@ -105,6 +105,7 @@ namespace DvMod.RemoteDispatch
 
         private static void Start()
         {
+            SignalsShim.Initialize();
             HttpServer.Create();
             Updater.Create();
             CarUpdater.Start();
@@ -112,6 +113,7 @@ namespace DvMod.RemoteDispatch
 
         private static void Stop()
         {
+            SignalsShim.Teardown();
             CarUpdater.Stop();
             Updater.Destroy();
             HttpServer.Destroy();

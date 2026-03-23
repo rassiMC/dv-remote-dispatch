@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Signals.API;
 using UnityEngine;
 
 namespace DvMod.RemoteDispatch.Signals
@@ -8,13 +9,40 @@ namespace DvMod.RemoteDispatch.Signals
     {
         internal void Register()
         {
-            // Hook into Signals events here once you know the API surface, e.g.:
-            // SignalController.OnAspectChanged += HandleAspectChanged;
+            // When SignalsAPI is Loaded, run OnSignalsLoaded
+            SignalsAPI.Loaded += OnSignalsLoaded;
+            // When SignalsAPI is Unloaded, run OnSignalsUnloaded
+            SignalsAPI.Unloaded += OnSignalsUnloaded;
         }
 
         internal void Unregister()
         {
-            // Unhook anything registered in Register()
+            // Make sure to undo everything we did in Register
+            SignalsAPI.Loaded -= OnSignalsLoaded;
+            SignalsAPI.Unloaded -= OnSignalsUnloaded;
+            if (SignalsAPI.Instance != null)
+            {
+                // Also remove the aspect changed handler if the API is still around
+                SignalsAPI.Instance.SignalAspectChanged -= OnAspectChanged;
+            }
+        }
+
+        private void OnSignalsLoaded()
+        {
+            // We subscribe to SignalAspectChanged so we get notified any time a signal changes (e.g. from STOP to OPEN).
+            SignalsAPI.Instance!.SignalAspectChanged += OnAspectChanged;
+            Debug.Log("[RemoteDispatch.Signals] Signals API loaded, ready to interact with signals.");
+        }
+
+        private void OnSignalsUnloaded()
+        {
+            Debug.Log("[RemoteDispatch.Signals] Signals API unloaded, cleaned up handlers.");
+        }
+
+        private void OnAspectChanged(SignalState state)
+        {
+            Debug.Log($"[RemoteDispatch.Signals] Aspect changed: {state.Id} -> {state.CurrentAspectId}");
+            // TODO: forward to main mod
         }
 
         /// <summary>Returns the current aspect of a signal by its ID, or null if not found.</summary>
@@ -22,8 +50,7 @@ namespace DvMod.RemoteDispatch.Signals
         {
             try
             {
-                // e.g. return SignalManager.Instance.GetSignal(signalId)?.CurrentAspect.ToString();
-                throw new NotImplementedException("Wire up to the Signals API");
+                return SignalsAPI.GetSignal(signalId)?.CurrentAspectId;
             }
             catch (Exception ex)
             {
@@ -38,9 +65,15 @@ namespace DvMod.RemoteDispatch.Signals
             var result = new Dictionary<string, string>();
             try
             {
-                // e.g.:
-                // foreach (var signal in SignalManager.Instance.AllSignals)
-                //     result[signal.Id] = signal.CurrentAspect.ToString();
+                var signals = SignalsAPI.GetAllSignals();
+                if (signals == null) return result;
+
+                foreach (var signal in signals)
+                {
+                    // Dont bother to record signals that are off, since they dont have a meaningful aspect
+                    if (signal.IsOn)
+                        result[signal.Id] = signal.CurrentAspectId;
+                }
             }
             catch (Exception ex)
             {
@@ -54,12 +87,7 @@ namespace DvMod.RemoteDispatch.Signals
         {
             try
             {
-                // e.g.:
-                // var signal = SignalManager.Instance.GetSignal(signalId);
-                // if (signal == null) return false;
-                // signal.SetAspect(Enum.Parse<SignalAspect>(aspect));
-                // return true;
-                throw new NotImplementedException("Wire up to the Signals API");
+                return SignalsAPI.SetSignalAspect(signalId, aspect);
             }
             catch (Exception ex)
             {

@@ -20,7 +20,7 @@ namespace DvMod.RemoteDispatch
             {
                 try
                 {
-                    if (asm.GetName().Name == "Signals.Game")
+                    if (asm.GetName().Name == "Signals.API")
                     {
                         signalsAssembly = asm;
                         break;
@@ -39,7 +39,7 @@ namespace DvMod.RemoteDispatch
 
                 if (signalsAssembly == null)
                 {
-                    Main.mod?.Logger.Warning("Signals mod is enabled but Signals.Game assembly not loaded.");
+                    Main.mod?.Logger.Warning("Signals mod is enabled but Signals.API assembly not loaded.");
                     return;
                 }
 

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace DvMod.RemoteDispatch.Signals
@@ -6,6 +7,11 @@ namespace DvMod.RemoteDispatch.Signals
     public static class Bootstrap
     {
         private static SignalsBridge? _bridge;
+
+        // Expose methods for the main mod to interact with signals without needing to reference SignalsAPI directly.
+        public static Dictionary<string, string>? GetAllSignals() => _bridge?.GetAllSignals();
+        public static string? GetSignalAspect(string signalId) => _bridge?.GetSignalAspect(signalId);
+        public static bool SetSignalAspect(string signalId, string aspect) => _bridge?.SetSignalAspect(signalId, aspect) ?? false;
 
         public static void Initialize()
         {

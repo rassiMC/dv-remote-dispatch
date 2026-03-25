@@ -18,6 +18,7 @@ foreach ($file in @("LICENSE", "info.json")) {
 }
 
 if ($Configuration -eq "Release") {
+    Write-Output "Packaging for release..."
     $DistDir  = Join-Path $PSScriptRoot "dist"
     New-Item $DistDir -ItemType Directory -Force | Out-Null
 
@@ -26,6 +27,7 @@ if ($Configuration -eq "Release") {
 
     Write-Output "Packaged: $ZipPath"
 } else {
+    Write-Output "Deploying for development..."
     $DeployDir = Join-Path $DVPath "Mods\RemoteDispatch"
     New-Item $DeployDir -ItemType Directory -Force | Out-Null
     Copy-Item -Force -Recurse -Path (Join-Path $BuildDir "*") -Destination $DeployDir

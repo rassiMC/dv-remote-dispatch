@@ -72,7 +72,11 @@ namespace DvMod.RemoteDispatch.Signals
                 {
                     // Dont bother to record signals that are off, since they dont have a meaningful aspect
                     if (signal.IsOn)
+                    {
+#pragma warning disable CS8601 // If a signals is off, then CurrentAspectId is null. IsOn = CurrentAspectId != null
                         result[signal.Id] = signal.CurrentAspectId;
+#pragma warning restore CS8601 // Possible null reference assignment.
+                    }
                 }
             }
             catch (Exception ex)

@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 
@@ -6,12 +8,18 @@ namespace DvMod.RemoteDispatch
 {
     internal static class SignalsShim
     {
+        // Cache method infos for the API methods we want to call, so we don't have to do reflection every time.
         private static MethodInfo? _teardownMethod;
+        private static MethodInfo? _getAllSignalsMethod;
+        private static MethodInfo? _getSignalAspectMethod;
+        private static MethodInfo? _setSignalAspectMethod;
 
         internal static bool IsInitialized { get; private set; }
 
         internal static void Initialize()
         {
+            if (IsInitialized) return;
+
             // Check if Signals mod is present and enabled
             var signalsMod = UnityModManagerNet.UnityModManager.FindMod("DVSignals");
 
@@ -33,7 +41,7 @@ namespace DvMod.RemoteDispatch
             {
                 if (signalsMod == null || !signalsMod.Enabled)
                 {
-                    Main.DebugLog(() => "Signals mod not found or not enabled, signal integration disabled.");
+                    Main.mod?.Logger.Warning("Signals mod not found or not enabled, signal integration disabled.");
                     return;
                 }
 
@@ -62,6 +70,9 @@ namespace DvMod.RemoteDispatch
 
                 var initMethod = bootstrap.GetMethod("Initialize", BindingFlags.Public | BindingFlags.Static);
                 _teardownMethod = bootstrap.GetMethod("Teardown", BindingFlags.Public | BindingFlags.Static);
+                _getAllSignalsMethod = bootstrap.GetMethod("GetAllSignals", BindingFlags.Public | BindingFlags.Static);
+                _getSignalAspectMethod = bootstrap.GetMethod("GetSignalAspect", BindingFlags.Public | BindingFlags.Static);
+                _setSignalAspectMethod = bootstrap.GetMethod("SetSignalAspect", BindingFlags.Public | BindingFlags.Static);
 
                 initMethod?.Invoke(null, null);
 
@@ -80,6 +91,7 @@ namespace DvMod.RemoteDispatch
 
             try
             {
+                // Do the teardown in a try/catch to avoid any exceptions from preventing the rest of the mod from unloading properly.
                 _teardownMethod?.Invoke(null, null);
             }
             catch (Exception ex)
@@ -90,5 +102,20 @@ namespace DvMod.RemoteDispatch
             _teardownMethod = null;
             IsInitialized = false;
         }
+
+        internal static Dictionary<string, string>? GetAllSignals() =>
+            _getAllSignalsMethod?.Invoke(null, null) as Dictionary<string, string>;
+
+        public static string GetAllSignalsDataJson()
+        {
+            return JsonConvert.SerializeObject(GetAllSignals());
+        }
+
+        internal static string? GetSignalAspect(string signalId) =>
+            _getSignalAspectMethod?.Invoke(null, new object[] { signalId }) as string;
+
+        internal static bool SetSignalAspect(string signalId, string aspect) =>
+            _setSignalAspectMethod?.Invoke(null, new object[] { signalId, aspect }) is true;
+
     }
 }

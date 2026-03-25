@@ -105,18 +105,19 @@ namespace DvMod.RemoteDispatch
 
         private static void Start()
         {
-            SignalsShim.Initialize();
+            // Start() is only called once WorldStreamingInit.IsLoaded is true
             HttpServer.Create();
             Updater.Create();
             CarUpdater.Start();
+            SignalsShim.Initialize();
         }
 
         private static void Stop()
         {
-            SignalsShim.Teardown();
             CarUpdater.Stop();
             Updater.Destroy();
             HttpServer.Destroy();
+            SignalsShim.Teardown();
         }
 
         public static void DebugLog(TrainCar car, Func<string> message)

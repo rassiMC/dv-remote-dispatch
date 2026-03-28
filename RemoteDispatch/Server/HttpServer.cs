@@ -115,6 +115,11 @@ namespace DvMod.RemoteDispatch
 #if DEBUG
                 Main.Log("/player endpoint hit");
 #endif
+                if(!Main.settings.permissions.CanSeePlayerBlips(context.User.Identity.Name))
+                {
+                    RenderEmpty(context, 200);
+                    break;
+                }
                 var playerJson = PlayerData.GetPlayerDataJson();
                 if (playerJson != null)
                     Render200(context, ContentTypes.Json, playerJson);
@@ -165,7 +170,7 @@ namespace DvMod.RemoteDispatch
             var segments = context.Request.Url.Segments;
             if (segments.Length == 2 && context.Request.HttpMethod == "GET")
             {
-                var allCarDataJson = CarData.GetAllCarDataJson();
+                var allCarDataJson = CarData.GetAllCarDataJson(Main.settings.permissions.CanSeeLocomotives(context.User.Identity.Name));
                 Render200(context, allCarDataJson);
                 return;
             }

@@ -70,6 +70,8 @@ namespace DvMod.RemoteDispatch
             public string name;
             public bool canToggleJunctions;
             public bool canControlLocomotives;
+            public bool canSeePlayerBlips;
+            public bool canSeeLocomotives;
 
             public PlayerPermissions()
             {
@@ -98,6 +100,14 @@ namespace DvMod.RemoteDispatch
         {
             return permissions.Find(p => p.name == username)?.canControlLocomotives ?? false;
         }
+        public bool CanSeePlayerBlips(string username)
+        {
+            return permissions.Find(p => p.name == username)?.canSeePlayerBlips ?? false;
+        }
+        public bool CanSeeLocomotives(string username)
+        {
+            return permissions.Find(p => p.name == username)?.canSeeLocomotives ?? false;
+        }
 
         private void OnSessionStarted(string username)
         {
@@ -116,6 +126,8 @@ namespace DvMod.RemoteDispatch
             DrawConnectedColumn();
             DrawJunctionsColumn();
             DrawLocoControlColumn();
+            DrawPlayerBlipsColumn();
+            DrawSeeLocomotivesColumn();
             GUILayout.EndHorizontal();
         }
 
@@ -147,6 +159,14 @@ namespace DvMod.RemoteDispatch
         private void DrawLocoControlColumn()
         {
             DrawColumn("Locomotive Control", p => p.canControlLocomotives = GUILayout.Toggle(p.canControlLocomotives, ""));
+        }
+        private void DrawPlayerBlipsColumn()
+        {
+            DrawColumn("Player Blips", p => p.canSeePlayerBlips = GUILayout.Toggle(p.canSeePlayerBlips, ""));
+        }
+        private void DrawSeeLocomotivesColumn()
+        {
+            DrawColumn("Locomotive Visibility", p => p.canSeeLocomotives = GUILayout.Toggle(p.canSeeLocomotives, ""));
         }
     }
 }

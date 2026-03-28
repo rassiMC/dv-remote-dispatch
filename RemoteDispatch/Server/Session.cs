@@ -13,7 +13,7 @@ namespace DvMod.RemoteDispatch
         private static readonly TimeSpan SessionTimeout = TimeSpan.FromMinutes(5);
         private static readonly object allSesssionsLock = new object();
         private static readonly Dictionary<string, Session> allSessions = new Dictionary<string, Session>();
-        private static readonly HashSet<string> AllTags = new HashSet<string>() { "cars", "jobs", "junctions", "player" };
+        private static readonly HashSet<string> BaseTags = new HashSet<string>() { "cars", "jobs", "junctions", "player" };
 
         public static event Action<string>? OnSessionStarted;
         public static event Action<string>? OnSessionEnded;
@@ -27,8 +27,40 @@ namespace DvMod.RemoteDispatch
             public Session(string username)
             {
                 this.username = username;
-                foreach (var tag in AllTags)
+                foreach (var tag in BaseTags)
+                {
+                    AddTagIfPermitted(tag);
+                }
+            }
+
+            public void AddTagIfPermitted(string tag)
+            {
+                if (username == null) return;
+                switch (tag)
+                {
+                case "cars":
+                    if (Main.settings.permissions.CanSeeLocomotives(username))
+                    {
+                        pendingTags.Add("carsWithLocomotives");
+                    }
+                    else
+                    {
+                        pendingTags.Add("cars");
+                    }
+                    break;
+                case "player":
+                    if (Main.settings.permissions.CanSeePlayerBlips(username))
+                    {
+                        pendingTags.Add("player");
+                    } else
+                    {
+                        pendingTags.Add("playerNull");
+                    }
+                    break;
+                default:
                     pendingTags.Add(tag);
+                    break;
+                }
             }
         }
 
@@ -36,6 +68,7 @@ namespace DvMod.RemoteDispatch
         {
             return new HashSet<string>(allSessions.Values.Select(s => s.username));
         }
+
 
         public static void AddTag(string tag)
         {
@@ -49,7 +82,7 @@ namespace DvMod.RemoteDispatch
                     if (session.timeSinceLastFetch.Elapsed > SessionTimeout)
                         timedOutSessions.Add(sessionId);
                     else
-                        session.pendingTags.Add(tag);
+                        session.AddTagIfPermitted(tag);
                 }
                 foreach (var sessionId in timedOutSessions)
                 {
@@ -112,19 +145,31 @@ namespace DvMod.RemoteDispatch
         {
             return tag switch
             {
-                "cars" => JObject.FromObject(CarData.GetAllCarData().ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToJson())),
+                "cars" => JObject.FromObject(CarData.GetAllCarData(false).ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToJson())),
+                "carsWithLocomotives" => JObject.FromObject(CarData.GetAllCarData(true).ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToJson())),
                 "jobs" => JObject.FromObject(JobData.GetAllJobData()),
                 "junctions" => new JArray(Junctions.GetAllJunctionStates()),
                 "player" => PlayerData.GetPlayerData(),
+                "playerNull" => new JObject(),
                 _ when tag.Contains('-') => GetUpdateForSplitTag(tag),
                 _ => throw new NotImplementedException($"Unexpected update tag {tag}"),
+            };
+        }
+
+        private static string GetFrontendTagName(string tag)
+        {
+            return tag switch
+            {
+                "carsWithLocomotives" => "cars",
+                "playerNull" => "player",
+                _ => tag
             };
         }
 
         public static async Task<string> GetUpdates(string username, string sessionId)
         {
             var tags = await GetTags(username, sessionId).ConfigureAwait(false);
-            return JsonConvert.SerializeObject(tags.ToDictionary(tag => tag, tag => GetUpdateForTag(tag)));
+            return JsonConvert.SerializeObject(tags.ToDictionary(tag => GetFrontendTagName(tag), tag => GetUpdateForTag(tag)));
         }
     }
 }

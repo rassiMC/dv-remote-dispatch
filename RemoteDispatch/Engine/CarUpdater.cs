@@ -44,7 +44,7 @@ namespace DvMod.RemoteDispatch
 
         public static void MarkTrainsetAsDirty(Trainset trainset)
         {
-            if (trainset.cars.Find(CarData.ShouldReturnTrainCar) != null)
+            if (trainset.cars.Find(car => CarData.ShouldReturnTrainCar(car, true)) != null)
                 Sessions.AddTag($"trainset-{trainset.id}");
         }
 

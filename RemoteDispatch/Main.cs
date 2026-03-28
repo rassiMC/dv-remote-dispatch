@@ -43,6 +43,7 @@ namespace DvMod.RemoteDispatch
         private static void OnSaveGUI(UnityModManager.ModEntry modEntry)
         {
             settings.Save(modEntry);
+            Sessions.AddTag("cars");
         }
 
         private static bool OnToggle(UnityModManager.ModEntry modEntry, bool value)

@@ -53,7 +53,7 @@ namespace DvMod.RemoteDispatch
             CarSpawner carSpawner = SingletonBehaviour<CarSpawner>.Instance;
             if (carSpawner == null)
             {
-                Main.DebugLog(() => $"Tried to start {nameof(CarUpdater)} before {nameof(CarSpawner)} was initialized!");
+                Main.DebugLog($"Tried to start {nameof(CarUpdater)} before {nameof(CarSpawner)} was initialized!");
                 return;
             }
 

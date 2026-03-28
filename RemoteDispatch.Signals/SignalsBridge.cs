@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using Signals.API;
+using DvMod.RemoteDispatch;
 using UnityEngine;
+using UnityModManagerNet;
 
 namespace DvMod.RemoteDispatch.Signals
 {
@@ -22,26 +24,33 @@ namespace DvMod.RemoteDispatch.Signals
             SignalsAPI.Unloaded -= OnSignalsUnloaded;
             if (SignalsAPI.Instance != null)
             {
-                // Also remove the aspect changed handler if the API is still around
+                // Also remove the handlers if the API is still around
                 SignalsAPI.Instance.SignalAspectChanged -= OnAspectChanged;
+                SignalsAPI.Instance.SignalModeChanged -= OnModeChanged;
             }
         }
 
         private void OnSignalsLoaded()
         {
-            // We subscribe to SignalAspectChanged so we get notified any time a signal changes (e.g. from STOP to OPEN).
             SignalsAPI.Instance!.SignalAspectChanged += OnAspectChanged;
-            Debug.Log("[RemoteDispatch.Signals] Signals API loaded, ready to interact with signals.");
+            SignalsAPI.Instance!.SignalModeChanged += OnModeChanged;
+            Bootstrap.DebugLog("[RemoteDispatch.Signals] Signals API loaded, ready to interact with signals.");
         }
 
         private void OnSignalsUnloaded()
         {
-            Debug.Log("[RemoteDispatch.Signals] Signals API unloaded, cleaned up handlers.");
+            Bootstrap.DebugLog("Signals API unloaded, cleaned up handlers.");
         }
 
         private void OnAspectChanged(SignalState state)
         {
-            Debug.Log($"[RemoteDispatch.Signals] Aspect changed: {state.Id} -> {state.CurrentAspectId}");
+            Bootstrap.DebugLog($"Aspect changed: {state.Id} -> {state.CurrentAspectId}");
+            // TODO: forward to main mod
+        }
+
+        private void OnModeChanged(string signalId, SignalMode newMode)
+        {
+            Bootstrap.DebugLog($"Mode changed: {signalId} -> {newMode}");
             // TODO: forward to main mod
         }
 
@@ -54,34 +63,34 @@ namespace DvMod.RemoteDispatch.Signals
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[RemoteDispatch.Signals] GetSignalAspect({signalId}) failed: {ex.Message}");
+                Bootstrap.Warning($"GetSignalAspect({signalId}) failed: {ex.Message}");
                 return null;
             }
         }
 
         /// <summary>Returns all signal IDs and their current aspects.</summary>
-        internal Dictionary<string, string> GetAllSignals()
+        internal Dictionary<string, SignalState> GetAllSignals()
         {
-            var result = new Dictionary<string, string>();
+            var result = new Dictionary<string, SignalState>();
             try
             {
                 var signals = SignalsAPI.GetAllSignals();
-                if (signals == null) return result;
+                if (signals == null)
+                {
+                    Bootstrap.DebugLog("GetAllSignals returned null.");
+                    return result;
+                }
 
                 foreach (var signal in signals)
                 {
-                    // Dont bother to record signals that are off, since they dont have a meaningful aspect
-                    if (signal.IsOn)
-                    {
-#pragma warning disable CS8601 // If a signals is off, then CurrentAspectId is null. IsOn = CurrentAspectId != null
-                        result[signal.Id] = signal.CurrentAspectId;
-#pragma warning restore CS8601 // Possible null reference assignment.
-                    }
+                    var aspect = signal.CurrentAspectId ?? "[N/A - SIGNAL OFF]";
+                    Bootstrap.DebugLog($"Found signal: {signal.Id} at {signal.Position} with aspect {aspect} and mode {signal.Mode}");
+                    result[signal.Id] = signal;
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[RemoteDispatch.Signals] GetAllSignals failed: {ex.Message}");
+                Bootstrap.Warning($"[RemoteDispatch.Signals] GetAllSignals failed: {ex.Message}");
             }
             return result;
         }
@@ -95,7 +104,7 @@ namespace DvMod.RemoteDispatch.Signals
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[RemoteDispatch.Signals] SetSignalAspect({signalId}, {aspect}) failed: {ex.Message}");
+                Bootstrap.Warning($"[RemoteDispatch.Signals] SetSignalAspect({signalId}, {aspect}) failed: {ex.Message}");
                 return false;
             }
         }

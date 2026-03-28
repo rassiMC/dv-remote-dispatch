@@ -63,7 +63,7 @@ namespace DvMod.RemoteDispatch
             if (!WorldStreamingInit.Instance || !WorldStreamingInit.IsLoaded)
                 throw new Exception("World not yet loaded");
             var tracks = Component.FindObjectsOfType<RailTrack>();
-            Main.DebugLog(() => $"Found {tracks.Length} RailTracks.");
+            Main.DebugLog($"Found {tracks.Length} RailTracks.");
             return tracks.ToDictionary(track => track, track => GetTrackPoints(track, resolution));
         }
 

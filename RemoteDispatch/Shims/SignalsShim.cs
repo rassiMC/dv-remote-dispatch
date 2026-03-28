@@ -1,6 +1,4 @@
-﻿using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
+﻿using System;
 using System.IO;
 using System.Reflection;
 
@@ -10,7 +8,7 @@ namespace DvMod.RemoteDispatch
     {
         // Cache method infos for the API methods we want to call, so we don't have to do reflection every time.
         private static MethodInfo? _teardownMethod;
-        private static MethodInfo? _getAllSignalsMethod;
+        private static MethodInfo? _getAllSignalsJsonMethod;
         private static MethodInfo? _getSignalAspectMethod;
         private static MethodInfo? _setSignalAspectMethod;
 
@@ -41,13 +39,13 @@ namespace DvMod.RemoteDispatch
             {
                 if (signalsMod == null || !signalsMod.Enabled)
                 {
-                    Main.mod?.Logger.Warning("Signals mod not found or not enabled, signal integration disabled.");
+                    Main.Warning("Signals mod not found or not enabled, signal integration disabled.");
                     return;
                 }
 
                 if (signalsAssembly == null)
                 {
-                    Main.mod?.Logger.Warning("Signals mod is enabled but Signals.API assembly not loaded.");
+                    Main.Warning("Signals mod is enabled but Signals.API assembly not loaded.");
                     return;
                 }
 
@@ -55,7 +53,7 @@ namespace DvMod.RemoteDispatch
 
                 if (!File.Exists(path))
                 {
-                    Main.mod?.Logger.Warning("RemoteDispatch.Signals.dll not found, signal integration disabled.");
+                    Main.Warning("RemoteDispatch.Signals.dll not found, signal integration disabled.");
                     return;
                 }
 
@@ -64,24 +62,30 @@ namespace DvMod.RemoteDispatch
 
                 if (bootstrap == null)
                 {
-                    Main.mod?.Logger.Warning("Failed to find DvMod.RemoteDispatch.Signals.Bootstrap, signal integration disabled.");
+                    Main.Warning("Failed to find DvMod.RemoteDispatch.Signals.Bootstrap, signal integration disabled.");
                     return;
                 }
 
                 var initMethod = bootstrap.GetMethod("Initialize", BindingFlags.Public | BindingFlags.Static);
                 _teardownMethod = bootstrap.GetMethod("Teardown", BindingFlags.Public | BindingFlags.Static);
-                _getAllSignalsMethod = bootstrap.GetMethod("GetAllSignals", BindingFlags.Public | BindingFlags.Static);
+                _getAllSignalsJsonMethod = bootstrap.GetMethod("GetAllSignalsJson", BindingFlags.Public | BindingFlags.Static);
                 _getSignalAspectMethod = bootstrap.GetMethod("GetSignalAspect", BindingFlags.Public | BindingFlags.Static);
                 _setSignalAspectMethod = bootstrap.GetMethod("SetSignalAspect", BindingFlags.Public | BindingFlags.Static);
 
-                initMethod?.Invoke(null, null);
+                initMethod?.Invoke(null, new object[]
+                {
+                    new Action<string>(msg => Main.Log(msg)),
+                    new Action<string>(msg => Main.DebugLog(msg)),
+                    new Action<string>(msg => Main.Warning(msg))
+
+                });
 
                 IsInitialized = true;
-                Main.mod?.Logger.Log("Signals integration loaded.");
+                Main.Log("Signals integration loaded.");
             }
             catch (Exception ex)
             {
-                Main.mod?.Logger.Warning($"Failed to load Signals integration.\r\n{ex.Message}\r\n{ex.StackTrace}");
+                Main.Warning($"Failed to load Signals integration.\r\n{ex.Message}\r\n{ex.StackTrace}");
             }
         }
 
@@ -96,19 +100,19 @@ namespace DvMod.RemoteDispatch
             }
             catch (Exception ex)
             {
-                Main.mod?.Logger.Warning($"Failed to teardown Signals integration.\r\n{ex.Message}\r\n{ex.StackTrace}");
+                Main.Warning($"Failed to teardown Signals integration.\r\n{ex.Message}\r\n{ex.StackTrace}");
             }
 
             _teardownMethod = null;
             IsInitialized = false;
         }
 
-        internal static Dictionary<string, string>? GetAllSignals() =>
-            _getAllSignalsMethod?.Invoke(null, null) as Dictionary<string, string>;
-
         public static string GetAllSignalsDataJson()
         {
-            return JsonConvert.SerializeObject(GetAllSignals());
+#if DEBUG
+            Main.Log("Getting all signals data as JSON-string...");
+#endif
+            return _getAllSignalsJsonMethod?.Invoke(null, null) as string ?? "null";
         }
 
         internal static string? GetSignalAspect(string signalId) =>

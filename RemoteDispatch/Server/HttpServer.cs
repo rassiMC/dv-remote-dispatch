@@ -23,7 +23,7 @@ namespace DvMod.RemoteDispatch
                 listener.Prefixes.Add($"http://*:{Main.settings.serverPort}/");
                 listener.AuthenticationSchemes = AuthenticationSchemes.Anonymous | AuthenticationSchemes.Basic;
                 listener.Realm = "DV Remote Dispatch";
-                Main.mod?.Logger.Log($"Starting HTTP server on port {Main.settings.serverPort}");
+                Main.Log($"Starting HTTP server on port {Main.settings.serverPort}");
                 listener.Start();
             }
 
@@ -42,7 +42,7 @@ namespace DvMod.RemoteDispatch
                             }
                             catch (Exception e)
                             {
-                                Main.mod?.Logger.Log($"Exception while handling HTTP request ({context.Request.Url}): {e}");
+                                Main.Log($"Exception while handling HTTP request ({context.Request.Url}): {e}");
                             }
                         });
                     }
@@ -63,7 +63,7 @@ namespace DvMod.RemoteDispatch
         {
             if (listener.IsListening)
             {
-                Main.mod?.Logger.Log("Stopping HTTP server");
+                Main.Log("Stopping HTTP server");
                 listener.Stop();
                 listener.Prefixes.Clear();
             }
@@ -89,31 +89,31 @@ namespace DvMod.RemoteDispatch
             {
             case "car":
 #if DEBUG
-                Main.mod?.Logger.Log("/car endpoint hit");
+                Main.Log("/car endpoint hit");
 #endif
                 HandleCarRequest(context);
                 break;
             case "job":
                 Render200(context, ContentTypes.Json, JobData.GetAllJobDataJson());
 #if DEBUG
-                Main.mod?.Logger.Log("/job endpoint hit");
+                Main.Log("/job endpoint hit");
 #endif
                 break;
             case "junction":
                 HandleJunctionRequest(context);
 #if DEBUG
-                Main.mod?.Logger.Log("/junction endpoint hit");
+                Main.Log("/junction endpoint hit");
 #endif
                 break;
             case "junctionState":
                 Render200(context, ContentTypes.Json, Junctions.GetJunctionStateJSON());
 #if DEBUG
-                Main.mod?.Logger.Log("/junctionState endpoint hit");
+                Main.Log("/junctionState endpoint hit");
 #endif
                 break;
             case "player":
 #if DEBUG
-                Main.mod?.Logger.Log("/player endpoint hit");
+                Main.Log("/player endpoint hit");
 #endif
                 var playerJson = PlayerData.GetPlayerDataJson();
                 if (playerJson != null)
@@ -123,37 +123,37 @@ namespace DvMod.RemoteDispatch
                 break;
             case "res":
 #if DEBUG
-                Main.mod?.Logger.Log("/res endpoint hit");
+                Main.Log("/res endpoint hit");
 #endif
                 RenderResource(context);
                 break;
             case "track":
 #if DEBUG
-                Main.mod?.Logger.Log("/track endpoint hit");
+                Main.Log("/track endpoint hit");
 #endif
                 Render200(context, ContentTypes.Json, await RailTracks.GetTrackPointJSON().ConfigureAwait(false));
                 break;
             case "trainset":
 #if DEBUG
-                Main.mod?.Logger.Log("/trainset endpoint hit");
+                Main.Log("/trainset endpoint hit");
 #endif
                 HandleTrainsetRequest(context);
                 break;
             case "updates":
 #if DEBUG
-                Main.mod?.Logger.Log("/updates endpoint hit");
+                Main.Log("/updates endpoint hit");
 #endif
                 await HandleUpdatesRequest(context).ConfigureAwait(false);
                 break;
             case "signals":
 #if DEBUG
-                Main.mod?.Logger.Log("/signals endpoint hit");
+                Main.Log("/signals endpoint hit");
 #endif
                 Render200(context, ContentTypes.Json, SignalsShim.GetAllSignalsDataJson());
                 break;
             default:
 #if DEBUG
-                Main.mod?.Logger.Log("unknown endpoint hit");
+                Main.Log("unknown endpoint hit");
 #endif
                 RenderEmpty(context, 404);
                 break;
@@ -240,7 +240,7 @@ namespace DvMod.RemoteDispatch
                     }
                     var newSelectedBranch = await Updater.RunOnMainThread(() =>
                     {
-                        Main.mod?.Logger.Log($"Toggling J-{junctionId}.");
+                        Main.DebugLog($"Toggling J-{junctionId}.");
                         var junction = RailTrackRegistry.Instance.OrderedJunctions[junctionId];
                         junction.Switch(Junction.SwitchMode.REGULAR);
                         return junction.selectedBranch;
@@ -341,7 +341,7 @@ namespace DvMod.RemoteDispatch
         private static void Render200(HttpListenerContext context, string contentType, string s)
         {
 #if DEBUG
-            Main.mod?.Logger.Log("Render200");
+            Main.Log("Render200");
 #endif
             context.Response.ContentType = contentType;
             var bytes = Encoding.UTF8.GetBytes(s);

@@ -32,7 +32,7 @@
 	<ItemGroup>
 		<Reference Include="UnityEngine.CoreModule" />
 		<Reference Include="UnityEngine.IMGUIModule" />
-		<PackageReference Include="UnityModManager" Version="0.27.2"/>
+		<PackageReference Include="UnityModManager" Version="0.27.2" />
 	</ItemGroup>
 
 	<ItemGroup>

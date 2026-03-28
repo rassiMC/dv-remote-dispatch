@@ -5,20 +5,10 @@
 		<AssemblySearchPaths>
 			$(AssemblySearchPaths);$(DvInstallDir)\DerailValley_Data\Managed\;$(DvInstallDir)\DerailValley_Data\Managed\UnityModManager\;
 		</AssemblySearchPaths>
-		<SignalsDllPath>$(DvInstallDir)\Mods\DVSignals\Signals.API.dll</SignalsDllPath>
 
 		<!-- Suppress NU1701 warnings for referencing non standard assemblies, we are doing it intentionally to access the game's code. -->
 		<NoWarn>$(NoWarn);NU1701</NoWarn>
 	</PropertyGroup>
-
-	<!-- Signals -->
-	<ItemGroup Condition="'$(MSBuildProjectName)' == 'RemoteDispatch.Signals'">
-		<Reference Include="Signals.API">
-			<HintPath>$(SignalsDllPath)</HintPath>
-			<!-- Do not copy Signals.API.dll to the output directory, we just need it for compile time reference. -->
-			<Private>false</Private>
-		</Reference>
-	</ItemGroup>
 
 	<!-- Packaging -->
 	<Target Name="PackageMod" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT' AND '$(MSBuildProjectName)' == 'RemoteDispatch'">

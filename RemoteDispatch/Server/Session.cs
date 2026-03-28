@@ -53,7 +53,7 @@ namespace DvMod.RemoteDispatch
                 }
                 foreach (var sessionId in timedOutSessions)
                 {
-                    Main.DebugLog(() => $"Session {sessionId} timed out");
+                    Main.Log($"Session {sessionId} timed out");
                     allSessions.Remove(sessionId);
                     OnSessionEnded?.Invoke(sessionId);
                 }
@@ -67,7 +67,7 @@ namespace DvMod.RemoteDispatch
             {
                 if (!allSessions.TryGetValue(sessionId, out session))
                 {
-                    Main.DebugLog(() => $"Starting new session {sessionId} for user {username}");
+                    Main.Log($"Starting new session {sessionId} for user {username}");
                     session = new Session(username);
                     allSessions.Add(sessionId, session);
                     OnSessionStarted?.Invoke(username);

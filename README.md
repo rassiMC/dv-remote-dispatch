@@ -32,4 +32,6 @@ Icons made by [Freepik](https://www.freepik.com) from [Flaticon](https://www.fla
 
 Frontend uses [Leaflet.js]https://leafletjs.com
 
-<!-- # Contributors -->
+# Contributors
+
+@radostin04 - Server based permission for player icons and locomotive visibility

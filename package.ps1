@@ -32,5 +32,8 @@ if ($Configuration -eq "Release") {
     New-Item $DeployDir -ItemType Directory -Force | Out-Null
     Copy-Item -Force -Recurse -Path (Join-Path $BuildDir "*") -Destination $DeployDir
 
+    # Clean up any .cache files
+    Get-ChildItem -Path $DeployDir -Filter "*.cache" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+
     Write-Output "Deployed to: $DeployDir"
 }

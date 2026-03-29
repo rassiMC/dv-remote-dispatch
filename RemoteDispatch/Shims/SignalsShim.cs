@@ -1,4 +1,7 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 
@@ -8,7 +11,7 @@ namespace DvMod.RemoteDispatch
     {
         // Cache method infos for the API methods we want to call, so we don't have to do reflection every time.
         private static MethodInfo? _teardownMethod;
-        private static MethodInfo? _getAllSignalsJsonMethod;
+        private static MethodInfo? _getAllSignalsMethod;
         private static MethodInfo? _getSignalAspectMethod;
         private static MethodInfo? _setSignalAspectMethod;
 
@@ -68,7 +71,7 @@ namespace DvMod.RemoteDispatch
 
                 var initMethod = bootstrap.GetMethod("Initialize", BindingFlags.Public | BindingFlags.Static);
                 _teardownMethod = bootstrap.GetMethod("Teardown", BindingFlags.Public | BindingFlags.Static);
-                _getAllSignalsJsonMethod = bootstrap.GetMethod("GetAllSignalsJson", BindingFlags.Public | BindingFlags.Static);
+                _getAllSignalsMethod = bootstrap.GetMethod("GetAllSignals", BindingFlags.Public | BindingFlags.Static);
                 _getSignalAspectMethod = bootstrap.GetMethod("GetSignalAspect", BindingFlags.Public | BindingFlags.Static);
                 _setSignalAspectMethod = bootstrap.GetMethod("SetSignalAspect", BindingFlags.Public | BindingFlags.Static);
 
@@ -107,12 +110,66 @@ namespace DvMod.RemoteDispatch
             IsInitialized = false;
         }
 
-        public static string GetAllSignalsDataJson()
+        public static JToken? GetAllSignalsData()
         {
 #if DEBUG
-            Main.Log("Getting all signals data as JSON-string...");
+            Main.Log("Getting all signals data...");
 #endif
-            return _getAllSignalsJsonMethod?.Invoke(null, null) as string ?? "null";
+            var signalsData = _getAllSignalsMethod?.Invoke(null, null);
+
+            // Signals data is a bit special since it can be quite large and we don't want to fetch it if not necessary,
+            // so we fetch it directly from the shim which will return null if the Signals mod is not present or if there is no signals data available.
+            Main.DebugLog($"SignalsShim.GetAllSignalsData() returned: {(signalsData == null ? "null" : JsonConvert.SerializeObject(signalsData))}");
+            if (signalsData is Dictionary<string, object> data)
+            {
+                // Convert raw world coordinates to lat/lng, applying WorldMover offset (same as PlayerData does)
+                var worldOffset = WorldMover.currentMove;
+                const double earthCircumference = 40e6;
+                const double metersToDegrees = 360.0 / earthCircumference;
+
+                var adjustedData = new Dictionary<string, object>();
+
+                foreach (var signal in data)
+                {
+                    ConvertSignalPositionToLatLng(worldOffset, metersToDegrees, adjustedData, signal);
+                }
+
+                return JObject.FromObject(adjustedData);
+            }
+            Main.DebugLog("Signals mod not available or no signals data");
+            return new JObject();
+        }
+
+        private static void ConvertSignalPositionToLatLng(UnityEngine.Vector3 worldOffset, double metersToDegrees, Dictionary<string, object> adjustedData, KeyValuePair<string, object> signal)
+        {
+            try
+            {
+                // Convert the anonymous object to JObject to manipulate it
+                var signalObject = JObject.FromObject(signal.Value);
+
+                // Get raw world coordinates (x, z) from the bridge
+                var positionArray = signalObject["Position"] as JArray;
+                if (positionArray != null && positionArray.Count == 2)
+                {
+                    double x = positionArray[0].Value<double>();
+                    double z = positionArray[1].Value<double>();
+
+                    // Apply WorldMover offset, then convert to lat/lng
+                    // z is north-south (latitude), x is east-west (longitude)
+                    signalObject["Position"] = new JArray
+                    {
+                        (z - worldOffset.z) * metersToDegrees,  // latitude
+                        (x - worldOffset.x) * metersToDegrees   // longitude
+                    };
+                }
+
+                adjustedData[signal.Key] = signalObject;
+            }
+            catch (Exception ex)
+            {
+                Main.DebugLog($"Failed to adjust signal position for {signal.Key}: {ex.Message}");
+                adjustedData[signal.Key] = signal.Value;
+            }
         }
 
         internal static string? GetSignalAspect(string signalId) =>

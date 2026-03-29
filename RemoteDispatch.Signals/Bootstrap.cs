@@ -1,7 +1,6 @@
 ﻿using Newtonsoft.Json;
 using System;
-using UnityEngine;
-using UnityModManagerNet;
+using System.Collections.Generic;
 
 namespace DvMod.RemoteDispatch.Signals
 {
@@ -13,14 +12,7 @@ namespace DvMod.RemoteDispatch.Signals
         internal static Action<string> Warning = noop => { };
 
         // Expose methods for the main mod to interact with signals without needing to reference SignalsAPI directly.
-        public static string? GetAllSignalsJson()
-        {
-            DebugLog("Signals GetAllSignalsJson called.");
-            var allSignals = _bridge?.GetAllSignals();
-            if (allSignals == null)
-                return null;
-            return JsonConvert.SerializeObject(allSignals);
-        }
+        public static Dictionary<string, object>? GetAllSignals() => _bridge?.GetAllSignals();
         public static string? GetSignalAspect(string signalId) => _bridge?.GetSignalAspect(signalId);
         public static bool SetSignalAspect(string signalId, string aspect) => _bridge?.SetSignalAspect(signalId, aspect) ?? false;
 

@@ -13,7 +13,7 @@ namespace DvMod.RemoteDispatch
         private static readonly TimeSpan SessionTimeout = TimeSpan.FromMinutes(5);
         private static readonly object allSesssionsLock = new object();
         private static readonly Dictionary<string, Session> allSessions = new Dictionary<string, Session>();
-        private static readonly HashSet<string> BaseTags = new HashSet<string>() { "cars", "jobs", "junctions", "player" };
+        private static readonly HashSet<string> BaseTags = new HashSet<string>() { "cars", "jobs", "junctions", "player", "signals" };
 
         public static event Action<string>? OnSessionStarted;
         public static event Action<string>? OnSessionEnded;
@@ -151,6 +151,7 @@ namespace DvMod.RemoteDispatch
                 "junctions" => new JArray(Junctions.GetAllJunctionStates()),
                 "player" => PlayerData.GetPlayerData(),
                 "playerNull" => new JObject(),
+                "signals" => Main.settings.featureFlags.enableSignals ? SignalsShim.GetAllSignalsData() : new JObject(),
                 _ when tag.Contains('-') => GetUpdateForSplitTag(tag),
                 _ => throw new NotImplementedException($"Unexpected update tag {tag}"),
             };

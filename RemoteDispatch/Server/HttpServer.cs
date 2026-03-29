@@ -154,7 +154,7 @@ namespace DvMod.RemoteDispatch
 #if DEBUG
                 Main.Log("/signals endpoint hit");
 #endif
-                Render200(context, ContentTypes.Json, SignalsShim.GetAllSignalsDataJson());
+                Render200(context, ContentTypes.Json, JsonConvert.SerializeObject(SignalsShim.GetAllSignalsData()));
                 break;
             default:
 #if DEBUG

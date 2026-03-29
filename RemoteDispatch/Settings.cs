@@ -11,6 +11,7 @@ namespace DvMod.RemoteDispatch
         public int serverPort = 7245;
         public string serverPassword = "";
         public Permissions permissions = new Permissions();
+        public FeatureFlags featureFlags = new FeatureFlags();
         public bool showUndiscoveredLocomotives = false;
         public bool enableLogging = false;
 
@@ -53,6 +54,8 @@ namespace DvMod.RemoteDispatch
             }
 
             enableLogging = GUILayout.Toggle(enableLogging, "Enable logging");
+
+            featureFlags.Draw();
 
             GUILayout.EndVertical();
         }
@@ -167,6 +170,21 @@ namespace DvMod.RemoteDispatch
         private void DrawSeeLocomotivesColumn()
         {
             DrawColumn("Locomotive Visibility", p => p.canSeeLocomotives = GUILayout.Toggle(p.canSeeLocomotives, ""));
+        }
+    }
+
+    public class FeatureFlags
+    {
+        public bool enableSignals = false;
+
+        public void Draw()
+        {
+            GUILayout.Label("Feature Flags:");
+            GUILayout.BeginHorizontal("box", GUILayout.ExpandWidth(false));
+            GUILayout.BeginVertical();
+            enableSignals = GUILayout.Toggle(enableSignals, "Enable signals");
+            GUILayout.EndVertical();
+            GUILayout.EndHorizontal();
         }
     }
 }

@@ -45,6 +45,7 @@
 		<EmbeddedResource Include="frontend/*.js" />
 		<EmbeddedResource Include="frontend/style.css" />
 		<EmbeddedResource Include="frontend/licenses/*.png" />
+		<EmbeddedResource Include="frontend/signals/*.webp" />
 	</ItemGroup>
 
 	<Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(OS)' == 'Windows_NT'">

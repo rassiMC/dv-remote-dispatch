@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using Signals.API;
-using DvMod.RemoteDispatch;
-using UnityEngine;
-using UnityModManagerNet;
+using Newtonsoft.Json;
 
 namespace DvMod.RemoteDispatch.Signals
 {
@@ -34,7 +32,7 @@ namespace DvMod.RemoteDispatch.Signals
         {
             SignalsAPI.Instance!.SignalAspectChanged += OnAspectChanged;
             SignalsAPI.Instance!.SignalModeChanged += OnModeChanged;
-            Bootstrap.DebugLog("[RemoteDispatch.Signals] Signals API loaded, ready to interact with signals.");
+            Bootstrap.DebugLog("Signals API loaded, ready to interact with signals.");
         }
 
         private void OnSignalsUnloaded()
@@ -68,10 +66,10 @@ namespace DvMod.RemoteDispatch.Signals
             }
         }
 
-        /// <summary>Returns all signal IDs and their current aspects.</summary>
-        internal Dictionary<string, SignalState> GetAllSignals()
+        /// <summary>Returns all signals with raw world coordinates (not yet converted to lat/lng).</summary>
+        internal Dictionary<string, object> GetAllSignals()
         {
-            var result = new Dictionary<string, SignalState>();
+            var result = new Dictionary<string, object>();
             try
             {
                 var signals = SignalsAPI.GetAllSignals();
@@ -83,9 +81,24 @@ namespace DvMod.RemoteDispatch.Signals
 
                 foreach (var signal in signals)
                 {
-                    var aspect = signal.CurrentAspectId ?? "[N/A - SIGNAL OFF]";
+                    var aspect = signal.CurrentAspectId ?? "OFF";
                     Bootstrap.DebugLog($"Found signal: {signal.Id} at {signal.Position} with aspect {aspect} and mode {signal.Mode}");
-                    result[signal.Id] = signal;
+
+                    result[signal.Id] = new
+                    {
+                        signal.Id,
+                        signal.Type,
+                        signal.Mode,
+                        signal.CurrentAspectId,
+                        signal.IsOn,
+                        signal.Direction,
+                        signal.JunctionId,
+                        signal.SelectedBranch,
+                        signal.YardId,
+                        signal.TrackId,
+                        // Store raw world coordinates (x, z) - conversion to lat/lng happens in Session.cs
+                        Position = new[] { signal.Position.x, signal.Position.z },
+                    };
                 }
             }
             catch (Exception ex)

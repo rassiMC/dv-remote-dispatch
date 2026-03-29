@@ -506,6 +506,82 @@ function updateAllJunctions(states) {
 }
 
 /////////////////////
+// signals
+
+const signalMarkers = new Map();
+const signalIconSize = [8, 32];
+const signalIconAnchor = [12, 12];
+
+// Cache L.Icon instances per aspect to avoid recreating them on every update
+const signalIconCache = new Map();
+
+function getSignalIconUrl(aspect, type) {
+    console.log(`Getting signal icon for aspect ${aspect} and type ${type}`);
+    if (!aspect || aspect === 'OFF')
+        return 'res/signals.off.webp';
+
+    if (aspect.toUpperCase() == 'TRAIN_DETECTED' && type.toUpperCase() == 'INTOYARD')
+        return 'res/signals.yard_train_detected.webp';
+
+    if ([
+        'MAIN_GREEN',
+        'MAIN_RED',
+        'MAIN_YELLOW',
+        'NEXT_RED',
+        'NEXT_YELLOW',
+        'OPEN',
+        'TRAIN_CROSSING',
+        'TRAIN_DETECTED'
+    ].includes(aspect.toUpperCase())) {
+        return `res/signals.${aspect.toLowerCase()}.webp`;
+    }
+
+    // GOK
+    return 'res/signals.off.webp';
+}
+
+function getSignalIcon(aspect, type) {
+    const url = getSignalIconUrl(aspect, type);
+    if (!signalIconCache.has(url)) {
+        signalIconCache.set(url, L.icon({
+            iconUrl: url,
+            iconSize: signalIconSize,
+            iconAnchor: signalIconAnchor,
+        }));
+    }
+    return signalIconCache.get(url);
+}
+
+function updateAllSignals(signalsData) {
+    Object.entries(signalsData).forEach(([signalId, signalData]) => {
+        console.log(`Updating signal ${signalId} with aspect ${signalData.CurrentAspectId} and type ${signalData.Type}`);
+        const aspect = signalData.CurrentAspectId || 'OFF';
+        if (!signalMarkers.has(signalId)) {
+            const position = signalData.Position;
+
+            const marker = L.marker(position, {
+                icon: getSignalIcon(aspect, signalData.Type),
+                interactive: false,
+                title: signalId,
+                zIndexOffset: Math.floor(position[0] * 100000 + position[1] * 100000),
+            }).addTo(map);
+
+            signalMarkers.set(signalId, { marker, aspect });
+        } else {
+            const existing = signalMarkers.get(signalId);
+
+            if (!existing)
+                return;
+
+            if (existing.aspect !== aspect) {
+                existing.marker.setIcon(getSignalIcon(aspect, signalData.Type));
+                existing.aspect = aspect;
+            }
+        }
+    });
+}
+
+/////////////////////
 // following
 
 function followCar(carId, shouldScroll) {
@@ -963,7 +1039,7 @@ function updatescaleMarkerFactor() {
     // Note, after _much fiddling_ with different formulas, (including bitwise operators)
     // Simple 2 to the power of "zoom difference" seemed the best
     scaleMarkerFactor = zoom > initialZoom ? 1 : (2 ** (initialZoom - zoom));
-    console.info('Map Zoom:', zoom, 'Scale Factor:', scaleMarkerFactor);
+    // console.info('Map Zoom:', zoom, 'Scale Factor:', scaleMarkerFactor);
 
     // update bounds only for selected locos to minimize work and avoid changing non-selected markers
     Array.from(selectedLocos).forEach(id => {
@@ -1054,6 +1130,9 @@ function updateOnce() {
                         break;
                     case 'player':
                         updatePlayerOverlays(data);
+                        break;
+                    case 'signals':
+                        updateAllSignals(data);
                         break;
                     default:
                         const segments = tag.split('-');

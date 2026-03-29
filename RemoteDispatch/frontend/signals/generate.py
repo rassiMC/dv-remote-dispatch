@@ -6,7 +6,10 @@ frames = [
     Image.open("off.png"),
     Image.open("red.png"),
     Image.open("red-white.png"),
-    Image.open("yellow.png")
+    Image.open("yellow.png"),
+    Image.open("distant_green.png"),
+    Image.open("distant_yellow.png"),
+    Image.open("distant_off.png")
 ]
 
 # main
@@ -44,21 +47,21 @@ frames[3].save( # red
 )
 
 # distant
-frames[0].save( # green
+frames[6].save( # distant_green
     "main_green.webp",
     lossless=True
 )
 
-frames[5].save( # yellow
+frames[7].save( # distant_yellow
     "main_yellow.webp",
     save_all=True,
-    append_images=[frames[2]], # off
+    append_images=[frames[8]], # distant_off
     duration=500,
     loop=0,
     lossless=True
 )
 
-frames[5].save( # yellow
+frames[7].save( # distant_yellow
     "main_red.webp",
     lossless=True
 )

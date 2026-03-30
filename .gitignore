@@ -6,3 +6,4 @@
 Directory.Build.props
 **/build
 **/dist/**
+*.drawio.bkp

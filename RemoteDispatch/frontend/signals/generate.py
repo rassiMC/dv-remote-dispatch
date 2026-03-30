@@ -52,8 +52,17 @@ frames[6].save( # distant_green
     lossless=True
 )
 
-frames[7].save( # distant_yellow
+frames[6].save( # distant_green
     "main_yellow.webp",
+    save_all=True,
+    append_images=[frames[8]], # distant_off
+    duration=500,
+    loop=0,
+    lossless=True
+)
+
+frames[7].save( # distant_yellow
+    "main_slow.webp",
     save_all=True,
     append_images=[frames[8]], # distant_off
     duration=500,

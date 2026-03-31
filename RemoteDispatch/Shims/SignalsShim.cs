@@ -17,6 +17,10 @@ namespace DvMod.RemoteDispatch
 
         internal static bool IsInitialized { get; private set; }
 
+        /// <summary>
+        /// Sets up the integration with the Signals mod if it's present and enabled.
+        /// This should be called during the main mod's initialization.
+        /// </summary>
         internal static void Initialize()
         {
             if (IsInitialized) return;
@@ -92,6 +96,9 @@ namespace DvMod.RemoteDispatch
             }
         }
 
+        /// <summary>
+        /// Passes through the teardown call to the Signals integration, if it was initialized. This should be called during the main mod's shutdown to clean up any handlers in the Signals mod.
+        /// </summary>
         internal static void Teardown()
         {
             if (!IsInitialized) return;
@@ -110,6 +117,11 @@ namespace DvMod.RemoteDispatch
             IsInitialized = false;
         }
 
+        /// <summary>
+        /// Returns all signals with their positions converted to lat/lng and adjusted for the WorldMover offset.
+        /// If the Signals mod is not present or there is no signals data available, returns an empty JObject.
+        /// </summary>
+        /// <returns></returns>
         public static JToken? GetAllSignalsData()
         {
 #if DEBUG
@@ -131,45 +143,13 @@ namespace DvMod.RemoteDispatch
 
                 foreach (var signal in data)
                 {
-                    ConvertSignalPositionToLatLng(worldOffset, metersToDegrees, adjustedData, signal);
+                    SignalsShimHelpers.ConvertSignalPositionToLatLng(worldOffset, metersToDegrees, adjustedData, signal);
                 }
 
                 return JObject.FromObject(adjustedData);
             }
             Main.DebugLog("Signals mod not available or no signals data");
             return new JObject();
-        }
-
-        private static void ConvertSignalPositionToLatLng(UnityEngine.Vector3 worldOffset, double metersToDegrees, Dictionary<string, object> adjustedData, KeyValuePair<string, object> signal)
-        {
-            try
-            {
-                // Convert the anonymous object to JObject to manipulate it
-                var signalObject = JObject.FromObject(signal.Value);
-
-                // Get raw world coordinates (x, z) from the bridge
-                var positionArray = signalObject["Position"] as JArray;
-                if (positionArray != null && positionArray.Count == 2)
-                {
-                    double x = positionArray[0].Value<double>();
-                    double z = positionArray[1].Value<double>();
-
-                    // Apply WorldMover offset, then convert to lat/lng
-                    // z is north-south (latitude), x is east-west (longitude)
-                    signalObject["Position"] = new JArray
-                    {
-                        (z - worldOffset.z) * metersToDegrees,  // latitude
-                        (x - worldOffset.x) * metersToDegrees   // longitude
-                    };
-                }
-
-                adjustedData[signal.Key] = signalObject;
-            }
-            catch (Exception ex)
-            {
-                Main.DebugLog($"Failed to adjust signal position for {signal.Key}: {ex.Message}");
-                adjustedData[signal.Key] = signal.Value;
-            }
         }
 
         internal static string? GetSignalAspect(string signalId) =>

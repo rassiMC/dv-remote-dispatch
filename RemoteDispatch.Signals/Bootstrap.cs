@@ -7,43 +7,49 @@ namespace DvMod.RemoteDispatch.Signals
     public static class Bootstrap
     {
         private static SignalsBridge? _bridge;
-        internal static Action<string> Log = noop => { };
-        internal static Action<string> DebugLog = noop => { };
-        internal static Action<string> Warning = noop => { };
 
         // Expose methods for the main mod to interact with signals without needing to reference SignalsAPI directly.
         public static Dictionary<string, object>? GetAllSignals() => _bridge?.GetAllSignals();
         public static string? GetSignalAspect(string signalId) => _bridge?.GetSignalAspect(signalId);
         public static bool SetSignalAspect(string signalId, string aspect) => _bridge?.SetSignalAspect(signalId, aspect) ?? false;
 
+        /// <summary>
+        /// Initialize the bridge and set up logging. This should be called by the main mod during its initialization.
+        /// </summary>
+        /// <param name="log"></param>
+        /// <param name="debugLog"></param>
+        /// <param name="warning"></param>
         public static void Initialize(Action<string> log, Action<string> debugLog, Action<string> warning)
         {
-            Log = log;
-            DebugLog = debugLog;
-            Warning = warning;
+            LoggingReturn.Log = log;
+            LoggingReturn.DebugLog = debugLog;
+            LoggingReturn.Warning = warning;
             try
             {
                 _bridge = new SignalsBridge();
                 _bridge.Register();
-                Log("Signals bridge initialized.");
+                LoggingReturn.Log("Signals bridge initialized.");
             }
             catch (Exception ex)
             {
-                Warning($"Signals Initialize failed: {ex.Message}\n{ex.StackTrace}");
+                LoggingReturn.Warning($"Signals Initialize failed: {ex.Message}\n{ex.StackTrace}");
             }
         }
 
+        ///<summary>
+        ///Clean up the bridge and handlers. This should be called by the main mod during its shutdown.
+        ///</summary>
         public static void Teardown()
         {
             try
             {
                 _bridge?.Unregister();
                 _bridge = null;
-                Log("[RemoteDispatch.Signals - Raw log message] Signals bridge torn down.");
+                LoggingReturn.Log("Signals bridge torn down.");
             }
             catch (Exception ex)
             {
-                Warning($"[RemoteDispatch.Signals - Raw log message] Teardown failed: {ex.Message}\n{ex.StackTrace}");
+                LoggingReturn.Warning($"Teardown failed: {ex.Message}\n{ex.StackTrace}");
             }
         }
     }

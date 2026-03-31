@@ -1,3 +1,8 @@
 [*.cs]
 csharp_indent_switch_labels = false
 dotnet_diagnostic.RCS1197.severity = none
+
+[**]
+indent_style = tab
+insert_final_newline = true
+trim_trailing_whitespace = true

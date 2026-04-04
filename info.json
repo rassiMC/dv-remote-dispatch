@@ -2,7 +2,7 @@
   "Id": "RemoteDispatch",
   "DisplayName": "Remote Dispatch",
   "Author": "Zeibach and Dom Routley",
-  "Version": "1.6.0",
+  "Version": "1.6.1",
   "AssemblyName": "RemoteDispatch.dll",
   "EntryMethod": "DvMod.RemoteDispatch.Main.Load",
   "LoadAfter": [ "PersistentJobsMod" ],

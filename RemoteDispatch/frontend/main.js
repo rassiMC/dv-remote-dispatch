@@ -454,7 +454,7 @@ function toggleJunction(junctionId) {
 		.catch(err => { });
 }
 
-const junctionCanvasSize = 30;
+const junctionCanvasSize = 60;
 
 function createJunctionShape(selectedBranch) {
 	let branchLine = (selectedBranch) => {
@@ -473,15 +473,15 @@ function createJunctionShape(selectedBranch) {
 
 function createJunctionLabel(junctionId) {
 	let displayName = junctionDisplayNames.get(junctionId) || junctionId;
-	return `<rect x="${-junctionCanvasSize / 2}" y="${junctionCanvasSize + 2}" width="${displayName.length * 5}" height="10" fill="black" opacity="60%"/>
-			<text x="${-junctionCanvasSize / 2}" y="${junctionCanvasSize + 10}" font-size="8" fill="white" font-family="sans-serif">${displayName}</text>`;
+	return `<rect x="${-junctionCanvasSize / 2}" y="${junctionCanvasSize - 10}" width="${junctionCanvasSize}" height="10" fill="black" opacity="60%"/>
+			<text x="${-junctionCanvasSize / 2 + 2}" y="${junctionCanvasSize - 2}" font-size="8" fill="white" font-family="sans-serif">${displayName}</text>`;
 }
 
 function createJunctionOverlay(junctionId) {
 	const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 	svg.setAttribute('id', `J-${junctionId}`)
 	svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-	svg.setAttribute('viewBox', `${-junctionCanvasSize / 2} ${-junctionCanvasSize} ${junctionCanvasSize * 4} ${junctionCanvasSize * 2 + 15}`);
+	svg.setAttribute('viewBox', `${-junctionCanvasSize / 2} ${-junctionCanvasSize} ${junctionCanvasSize} ${junctionCanvasSize * 2}`);
 	svg.innerHTML = createJunctionShape(null) + createJunctionLabel(junctionId);
 	return svg;
 }
@@ -499,16 +499,14 @@ function updateJunctionOverlay(junctionId, selectedBranch) {
 
 function getJunctionOverlayBounds(position) {
 	const size = metersToDegrees * 5;
-	const extraHeight = metersToDegrees * 3;
-	const extraWidth = metersToDegrees * 5;
 	return [
 		[
-			position[0] - size - extraHeight,
-			position[1] - size / 2 - extraWidth
+			position[0] - size,
+			position[1] - size / 2
 		],
 		[
 			position[0] + size,
-			position[1] + size / 2 + extraWidth
+			position[1] + size / 2
 		]
 	];
 }

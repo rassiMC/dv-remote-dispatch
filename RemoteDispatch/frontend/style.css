@@ -36,8 +36,8 @@ table {
   border:1px solid #ddd;
   border-collapse:separate;
   -webkit-box-shadow:0 0 4px rgba(0,0,0,0.10);
-     -moz-box-shadow:0 0 4px rgba(0,0,0,0.10);
-          box-shadow:0 0 4px rgba(0,0,0,0.10);
+	 -moz-box-shadow:0 0 4px rgba(0,0,0,0.10);
+		  box-shadow:0 0 4px rgba(0,0,0,0.10);
 }
 table th,
 table td {
@@ -188,13 +188,55 @@ body {
   background-color: lightblue;
 }
 #jobsTab input {
-    float:left;
-    clear:left;
+	float:left;
+	clear:left;
 }
 #jobsTab label {
-    float:left;
-    clear: left;
+	float:left;
+	clear: left;
 }
 #jobList {
-    clear: left;
+	clear: left;
+}
+
+#search {
+	position: absolute;
+	top: 10px;
+	right: 10px;
+	z-index: 1000;
+	background: rgba(244, 244, 244,0.75);
+	border-radius: 6px;
+	padding: 6px;
+	min-width: 200px;
+}
+
+#searchInput {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 4px 8px;
+	font-size: 14px;
+	border: none;
+	border-radius: 4px;
+	background: #222;
+	color: white;
+}
+
+#searchResults {
+	list-style: none;
+	margin: 4px 0 0;
+	padding: 0;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+#searchResults li {
+	padding: 4px 8px;
+	color: black;
+	cursor: pointer;
+	border-radius: 4px;
+	font-size: 13px;
+}
+
+#searchResults li:hover, #searchResults li.active {
+	background: rgba(255,255,255,0.2);
 }

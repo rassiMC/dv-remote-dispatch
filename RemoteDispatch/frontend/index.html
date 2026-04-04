@@ -87,21 +87,21 @@
 					<tr>
 						<th><label for="themeDropdown">Theme</label></th>
 						<td>
-						<select name="theme" id="themeDropdown">
-							<option value="dark">Dark</option>
-							<option value="light">Light</option>
-						</select>
+							<select name="theme" id="themeDropdown">
+								<option value="dark">Dark</option>
+								<option value="light">Light</option>
+							</select>
 						</td>
 					</tr>
 					<tr>
 						<th><label for="carColorDropdown">Car color</label></th>
 						<td>
-						<select name="carColor" id="carColorDropdown">
-							<option value="jobId">by job ID</option>
-							<option value="jobType">by job type</option>
-							<option value="destination">by destination</option>
-							<option value="carType">by car type</option>
-						</select>
+							<select name="carColor" id="carColorDropdown">
+								<option value="jobId">by job ID</option>
+								<option value="jobType">by job type</option>
+								<option value="destination">by destination</option>
+								<option value="carType">by car type</option>
+							</select>
 						</td>
 					</tr>
 					<tr>
@@ -117,6 +117,10 @@
 		</div>
 	</div>
 	<div id="map" class="dark" style="height:100vh"></div>
+	<div id="search">
+		<input id="searchInput" type="text" placeholder="Go to…" autocomplete="off">
+		<ul id="searchResults"></ul>
+	</div>
 	<script src="res/main.js"></script>
 </body>
 </html>

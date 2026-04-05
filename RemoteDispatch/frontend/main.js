@@ -574,32 +574,29 @@ function getSignalIcon(aspect, type) {
 	return signalIconCache.get(url);
 }
 
+function createSignalMarker(signalId, signalData) {
+	const aspect = signalData.CurrentAspectId || 'OFF';
+	const position = signalData.Position;
+	const marker = L.marker(position, {
+		icon: getSignalIcon(aspect, signalData.Type),
+		interactive: false,
+		title: signalId,
+		zIndexOffset: Math.floor(position[0] * 100000 + position[1] * 100000),
+	}).addTo(map);
+	signalMarkers.set(signalId, { marker, aspect });
+}
+
 function updateAllSignals(signalsData) {
 	Object.entries(signalsData).forEach(([signalId, signalData]) => {
 		if (loggingEnabled)
 			console.log(`Updating signal ${signalId} with aspect ${signalData.CurrentAspectId} and type ${signalData.Type}`);
+		const existing = signalMarkers.get(signalId);
+		if (!existing)
+			return;
 		const aspect = signalData.CurrentAspectId || 'OFF';
-		if (!signalMarkers.has(signalId)) {
-			const position = signalData.Position;
-
-			const marker = L.marker(position, {
-				icon: getSignalIcon(aspect, signalData.Type),
-				interactive: false,
-				title: signalId,
-				zIndexOffset: Math.floor(position[0] * 100000 + position[1] * 100000),
-			}).addTo(map);
-
-			signalMarkers.set(signalId, { marker, aspect });
-		} else {
-			const existing = signalMarkers.get(signalId);
-
-			if (!existing)
-				return;
-
-			if (existing.aspect !== aspect) {
-				existing.marker.setIcon(getSignalIcon(aspect, signalData.Type));
-				existing.aspect = aspect;
-			}
+		if (existing.aspect !== aspect) {
+			existing.marker.setIcon(getSignalIcon(aspect, signalData.Type));
+			existing.aspect = aspect;
 		}
 	});
 }
@@ -1268,6 +1265,14 @@ function updateLoop() {
 		});
 }
 
-junctionsReady.then(_ => {
+const signalsReady = junctionsReady
+	.then(_ => fetch(new URL('/signals', location)))
+	.then(resp => resp.json())
+	.then(allSignalsData =>
+		Object.entries(allSignalsData).forEach(([signalId, signalData]) =>
+			createSignalMarker(signalId, signalData))
+	);
+
+signalsReady.then(_ => {
 	updateLoop();
 });

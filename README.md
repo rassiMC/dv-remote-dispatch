@@ -30,7 +30,7 @@ Original [mod](https://www.nexusmods.com/derailvalley/mods/328) by [Zeibach](htt
 
 Icons made by [Freepik](https://www.freepik.com) from [Flaticon](https://www.flaticon.com/).
 
-Frontend uses [Leaflet.js]https://leafletjs.com
+Frontend uses [Leaflet.js](https://leafletjs.com)
 
 # Contributors
 

@@ -173,7 +173,7 @@ All testing is manual — there are no automated tests (side note, if you want t
 - **Keep pull requests focused.** One feature or fix per PR makes review much easier.
 - **More smaller changes over few large ones.** If you have a big change in mind, consider breaking it down into smaller, incremental PRs. This makes it easier to review and merge, and helps avoid merge conflicts. You can always gate unfinished features behind a debug setting or feature flag if you want to merge them before they're fully polished.
 
---
+---
 
 ## Feature flags
 

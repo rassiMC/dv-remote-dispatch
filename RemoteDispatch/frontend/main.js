@@ -775,7 +775,7 @@ function updateCouplingControls(carData) {
 	const carsInRear = carData.carsInRear;
 
 	locoControlCoupleButton.disabled = !canCouple;
-	locoControlUncoupleButton.disabled = carsInFront == 0 && carsInRear && 0;
+	locoControlUncoupleButton.disabled = carsInFront === 0 && carsInRear === 0;
 
 	if (locoControlUncoupleSelect.childElementCount == carsInFront + carsInRear) {
 		return;

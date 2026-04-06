@@ -18,24 +18,22 @@ There is also an optional **Signals sub-project** (`RemoteDispatch.Signals/`) �
 
 ## Setting up
 
-### Prerequisites:
+### Prerequisites
 
 - [Derail Valley](https://www.derailvalley.com/) with [UnityModManager](https://www.nexusmods.com/site/mods/21) installed
-- [dotnet SDK](https://dotnet.microsoft.com/download) version 6 or later
-  (`dotnet --version` to confirm its on your PATH)
+- [dotnet SDK](https://dotnet.microsoft.com/download) version 10 (recommended — solves most build issues)
+  (`dotnet --version` to confirm it's on your PATH)
 
-#### Optional, but these are our recommendations:
+#### Optional, but recommended
 
-- [Windows Only] [Full Interactive Developer Environment] [Visual Studio Community](https://visualstudio.microsoft.com/vs/community/) is free for open source use
-  During installation, select the **.NET desktop development** workload as this includes the Dotnet SDK and everything else needed to build the mod
-- [Text editor] [Visual Studio Code]()
-  Install the [C# Dev Kit extension](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csdevkit) and point it at the `.sln` file
-
+- **[Windows only]** [Visual Studio Community](https://visualstudio.microsoft.com/vs/community/) is free for open source use.
+  During installation, select the **.NET desktop development** workload — this includes the dotnet SDK and everything else needed to build the mod.
+- **[All platforms]** [Visual Studio Code](https://code.visualstudio.com/) with the [C# Dev Kit extension](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csdevkit), pointed at the `.slnx` file.
 
 ### Building for the first time
 
-1. Clone the repository
-2. Create a `Directory.Build.props` file from this example in the root of the repo, this is a personal file and should not be committed back to the repo:
+1. Clone the repository.
+2. Create a `Directory.Build.props` file in the root of the repo from the example below. This is a personal file and should not be committed back to the repo:
     ```xml
     <Project>
         <PropertyGroup>
@@ -44,9 +42,11 @@ There is also an optional **Signals sub-project** (`RemoteDispatch.Signals/`) �
         </PropertyGroup>
     </Project>
     ```
-3. With your terminal in the root of the repo (same directory as the `RemoteDispatch.slnx` file), run this command:
-    `dotnet build -v detailed`
-4. This will give you an output something like this:
+3. With your terminal in the root of the repo (same directory as the `RemoteDispatch.slnx` file), run:
+    ```
+    dotnet build -v detailed
+    ```
+4. You should see output like this:
     ```
     Restore complete (0.3s)
         Determining projects to restore...
@@ -57,16 +57,18 @@ There is also an optional **Signals sub-project** (`RemoteDispatch.Signals/`) �
 
     Build succeeded in 1.4s
     ```
-5. Go into your RemoteDispatch mod folder (DerailValley location, /Mods/RemoteDispatch), and make sure there is no .cache file, delete it if there is one as this will be an _older_ version of the mod.
-6. Run the game and make sure RemoteDispatch is enabled in UMM
+5. Go into your RemoteDispatch mod folder (`<DerailValley>/Mods/RemoteDispatch`) and make sure there is no `.cache` file — delete it if there is one, as it will be an older version of the mod.
+6. Run the game and make sure RemoteDispatch is enabled in UMM.
 
 #### Linux users
 
-Part of the build process is the package script, this will not run for you by default and you will need to manually grab the .DLLs and copy them to your mods folder. Installing powershell core and running the package script manually will work, and if you want to commit a change to the RemoteDispatch.csproj file to invoke this for Linux as well I would appreciate it.
+The build process includes a package script that will not run automatically on Linux. You will need to manually copy the `.dll` files to your mods folder.
+
+Make sure your `Directory.Build.props` points at the `Managed` folder within your Derail Valley installation for dependency resolution — the path will differ from the Windows example above. Installing PowerShell Core and running the package script manually is also an option. If you'd like to contribute a change to `RemoteDispatch.csproj` to handle this automatically on Linux, that would be very welcome.
 
 #### Release builds
 
-Run `dotnet build -c Release -v detailed` and the package script will create a zip file in a dist folder.
+Run `dotnet build -c Release -v detailed` and the package script will create a zip file in a `dist` folder.
 
 ---
 
@@ -86,19 +88,23 @@ RemoteDispatch/
 │   ├── JobData.cs          # Job and task data; Harmony hooks on job state changes
 │   ├── PlayerData.cs       # Player position and Steam name
 │   └── RailTracks.cs       # Track geometry and junction positions, baked to lat/lon
-└── Server/
+├── Server/
 │   ├── AsyncSet.cs         # Thread-safe set with async TakeAsync, used for pending tags
 │   ├── HttpServer.cs       # HttpListener; routes requests, handles auth and gzip
 │   └── Session.cs          # Per-client sessions; tag-based change notification
-└── Shims/
+├── Shims/
 │   └── SignalsShim.cs      # Optional runtime integration with the DVSignals mod
 └── frontend/
-    └── *                   # Frontend code
+    └── *                   # Frontend source (see below)
 
 RemoteDispatch.Signals/     # Separate assembly, only loaded if DVSignals mod is installed
 ├── Bootstrap.cs            # Public entry point called by SignalsShim via reflection
 └── SignalsBridge.cs        # Stubs for reading/writing signal aspects
 ```
+
+### The frontend
+
+The frontend is a JavaScript application that lives in `frontend/`. It is **packaged directly into the main DLL at build time** — there is no separate frontend build step to run, and no dev server. Any changes you make to the frontend files will be picked up automatically the next time you run `dotnet build`.
 
 ---
 
@@ -133,11 +139,50 @@ If you add a new patch class, place it in the file most relevant to what it's pa
 
 ---
 
+## Debugging and logging
+
+- `Main.Log(...)` — always writes to the UMM log.
+- `Main.DebugLog(...)` — only writes logs when the logging setting is enabled in the UMM mod settings; use this for noisy or diagnostic output you want users to be _able_ to use, but not be noisy if they are debugging another mod.
+
+You can also "gate" your log commands with the preprocessor directive `#if DEBUG`, this will mean code within the gate will only be included in the build if you built the code in DEBUG configuration. This is the default if you do not pass `-c Release` to the `dotnet build` command.
+
+---
+
+## Code style
+
+There is an `.editorconfig` at the root of the repo — make sure your editor respects it. The main things to be aware of:
+
+- **Indentation:** tabs, not spaces. This lets each contributor set their editor to display whatever indent width suits them, and avoids large whitespace-only diffs in PRs.
+- **Brace style:** Allman for C# (opening brace on its own line), K&R One True Brace Style for JavaScript (opening brace on the same line). Most editors default to these and will apply them automatically.
+
+Following these conventions keeps PR diffs clean and makes review easier for everyone.
+
+---
+
+## Testing
+
+All testing is manual — there are no automated tests (side note, if you want to add automated tests _please do_). Before submitting a PR, please test your changes in-game with at least one connected browser client. Things worth exercising:
+
+- Does your new feature/bugfix work
+- The update loop (does data reach the client when something changes in-game) still functions
+
+---
+
 ## Submitting changes
 
 - **Keep pull requests focused.** One feature or fix per PR makes review much easier.
-- **Test in-game** with at least one connected client before submitting. The update loop, auth, and gzip path are all worth exercising.
-- **Don't break the HTTP contract.** The JSON shape returned by each endpoint is consumed by the frontend and potentially by third-party tools. Additive changes (new fields) are fine; removing or renaming fields is a breaking change and needs a discussion first.
+- **More smaller changes over few large ones.** If you have a big change in mind, consider breaking it down into smaller, incremental PRs. This makes it easier to review and merge, and helps avoid merge conflicts. You can always gate unfinished features behind a debug setting or feature flag if you want to merge them before they're fully polished.
+
+--
+
+## Feature flags
+
+If you are adding a feature that is not yet complete, or that you want to be able to toggle on and off for testing, you can gate it behind a setting in the mod settings menu. This allows other contributors to test and build on your work while it's in progress, as well as allowing users to opt in to unfinished features if they are interested in testing them.
+
+These should not be confused with normal feature settings.
+Feature flags are for gating incomplete features that are still being worked on, while normal settings are for features that are complete but that users may want to enable or disable. It is entierly possible and realistic for a feature flag to be moved to a normal setting once the feature is complete and polished.
+
+---
 
 ## AI
 

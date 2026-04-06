@@ -22,7 +22,7 @@ Please include:
 
 Please do feel free to contribute, we have many ideas and not enough people to do them all.
 
-See [Contributing](./CONTRIBUTING.md)
+See [Contributing](.github/CONTRIBUTING.md)
 
 ## Credits
 

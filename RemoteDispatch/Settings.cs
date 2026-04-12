@@ -68,15 +68,16 @@ namespace DvMod.RemoteDispatch
 
     public class Permissions
     {
-        public class PlayerPermissions
-        {
-            public string name;
-            public bool canToggleJunctions;
-            public bool canControlLocomotives;
-            public bool canSeePlayerBlips;
-            public bool canSeeLocomotives;
+		public class PlayerPermissions
+		{
+			public string name;
+			public bool canToggleJunctions;
+			public bool canControlLocomotives;
+			public bool canSeePlayerBlips;
+			public bool canSeeLocomotives;
+			public bool canControlSignals;
 
-            public PlayerPermissions()
+			public PlayerPermissions()
             {
                 name = "";
             }
@@ -93,13 +94,14 @@ namespace DvMod.RemoteDispatch
         }
 
         public readonly List<PlayerPermissions> permissions = new List<PlayerPermissions>();
-        public PlayerPermissions defaultPermissions = new PlayerPermissions{
-            name = "Default",
-            canToggleJunctions =  true,
-            canControlLocomotives = true,
-            canSeePlayerBlips = true,
-            canSeeLocomotives = true
-        };
+	public PlayerPermissions defaultPermissions = new PlayerPermissions{
+		name = "Default",
+		canToggleJunctions =  true,
+		canControlLocomotives = true,
+		canSeePlayerBlips = true,
+		canSeeLocomotives = true,
+		canControlSignals = false
+	};
 
         public Permissions()
         {
@@ -111,11 +113,16 @@ namespace DvMod.RemoteDispatch
             return permissions.Find(p => p.name == username)?.canToggleJunctions ?? false;
         }
 
-        public bool HasLocoControlPermission(string username)
-        {
-            return permissions.Find(p => p.name == username)?.canControlLocomotives ?? false;
-        }
-        public bool CanSeePlayerBlips(string username)
+		public bool HasLocoControlPermission(string username)
+		{
+			return permissions.Find(p => p.name == username)?.canControlLocomotives ?? false;
+		}
+
+		public bool HasSignalControlPermission(string username)
+		{
+			return permissions.Find(p => p.name == username)?.canControlSignals ?? false;
+		}
+		public bool CanSeePlayerBlips(string username)
         {
             return permissions.Find(p => p.name == username)?.canSeePlayerBlips ?? false;
         }
@@ -138,16 +145,17 @@ namespace DvMod.RemoteDispatch
 
         public void Draw()
         {
-            GUILayout.Label("Dispatcher permissions:");
-            GUILayout.BeginHorizontal("box", GUILayout.ExpandWidth(false));
-            DrawNamesColumn();
-            DrawConnectedColumn();
-            DrawJunctionsColumn();
-            DrawLocoControlColumn();
-            DrawPlayerBlipsColumn();
-            DrawSeeLocomotivesColumn();
-            GUILayout.EndHorizontal();
-        }
+			GUILayout.Label("Dispatcher permissions:");
+			GUILayout.BeginHorizontal("box", GUILayout.ExpandWidth(false));
+			DrawNamesColumn();
+			DrawConnectedColumn();
+			DrawJunctionsColumn();
+			DrawLocoControlColumn();
+			DrawSignalControlColumn();
+			DrawPlayerBlipsColumn();
+			DrawSeeLocomotivesColumn();
+			GUILayout.EndHorizontal();
+		}
 
         private void DrawColumn(string label, Action<PlayerPermissions> action)
         {
@@ -175,11 +183,16 @@ namespace DvMod.RemoteDispatch
             DrawColumn("Junctions", p => p.canToggleJunctions = GUILayout.Toggle(p.canToggleJunctions, ""));
         }
 
-        private void DrawLocoControlColumn()
-        {
-            DrawColumn("Locomotive Control", p => p.canControlLocomotives = GUILayout.Toggle(p.canControlLocomotives, ""));
-        }
-        private void DrawPlayerBlipsColumn()
+		private void DrawLocoControlColumn()
+		{
+			DrawColumn("Locomotive Control", p => p.canControlLocomotives = GUILayout.Toggle(p.canControlLocomotives, ""));
+		}
+
+		private void DrawSignalControlColumn()
+		{
+			DrawColumn("Signal Control", p => p.canControlSignals = GUILayout.Toggle(p.canControlSignals, ""));
+		}
+		private void DrawPlayerBlipsColumn()
         {
             DrawColumn("Player Blips", p => p.canSeePlayerBlips = GUILayout.Toggle(p.canSeePlayerBlips, ""));
         }

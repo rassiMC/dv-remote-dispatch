@@ -436,99 +436,6 @@ const tracksReady = fetch(new URL('/track', location))
 
 let junctions = [];
 var junctionDisplayNames = new Map();
-
-const junctionsReady = tracksReady
-	.then(_ => fetch(new URL('/junction', location)))
-	.then(resp => resp.json())
-	.then(allJunctionData =>
-		junctions = allJunctionData.map((data, index) => ({
-			marker: createJunctionMarker(data.position, index, data.id), // id here is the "real" ID of the Junction, the index is just how the frontend handles them internally
-			branches: data.branches,
-		}))
-	);
-
-function toggleJunction(junctionId) {
-	fetch(new URL(`/junction/${junctionId}/toggle`, location), { method: 'POST' })
-		.then(resp => resp.json())
-		.then(selectedBranch => updateJunctionOverlay(junctionId, selectedBranch))
-		.catch(err => { });
-}
-
-const junctionCanvasSize = 60;
-
-function createJunctionShape(selectedBranch) {
-	let branchLine = (selectedBranch) => {
-		switch (selectedBranch) {
-			case 0: return `<line clip-path="url(#box)" x1="${junctionCanvasSize / 2}" y1="${junctionCanvasSize}" x2="${-junctionCanvasSize / 2}" y2="${-junctionCanvasSize}" stroke="white" stroke-width="10"/>`
-			case 1: return `<line clip-path="url(#box)" x1="${-junctionCanvasSize / 2}" y1="${junctionCanvasSize}" x2="${junctionCanvasSize / 2}" y2="${-junctionCanvasSize}" stroke="white" stroke-width="10"/>`
-		}
-		return ''
-	}
-	return `<g opacity="70%">
-		<clipPath id="box"><rect x="${-junctionCanvasSize / 2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize * 2}"/></clipPath>
-		<rect x="${-junctionCanvasSize / 2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize * 2}" fill="red"/>` +
-		branchLine(selectedBranch) +
-		`<rect x="${-junctionCanvasSize / 2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize * 2}" fill="none" stroke="black" stroke-width="2%"/></g>`;
-}
-
-function createJunctionLabel(junctionId) {
-	let displayName = junctionDisplayNames.get(junctionId) || junctionId;
-	return `<rect x="${-junctionCanvasSize / 2}" y="${junctionCanvasSize - 10}" width="${junctionCanvasSize}" height="10" fill="black" opacity="60%"/>
-			<text x="${-junctionCanvasSize / 2 + 2}" y="${junctionCanvasSize - 2}" font-size="8" fill="white" font-family="sans-serif">${displayName}</text>`;
-}
-
-function createJunctionOverlay(junctionId) {
-	const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-	svg.setAttribute('id', `J-${junctionId}`)
-	svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-	svg.setAttribute('viewBox', `${-junctionCanvasSize / 2} ${-junctionCanvasSize} ${junctionCanvasSize} ${junctionCanvasSize * 2}`);
-	svg.innerHTML = createJunctionShape(null) + createJunctionLabel(junctionId);
-	return svg;
-}
-
-function updateJunctionOverlay(junctionId, selectedBranch) {
-	const junction = junctions[junctionId]
-	junction.marker.getElement().innerHTML = createJunctionShape(selectedBranch) + createJunctionLabel(junctionId);
-	const selectedTrackId = junction.branches[selectedBranch]
-	trackPolyLines.get(selectedTrackId).setStyle({ color: 'steelblue', dashArray: null });
-	const unselectedTrackPolyLine = trackPolyLines.get(junction.branches[1 - selectedBranch]);
-	unselectedTrackPolyLine
-		.setStyle({ color: 'lightsteelblue', dashArray: "6 12" })
-		.bringToBack();
-}
-
-function getJunctionOverlayBounds(position) {
-	const size = metersToDegrees * 5;
-	return [
-		[
-			position[0] - size,
-			position[1] - size / 2
-		],
-		[
-			position[0] + size,
-			position[1] + size / 2
-		]
-	];
-}
-
-function createJunctionMarker(p, junctionId, displayName) {
-	junctionDisplayNames.set(junctionId, displayName);
-	return L.svgOverlay(
-		createJunctionOverlay(junctionId, junctionId),
-		getJunctionOverlayBounds(p),
-		{ interactive: true, renderer: canvasRenderer })
-		.addEventListener('click', () => toggleJunction(junctionId))
-		.addTo(map)
-		.setZIndex(Math.floor(p[0] * 100000 + p[1] * 100000));
-}
-
-function updateAllJunctions(states) {
-	states.forEach((state, index) => updateJunctionOverlay(index, state))
-}
-
-/////////////////////
-// signals
-
 const signalMarkers = new Map();
 const signalIconSize = [8, 32];
 const signalIconAnchor = [12, 12];
@@ -542,23 +449,23 @@ function getSignalIconUrl(aspect, type) {
 	if (!aspect || aspect === 'OFF')
 		return 'res/signals.off.webp';
 
-	if (aspect.toUpperCase() == 'TRAIN_DETECTED' && type.toUpperCase() == 'INTOYARD')
-		return 'res/signals.yard_train_detected.webp';
+	const upperAspect = aspect.toUpperCase();
+	const upperType = type.toUpperCase();
 
-	if ([
-		'MAIN_GREEN',
-		'MAIN_RED',
-		'MAIN_YELLOW',
-		'NEXT_RED',
-		'NEXT_YELLOW',
-		'OPEN',
-		'TRAIN_CROSSING',
-		'TRAIN_DETECTED'
-	].includes(aspect.toUpperCase())) {
+	// Match all known aspects by lowercasing the input
+	const supportedAspects = [
+		'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7',
+		'DS1', 'DS2', 'DS3', 'DS4'
+	].map(x => x.toUpperCase());
+
+	if (supportedAspects.includes(upperAspect)) {
 		return `res/signals.${aspect.toLowerCase()}.webp`;
 	}
 
-	// GOK
+	// Check for type-specific aspects
+	if (upperType.includes('YARD') && upperAspect === 'TRAIN_DETECTED')
+		return 'res/signals.yard_train_detected.webp';
+
 	return 'res/signals.off.webp';
 }
 
@@ -576,14 +483,102 @@ function getSignalIcon(aspect, type) {
 
 function createSignalMarker(signalId, signalData) {
 	const aspect = signalData.CurrentAspectId || 'OFF';
+	const mode = signalData.Mode || 'Automatic';
 	const position = signalData.Position;
+
 	const marker = L.marker(position, {
 		icon: getSignalIcon(aspect, signalData.Type),
-		interactive: false,
+		interactive: true,
 		title: signalId,
 		zIndexOffset: Math.floor(position[0] * 100000 + position[1] * 100000),
-	}).addTo(map);
-	signalMarkers.set(signalId, { marker, aspect });
+	})
+	.bindPopup(() => buildSignalPopup(signalId), { maxWidth: 260 })
+	.addTo(map);
+
+	signalMarkers.set(signalId, { marker, aspect, mode, type: signalData.Type });
+}
+
+const SIGNAL_ASPECTS = [
+	'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7',
+	'DS1', 'DS2', 'DS3', 'DS4', 'S1c'
+];
+
+function buildSignalPopup(signalId) {
+	const state = signalMarkers.get(signalId);
+	if (!state) return '';
+
+	const isManual = state.mode === 'Manual';
+
+	const container = document.createElement('div');
+	container.style.cssText = 'min-width:200px;font-family:sans-serif';
+	container.innerHTML = `
+		<strong style="font-size:1.1em">${signalId}</strong>
+		<div style="margin:6px 0">
+			Mode: <strong id="sig-mode-label-${signalId}">${state.mode}</strong>
+		</div>
+		<label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer">
+			<input type="checkbox" id="sig-manual-${signalId}" ${isManual ? 'checked' : ''}>
+			Manual control
+		</label>
+		<div id="sig-aspect-row-${signalId}" style="display:${isManual ? 'block' : 'none'}">
+			<div style="margin-bottom:4px">Set aspect:</div>
+			<select id="sig-aspect-select-${signalId}" style="width:100%;margin-bottom:8px;max-height:120px;overflow-y:auto">
+				${SIGNAL_ASPECTS.map(a =>
+					`<option value="${a}" ${a === state.aspect ? 'selected' : ''}>${a}</option>`
+				).join('')}
+			</select>
+			<button id="sig-apply-${signalId}"
+				style="width:100%;padding:4px;background:#2a6;color:#fff;border:none;border-radius:3px;cursor:pointer">
+				Apply aspect
+			</button>
+		</div>
+		<div id="sig-status-${signalId}" style="margin-top:6px;font-size:0.85em;color:gray"></div>
+	`;
+
+	container.querySelector(`#sig-manual-${signalId}`)
+		.addEventListener('change', e => {
+			const newMode = e.target.checked ? 'Manual' : 'Automatic';
+			postSignalControl(signalId, { mode: newMode })
+				.then(ok => {
+					if (ok) {
+						container.querySelector(`#sig-mode-label-${signalId}`).textContent = newMode;
+						container.querySelector(`#sig-aspect-row-${signalId}`)
+							.style.display = e.target.checked ? 'block' : 'none';
+						setSignalStatus(signalId, container, `Mode set to ${newMode}.`);
+					} else {
+						setSignalStatus(signalId, container, 'Failed to set mode.', true);
+						e.target.checked = !e.target.checked; // revert on failure
+					}
+				});
+		});
+
+	container.querySelector(`#sig-apply-${signalId}`)
+		.addEventListener('click', () => {
+			const aspect = container.querySelector(`#sig-aspect-select-${signalId}`).value;
+			postSignalControl(signalId, { aspect })
+				.then(ok => {
+					setSignalStatus(signalId, container,
+						ok ? `Aspect set to ${aspect}.` : 'Failed to set aspect.', !ok);
+				});
+		});
+
+	return container;
+}
+
+function setSignalStatus(signalId, container, msg, isError = false) {
+	const el = container.querySelector(`#sig-status-${signalId}`);
+	if (el) {
+		el.textContent = msg;
+		el.style.color = isError ? '#c44' : 'gray';
+	}
+}
+
+function postSignalControl(signalId, params) {
+	const qs = new URLSearchParams(params).toString();
+	return fetch(new URL(`/signal/${encodeURIComponent(signalId)}/control?${qs}`, location),
+		{ method: 'POST' })
+		.then(r => r.ok || r.status === 204)
+		.catch(() => false);
 }
 
 function updateAllSignals(signalsData) {
@@ -593,10 +588,32 @@ function updateAllSignals(signalsData) {
 		const existing = signalMarkers.get(signalId);
 		if (!existing)
 			return;
+
 		const aspect = signalData.CurrentAspectId || 'OFF';
+		const mode   = signalData.Mode ?? existing.mode;
+
+		let changed = false;
 		if (existing.aspect !== aspect) {
-			existing.marker.setIcon(getSignalIcon(aspect, signalData.Type));
+			existing.marker.setIcon(getSignalIcon(aspect, existing.type));
 			existing.aspect = aspect;
+			changed = true;
+		}
+		if (existing.mode !== mode) {
+			existing.mode = mode;
+			changed = true;
+		}
+
+		// If the popup is currently open, patch the DOM directly so it stays live
+		if (changed && existing.marker.isPopupOpen()) {
+			const modeLabel = document.getElementById(`sig-mode-label-${signalId}`);
+			const manualCb  = document.getElementById(`sig-manual-${signalId}`);
+			const aspectSel = document.getElementById(`sig-aspect-select-${signalId}`);
+			const aspectRow = document.getElementById(`sig-aspect-row-${signalId}`);
+
+			if (modeLabel)  modeLabel.textContent  = mode;
+			if (manualCb)   manualCb.checked       = mode === 'Manual';
+			if (aspectRow)  aspectRow.style.display = mode === 'Manual' ? 'block' : 'none';
+			if (aspectSel)  aspectSel.value         = aspect;
 		}
 	});
 }

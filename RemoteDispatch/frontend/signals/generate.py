@@ -1,88 +1,162 @@
 from PIL import Image
 
-frames = [
-    Image.open("green.png"),
-    Image.open("green-yellow.png"),
-    Image.open("off.png"),
-    Image.open("red.png"),
-    Image.open("red-white.png"),
-    Image.open("yellow.png"),
-    Image.open("distant_green.png"),
-    Image.open("distant_yellow.png"),
-    Image.open("distant_off.png")
-]
+frames = {
+    "all": Image.open("source-all.png"),
+    "distant_all": Image.open("source-distant_all.png"),
+    "distant_green": Image.open("source-distant_green.png"),
+    "distant_off": Image.open("source-distant_off.png"),
+    "distant_yellow": Image.open("source-distant_yellow.png"),
+    "green": Image.open("source-green.png"),
+    "greenwhite": Image.open("source-green-white.png"),
+    "greenyellow": Image.open("source-green-yellow.png"),
+    "greenyellowwhite": Image.open("source-green-yellow-white.png"),
+    "off": Image.open("source-off.png"),
+    "red": Image.open("source-red.png"),
+    "redwhite": Image.open("source-red-white.png"),
+    "yellow": Image.open("source-yellow.png"),
+    "yellowredyellow": Image.open("source-yellow-red-yellow.png"),
+    "yellowredyellowwhite": Image.open("source-yellow-red-yellow-white.png"),
+    "yellowwhite": Image.open("source-yellow-white.png")
+}
 
-# main
-frames[0].save( # green
-    "open.webp",
+# =============================================
+# Main signals
+# =============================================
+
+# track clear
+frames["green"].save(
+    "s2_automatic.webp",
+    lossless=True
+)
+frames["greenwhite"].save(
+    "s2_manual.webp",
     lossless=True
 )
 
-frames[0].save( # green
-    "next_yellow.webp",
+# expect caution
+frames["greenyellow"].save(
+    "s4_automatic.webp",
     save_all=True,
-    append_images=[frames[1]], # green-yellow
+    append_images=[frames["yellow"]],
+    duration=500,
+    loop=0,
+    lossless=True
+)
+frames["greenyellowwhite"].save(
+    "s4_manual.webp",
+    save_all=True,
+    append_images=[frames["yellowwhite"]],
     duration=500,
     loop=0,
     lossless=True
 )
 
-frames[5].save( # yellow
-    "next_red.webp",
+# caution
+frames["yellow"].save(
+    "s6_automatic.webp",
+    lossless=True
+)
+frames["yellowwhite"].save(
+    "s6_manual.webp",
     lossless=True
 )
 
-frames[3].save( # red
-    "train_detected.webp",
+# stop
+frames["red"].save(
+    "s1_automatic.webp",
+    lossless=True
+)
+frames["redwhite"].save(
+    "s1_manual.webp",
     lossless=True
 )
 
-frames[3].save( # red
-    "train_crossing.webp",
+#stop, train crossing
+frames["yellowredyellow"].save(
+    "s1c_automatic.webp",
     save_all=True,
-    append_images=[frames[4]], # red-white
+    append_images=[frames["red"]],
+    duration=500,
+    loop=0,
+    lossless=True
+)
+frames["yellowredyellowwhite"].save(
+    "s1c_manual.webp",
+    save_all=True,
+    append_images=[frames["redwhite"]],
     duration=500,
     loop=0,
     lossless=True
 )
 
-# distant
-frames[6].save( # distant_green
-    "main_green.webp",
+# =============================================
+# Distant signals
+# =============================================
+
+# distant clear
+frames["distant_green"].save(
+    "ds1_automatic.webp",
     lossless=True
 )
 
-frames[6].save( # distant_green
-    "main_yellow.webp",
+# distant caution
+frames["distant_green"].save(
+    "ds2_automatic.webp",
     save_all=True,
-    append_images=[frames[8]], # distant_off
+    append_images=[frames["distant_off"]],
     duration=500,
     loop=0,
     lossless=True
 )
 
-frames[7].save( # distant_yellow
-    "main_slow.webp",
+# distant is slow clear, slow expect caution, or caution
+frames["distant_yellow"].save(
+    "ds3_automatic.webp",
     save_all=True,
-    append_images=[frames[8]], # distant_off
+    append_images=[frames["distant_off"]],
     duration=500,
     loop=0,
     lossless=True
 )
 
-frames[7].save( # distant_yellow
-    "main_red.webp",
+# distant is stop
+frames["distant_yellow"].save(
+    "ds4_automatic.webp",
     lossless=True
 )
 
-# yard
-frames[4].save( # red-white
-    "yard_train_detected.webp",
-    lossless=True
-)
+# =============================================
+# off/all signals
+# =============================================
 
-# off
-frames[2].save( # off
+# main off
+frames["off"].save(
     "off.webp",
+    lossless=True
+)
+
+# main all, used for debugging and errors
+frames["all"].save(
+    "all.webp",
+    save_all=True,
+    append_images=[frames["off"]],
+    duration=500,
+    loop=0,
+    lossless=True
+)
+
+# distant off
+frames["distant_off"].save(
+    "distant_off.webp",
+    lossless=True
+)
+
+# distant all, used for debugging and errors
+frames["distant_all"].save(
+    "distant_all.webp",
+    save_all=True,
+    append_images=[frames["distant_off"]],
+    duration=500,
+    loop=0,
     lossless=True
 )

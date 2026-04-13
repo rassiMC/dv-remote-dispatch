@@ -436,6 +436,99 @@ const tracksReady = fetch(new URL('/track', location))
 
 let junctions = [];
 var junctionDisplayNames = new Map();
+
+const junctionsReady = tracksReady
+	.then(_ => fetch(new URL('/junction', location)))
+	.then(resp => resp.json())
+	.then(allJunctionData =>
+		junctions = allJunctionData.map((data, index) => ({
+			marker: createJunctionMarker(data.position, index, data.id), // id here is the "real" ID of the Junction, the index is just how the frontend handles them internally
+			branches: data.branches,
+		}))
+	);
+
+function toggleJunction(junctionId) {
+	fetch(new URL(`/junction/${junctionId}/toggle`, location), { method: 'POST' })
+		.then(resp => resp.json())
+		.then(selectedBranch => updateJunctionOverlay(junctionId, selectedBranch))
+		.catch(err => { });
+}
+
+const junctionCanvasSize = 60;
+
+function createJunctionShape(selectedBranch) {
+	let branchLine = (selectedBranch) => {
+		switch (selectedBranch) {
+			case 0: return `<line clip-path="url(#box)" x1="${junctionCanvasSize / 2}" y1="${junctionCanvasSize}" x2="${-junctionCanvasSize / 2}" y2="${-junctionCanvasSize}" stroke="white" stroke-width="10"/>`
+			case 1: return `<line clip-path="url(#box)" x1="${-junctionCanvasSize / 2}" y1="${junctionCanvasSize}" x2="${junctionCanvasSize / 2}" y2="${-junctionCanvasSize}" stroke="white" stroke-width="10"/>`
+		}
+		return ''
+	}
+	return `<g opacity="70%">
+		<clipPath id="box"><rect x="${-junctionCanvasSize / 2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize * 2}"/></clipPath>
+		<rect x="${-junctionCanvasSize / 2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize * 2}" fill="red"/>` +
+		branchLine(selectedBranch) +
+		`<rect x="${-junctionCanvasSize / 2}" y="${-junctionCanvasSize}" width="${junctionCanvasSize}" height="${junctionCanvasSize * 2}" fill="none" stroke="black" stroke-width="2%"/></g>`;
+}
+
+function createJunctionLabel(junctionId) {
+	let displayName = junctionDisplayNames.get(junctionId) || junctionId;
+	return `<rect x="${-junctionCanvasSize / 2}" y="${junctionCanvasSize - 10}" width="${junctionCanvasSize}" height="10" fill="black" opacity="60%"/>
+			<text x="${-junctionCanvasSize / 2 + 2}" y="${junctionCanvasSize - 2}" font-size="8" fill="white" font-family="sans-serif">${displayName}</text>`;
+}
+
+function createJunctionOverlay(junctionId) {
+	const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	svg.setAttribute('id', `J-${junctionId}`)
+	svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+	svg.setAttribute('viewBox', `${-junctionCanvasSize / 2} ${-junctionCanvasSize} ${junctionCanvasSize} ${junctionCanvasSize * 2}`);
+	svg.innerHTML = createJunctionShape(null) + createJunctionLabel(junctionId);
+	return svg;
+}
+
+function updateJunctionOverlay(junctionId, selectedBranch) {
+	const junction = junctions[junctionId]
+	junction.marker.getElement().innerHTML = createJunctionShape(selectedBranch) + createJunctionLabel(junctionId);
+	const selectedTrackId = junction.branches[selectedBranch]
+	trackPolyLines.get(selectedTrackId).setStyle({ color: 'steelblue', dashArray: null });
+	const unselectedTrackPolyLine = trackPolyLines.get(junction.branches[1 - selectedBranch]);
+	unselectedTrackPolyLine
+		.setStyle({ color: 'lightsteelblue', dashArray: "6 12" })
+		.bringToBack();
+}
+
+function getJunctionOverlayBounds(position) {
+	const size = metersToDegrees * 5;
+	return [
+		[
+			position[0] - size,
+			position[1] - size / 2
+		],
+		[
+			position[0] + size,
+			position[1] + size / 2
+		]
+	];
+}
+
+function createJunctionMarker(p, junctionId, displayName) {
+	junctionDisplayNames.set(junctionId, displayName);
+	return L.svgOverlay(
+		createJunctionOverlay(junctionId, junctionId),
+		getJunctionOverlayBounds(p),
+		{ interactive: true, renderer: canvasRenderer })
+		.addEventListener('click', () => toggleJunction(junctionId))
+		.addTo(map)
+		.setZIndex(Math.floor(p[0] * 100000 + p[1] * 100000));
+}
+
+function updateAllJunctions(states) {
+	states.forEach((state, index) => updateJunctionOverlay(index, state))
+}
+
+/////////////////////
+// signals
+
 const signalMarkers = new Map();
 const signalIconSize = [8, 32];
 const signalIconAnchor = [12, 12];
@@ -443,34 +536,29 @@ const signalIconAnchor = [12, 12];
 // Cache L.Icon instances per aspect to avoid recreating them on every update
 const signalIconCache = new Map();
 
-function getSignalIconUrl(aspect, type) {
+function getSignalIconUrl(aspect, mode) {
 	if (loggingEnabled)
-		console.log(`Getting signal icon for aspect ${aspect} and type ${type}`);
+		console.log(`Getting signal icon for aspect ${aspect} and mode ${mode}`);
 	if (!aspect || aspect === 'OFF')
 		return 'res/signals.off.webp';
 
-	const upperAspect = aspect.toUpperCase();
-	const upperType = type.toUpperCase();
+	const lowerAspect = aspect.toLowerCase();
 
 	// Match all known aspects by lowercasing the input
 	const supportedAspects = [
-		'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7',
-		'DS1', 'DS2', 'DS3', 'DS4'
-	].map(x => x.toUpperCase());
+		's1', 's2', 's4', 's6',
+		'ds1', 'ds2', 'ds3', 'ds4'
+	].map(x => x.toLowerCase());
 
-	if (supportedAspects.includes(upperAspect)) {
-		return `res/signals.${aspect.toLowerCase()}.webp`;
+	if (supportedAspects.includes(lowerAspect)) {
+		return `res/signals.${lowerAspect}_${mode.toLowerCase()}.webp`;
 	}
 
-	// Check for type-specific aspects
-	if (upperType.includes('YARD') && upperAspect === 'TRAIN_DETECTED')
-		return 'res/signals.yard_train_detected.webp';
-
-	return 'res/signals.off.webp';
+	return 'res/signals.all.webp';
 }
 
-function getSignalIcon(aspect, type) {
-	const url = getSignalIconUrl(aspect, type);
+function getSignalIcon(aspect, mode) {
+	const url = getSignalIconUrl(aspect, mode);
 	if (!signalIconCache.has(url)) {
 		signalIconCache.set(url, L.icon({
 			iconUrl: url,
@@ -487,7 +575,7 @@ function createSignalMarker(signalId, signalData) {
 	const position = signalData.Position;
 
 	const marker = L.marker(position, {
-		icon: getSignalIcon(aspect, signalData.Type),
+		icon: getSignalIcon(aspect, mode),
 		interactive: true,
 		title: signalId,
 		zIndexOffset: Math.floor(position[0] * 100000 + position[1] * 100000),
@@ -584,7 +672,7 @@ function postSignalControl(signalId, params) {
 function updateAllSignals(signalsData) {
 	Object.entries(signalsData).forEach(([signalId, signalData]) => {
 		if (loggingEnabled)
-			console.log(`Updating signal ${signalId} with aspect ${signalData.CurrentAspectId} and type ${signalData.Type}`);
+			console.log(`Updating signal ${signalId} with aspect ${signalData.CurrentAspectId} and mode ${signalData.Mode}`);
 		const existing = signalMarkers.get(signalId);
 		if (!existing)
 			return;
@@ -594,7 +682,7 @@ function updateAllSignals(signalsData) {
 
 		let changed = false;
 		if (existing.aspect !== aspect) {
-			existing.marker.setIcon(getSignalIcon(aspect, existing.type));
+			existing.marker.setIcon(getSignalIcon(aspect, existing.mode));
 			existing.aspect = aspect;
 			changed = true;
 		}

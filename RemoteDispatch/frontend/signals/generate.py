@@ -7,9 +7,11 @@ frames = {
     "distant_off": Image.open("source-distant_off.png"),
     "distant_yellow": Image.open("source-distant_yellow.png"),
     "green": Image.open("source-green.png"),
+    "greenlyellow": Image.open("source-green-lyellow.png"),
+    "greenlyellowwhite": Image.open("source-green-lyellow-white.png"),
     "greenwhite": Image.open("source-green-white.png"),
-    "greenyellow": Image.open("source-green-yellow.png"),
-    "greenyellowwhite": Image.open("source-green-yellow-white.png"),
+    "lyellow": Image.open("source-lyellow.png"),
+    "lyellowwhite": Image.open("source-lyellow-white.png"),
     "off": Image.open("source-off.png"),
     "red": Image.open("source-red.png"),
     "redwhite": Image.open("source-red-white.png"),
@@ -34,18 +36,18 @@ frames["greenwhite"].save(
 )
 
 # expect caution
-frames["greenyellow"].save(
+frames["greenlyellow"].save(
     "s4_automatic.webp",
     save_all=True,
-    append_images=[frames["yellow"]],
+    append_images=[frames["lyellow"]],
     duration=500,
     loop=0,
     lossless=True
 )
-frames["greenyellowwhite"].save(
+frames["greenlyellowwhite"].save(
     "s4_manual.webp",
     save_all=True,
-    append_images=[frames["yellowwhite"]],
+    append_images=[frames["lyellowwhite"]],
     duration=500,
     loop=0,
     lossless=True

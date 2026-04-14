@@ -139,6 +139,12 @@ namespace DvMod.RemoteDispatch
 				string signalsJson = Main.settings.featureFlags.enableSignals ? JsonConvert.SerializeObject(SignalsShim.GetAllSignalsData()) : JsonConvert.SerializeObject(new JObject());
 				Render200(context, ContentTypes.Json, signalsJson);
 				break;
+			case "signal":
+#if DEBUG
+				Main.Log("/signal endpoint hit");
+#endif
+				await HandleSignalRequest(context);
+				break;
 			default:
 #if DEBUG
 				Main.Log("unknown endpoint hit");
@@ -189,6 +195,55 @@ namespace DvMod.RemoteDispatch
 				RenderEmpty(context, success ? 204 : 400);
 			}
 			RenderEmpty(context, 404);
+		}
+
+		private static async Task HandleSignalRequest(HttpListenerContext context)
+		{
+			var url = context.Request.Url;
+			var segments = url.Segments;
+
+			if (segments.Length < 3 || !segments[2].TrimEnd('/').Equals("control", StringComparison.OrdinalIgnoreCase))
+			{
+				Main.Warning($"Invalid signal control request URL: {url}");
+				RenderEmpty(context, 404);
+				return;
+			}
+
+			if (!Main.settings.permissions.HasSignalControlPermission(context.User.Identity.Name))
+			{
+				RenderEmpty(context, 403);
+				return;
+			}
+
+			var signalIdString = segments[1];
+
+			string? signalId = signalIdString.TrimEnd('/');
+			if (string.IsNullOrEmpty(signalId))
+			{
+				Main.Warning($"No signal ID provided in URL: {url}");
+				RenderEmpty(context, 404);
+				return;
+			}
+
+			var success = false;
+			if (context.Request.QueryString != null)
+			{
+				foreach (var key in context.Request.QueryString.AllKeys)
+				{
+					if (key.Equals("mode", StringComparison.OrdinalIgnoreCase))
+					{
+						string? modeParam = context.Request.QueryString.Get(key);
+						success &= SignalsShim.SetSignalMode(signalId!, modeParam!);
+					}
+					else if (key.Equals("aspect", StringComparison.OrdinalIgnoreCase))
+					{
+						string? aspectParam = context.Request.QueryString.Get(key);
+						success &= SignalsShim.SetSignalAspect(signalId!, aspectParam!);
+					}
+				}
+			}
+
+			RenderEmpty(context, success ? 204 : 400);
 		}
 
 		private static async Task HandleUpdatesRequest(HttpListenerContext context)

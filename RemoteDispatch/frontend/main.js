@@ -623,7 +623,7 @@ function buildSignalPopup(signalId) {
 		<div id="sig-status-${signalId}" style="margin-top:6px;font-size:0.85em;color:gray"></div>
 	`;
 
-	container.querySelector(`#sig-manual-${signalId}`)
+	container.querySelector(`[id="sig-manual-${signalId}"]`)
 		.addEventListener('change', e => {
 			const newMode = e.target.checked ? 'Manual' : 'Automatic';
 			postSignalControl(signalId, { mode: newMode })
@@ -642,7 +642,7 @@ function buildSignalPopup(signalId) {
 
 	container.querySelector(`#sig-apply-${signalId}`)
 		.addEventListener('click', () => {
-			const aspect = container.querySelector(`#sig-aspect-select-${signalId}`).value;
+			const aspect = 	container.querySelector(`[id="sig-aspect-select-${signalId}"]`).value;
 			postSignalControl(signalId, { aspect })
 				.then(ok => {
 					setSignalStatus(signalId, container,
@@ -653,13 +653,13 @@ function buildSignalPopup(signalId) {
 	return container;
 }
 
-function setSignalStatus(signalId, container, msg, isError = false) {
-	const el = container.querySelector(`#sig-status-${signalId}`);
-	if (el) {
-		el.textContent = msg;
-		el.style.color = isError ? '#c44' : 'gray';
+	function setSignalStatus(signalId, container, msg, isError = false) {
+		const el = container.querySelector(`[id="sig-status-${signalId}"]`);
+		if (el) {
+			el.textContent = msg;
+			el.style.color = isError ? '#c44' : 'gray';
+		}
 	}
-}
 
 function postSignalControl(signalId, params) {
 	const qs = new URLSearchParams(params).toString();

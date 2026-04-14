@@ -14,6 +14,9 @@ namespace DvMod.RemoteDispatch
         private static MethodInfo? _getAllSignalsMethod;
         private static MethodInfo? _getSignalAspectMethod;
         private static MethodInfo? _setSignalAspectMethod;
+        // SignalMode is a .NET enum (Manual/Automatic), need it for API invocation
+        // Cache reflection info to avoid recompiling every call
+        private static MethodInfo? _setSignalModeMethod;
 
         internal static bool IsInitialized { get; private set; }
 
@@ -74,10 +77,17 @@ namespace DvMod.RemoteDispatch
                 }
 
                 var initMethod = bootstrap.GetMethod("Initialize", BindingFlags.Public | BindingFlags.Static);
+                // Load reflection-wrapped methods from the Bootstrap class in RemoteDispatch.Signals
+                // This preserves the dependency chain: SignalsAPI → RemoteDispatch.Signals → RemoteDispatch.Shims
                 _teardownMethod = bootstrap.GetMethod("Teardown", BindingFlags.Public | BindingFlags.Static);
                 _getAllSignalsMethod = bootstrap.GetMethod("GetAllSignals", BindingFlags.Public | BindingFlags.Static);
                 _getSignalAspectMethod = bootstrap.GetMethod("GetSignalAspect", BindingFlags.Public | BindingFlags.Static);
                 _setSignalAspectMethod = bootstrap.GetMethod("SetSignalAspect", BindingFlags.Public | BindingFlags.Static);
+                
+                // Retrieve SetSignalMode method from Bootstrap (in RemoteDispatch.Signals DLL)
+                // This maintains the same dependency chain as SetSignalAspect:
+                // Signals.API → RemoteDispatch.Signals (bridge logic) → RemoteDispatch.Shims (reflection wrapper)
+                _setSignalModeMethod = bootstrap.GetMethod("SetSignalMode", BindingFlags.Public | BindingFlags.Static);
 
                 initMethod?.Invoke(null, new object[]
                 {
@@ -157,6 +167,12 @@ namespace DvMod.RemoteDispatch
 
         internal static bool SetSignalAspect(string signalId, string aspect) =>
             _setSignalAspectMethod?.Invoke(null, new object[] { signalId, aspect }) is true;
+
+        // Wrapper to expose Signals.API's SetSignalMode through reflection.
+        // Accepts string mode (e.g. "Manual" or "Automatic"), forwards to RemoteDispatch.Signals.SignalsBridge.SetSignalMode().
+        // Returns true on success, false on failure or 404 from API side.
+        internal static bool SetSignalMode(string signalId, string mode) =>
+            _setSignalModeMethod?.Invoke(null, new object[] { signalId, mode }) is true;
 
     }
 }

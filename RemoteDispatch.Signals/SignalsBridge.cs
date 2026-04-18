@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Signals.API;
 using Newtonsoft.Json;
@@ -58,7 +58,7 @@ namespace DvMod.RemoteDispatch.Signals
 		{
 			SignalsAPI.Instance!.SignalAspectChanged += OnAspectChanged;
 			SignalsAPI.Instance!.SignalModeChanged += OnModeChanged;
-			LoggingReturn.DebugLog("Signals API loaded, ready to interact with signals.");
+			LoggingReturn.DebugLog?.Invoke("Signals API loaded, ready to interact with signals.");
 		}
 
 		/// <summary>
@@ -66,7 +66,7 @@ namespace DvMod.RemoteDispatch.Signals
 		/// </summary>
 		private void OnSignalsUnloaded()
 		{
-			LoggingReturn.DebugLog("Signals API unloaded, cleaned up handlers.");
+			LoggingReturn.DebugLog?.Invoke("Signals API unloaded, cleaned up handlers.");
 		}
 
 		/// <summary>
@@ -76,7 +76,7 @@ namespace DvMod.RemoteDispatch.Signals
 		/// aspects.</param>
 		private void OnAspectChanged(SignalState state)
 		{
-			LoggingReturn.DebugLog($"Aspect changed: {state.Id} -> {state.CurrentAspectId}");
+			LoggingReturn.DebugLog?.Invoke($"Aspect changed: {state.Id} -> {state.CurrentAspectId ?? "OFF"}");
 			_onAspectChanged?.Invoke(state.Id, state.CurrentAspectId ?? "OFF");
 		}
 
@@ -87,7 +87,7 @@ namespace DvMod.RemoteDispatch.Signals
 		/// <param name="newMode"></param>
 		private void OnModeChanged(string signalId, SignalMode newMode)
 		{
-			LoggingReturn.DebugLog($"Mode changed: {signalId} -> {newMode}");
+			LoggingReturn.DebugLog?.Invoke($"Mode changed: {signalId} -> {newMode}");
 			_onModeChanged?.Invoke(signalId, newMode.ToString());
 		}
 
@@ -102,7 +102,7 @@ namespace DvMod.RemoteDispatch.Signals
 			}
 			catch (Exception ex)
 			{
-				LoggingReturn.Warning($"GetSignalAspect({signalId}) failed: {ex.Message}");
+				LoggingReturn.Warning?.Invoke($"GetSignalAspect({signalId}) failed: {ex.Message}");
 				return null;
 			}
 		}
@@ -118,14 +118,14 @@ namespace DvMod.RemoteDispatch.Signals
 				var signals = SignalsAPI.GetAllSignals();
 				if (signals == null)
 				{
-					LoggingReturn.DebugLog("GetAllSignals returned null.");
+					LoggingReturn.DebugLog?.Invoke("GetAllSignals returned null.");
 					return result;
 				}
 
 				foreach (var signal in signals)
 				{
 					var aspect = signal.CurrentAspectId ?? "OFF";
-					LoggingReturn.DebugLog($"Found signal: {signal.Id} at {signal.Position} with aspect {aspect} and mode {signal.Mode}");
+					LoggingReturn.DebugLog?.Invoke($"Found signal: {signal.Id} at {signal.Position} with aspect {aspect} and mode {signal.Mode}");
 
 					result[signal.Id] = new
 					{
@@ -146,8 +146,10 @@ namespace DvMod.RemoteDispatch.Signals
 			}
 			catch (Exception ex)
 			{
-				LoggingReturn.Warning($"[RemoteDispatch.Signals] GetAllSignals failed: {ex.Message}");
+				LoggingReturn.Warning?.Invoke($"[RemoteDispatch.Signals] GetAllSignals failed: {ex.Message}");
+				return result;
 			}
+
 			return result;
 		}
 
@@ -162,7 +164,7 @@ namespace DvMod.RemoteDispatch.Signals
 			}
 			catch (Exception ex)
 			{
-				LoggingReturn.Warning($"[RemoteDispatch.Signals] SetSignalAspect({signalId}, {aspect}) failed: {ex.Message}");
+				LoggingReturn.Warning?.Invoke($"[RemoteDispatch.Signals] SetSignalAspect({signalId}, {aspect}) failed: {ex.Message}");
 				return false;
 			}
 		}
@@ -182,7 +184,7 @@ namespace DvMod.RemoteDispatch.Signals
 			}
 			catch (Exception ex)
 			{
-				LoggingReturn.Warning($"[RemoteDispatch.Signals] SetSignalMode({signalId}, {mode}) failed: {ex.Message}");
+				LoggingReturn.Warning?.Invoke($"[RemoteDispatch.Signals] SetSignalMode({signalId}, {mode}) failed: {ex.Message}");
 				return false;
 			}
 		}

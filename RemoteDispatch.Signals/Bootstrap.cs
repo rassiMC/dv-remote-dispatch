@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 
@@ -28,28 +28,29 @@ namespace DvMod.RemoteDispatch.Signals
             {
                 _bridge = new SignalsBridge();
                 _bridge.Register();
-                LoggingReturn.Log("Signals bridge initialized.");
+                LoggingReturn.Log?.Invoke("Signals bridge initialized.");
             }
             catch (Exception ex)
             {
-                LoggingReturn.Warning($"Signals Initialize failed: {ex.Message}\n{ex.StackTrace}");
+                LoggingReturn.Warning?.Invoke($"Signals Initialize failed: {ex.Message}\n{ex.StackTrace}");
             }
         }
 
         ///<summary>
         ///Clean up the bridge and handlers. This should be called by the main mod during its shutdown.
-        ///</summary>
+        ///
+		///</summary>
         public static void Teardown()
         {
             try
             {
                 _bridge?.Unregister();
                 _bridge = null;
-                LoggingReturn.Log("Signals bridge torn down.");
+                LoggingReturn.Log?.Invoke("Signals bridge torn down.");
             }
             catch (Exception ex)
             {
-                LoggingReturn.Warning($"Teardown failed: {ex.Message}\n{ex.StackTrace}");
+                LoggingReturn.Warning?.Invoke($"Teardown failed: {ex.Message}\n{ex.StackTrace}");
             }
         }
     }

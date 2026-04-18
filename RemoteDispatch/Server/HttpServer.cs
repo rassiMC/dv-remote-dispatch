@@ -202,9 +202,14 @@ namespace DvMod.RemoteDispatch
 			var url = context.Request.Url;
 			var segments = url.Segments;
 
-			if (segments.Length < 3 || !segments[2].TrimEnd('/').Equals("control", StringComparison.OrdinalIgnoreCase))
+			if (segments.Length < 4 || !segments[3].TrimEnd('/').Equals("control", StringComparison.OrdinalIgnoreCase))
 			{
 				Main.Warning($"Invalid signal control request URL: {url}");
+				Main.DebugLog($"Number of URL segments: {segments.Length}");
+				Main.DebugLog($"First URL segment (should be host): {(segments.Length >= 1 ? segments[0] : "N/A")}");
+				Main.DebugLog($"Second URL segment (should be 'signal'): {(segments.Length >= 2 ? segments[1] : "N/A")}");
+				Main.DebugLog($"Third URL segment (should be signal ID): {(segments.Length >= 3 ? segments[2] : "N/A")}");
+				Main.DebugLog($"Fourth URL segment (should be 'control'): {(segments.Length >= 4 ? segments[3] : "N/A")}");
 				RenderEmpty(context, 404);
 				return;
 			}
@@ -215,7 +220,7 @@ namespace DvMod.RemoteDispatch
 				return;
 			}
 
-			var signalIdString = segments[1];
+			var signalIdString = segments[2];
 
 			string? signalId = signalIdString.TrimEnd('/');
 			if (string.IsNullOrEmpty(signalId))

@@ -448,10 +448,17 @@ const junctionsReady = tracksReady
 	);
 
 function toggleJunction(junctionId) {
-	fetch(new URL(`/junction/${junctionId}/toggle`, location), { method: 'POST' })
-		.then(resp => resp.json())
-		.then(selectedBranch => updateJunctionOverlay(junctionId, selectedBranch))
-		.catch(err => { });
+  return fetch(new URL(`/junction/${junctionId}/toggle`, location), { method: 'POST' })
+    .then(r => {
+      if (r.status === 403) console.warn('No permission to toggle junction #' + junctionId);
+      else if (r.status === 404) console.warn('Junction not found: #' + junctionId);
+      
+      return r.json();
+    })
+    .catch(err => {
+      console.error(`Failed to toggle junction #${junctionId}:`, err);
+      throw err;
+    });
 }
 
 const junctionCanvasSize = 60;
@@ -536,6 +543,15 @@ const signalIconAnchor = [12, 12];
 // Cache L.Icon instances per aspect to avoid recreating them on every update
 const signalIconCache = new Map();
 
+function makeSafeSignalId(id) {
+	if (!id) return '';
+	// Replace characters that have special meaning in CSS:
+	// . (class), : (pseudo-class/attribute), [ (attribute selector),
+	// # (ID), $ (data attribute), { } (content), ( ) (expression),
+	// * (universal), + (adjacent sibling), > (child), space (descendant), % (percent)
+	return id.replace(/[\.\:\[\]\#\$%\{\}\(\)\*\+\>\s]+/g, '_');
+}
+
 function getSignalIconUrl(aspect, mode) {
 	if (loggingEnabled)
 		console.log(`Getting signal icon for aspect ${aspect} and mode ${mode}`);
@@ -583,12 +599,13 @@ function createSignalMarker(signalId, signalData) {
 	.bindPopup(() => buildSignalPopup(signalId), { maxWidth: 260 })
 	.addTo(map);
 
-	signalMarkers.set(signalId, { marker, aspect, mode, type: signalData.Type });
+	signalMarkers.set(signalId, { marker, aspect, mode });
 }
 
+// Supported aspects match icon set. 
 const SIGNAL_ASPECTS = [
-	'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7',
-	'DS1', 'DS2', 'DS3', 'DS4', 'S1c'
+    'S1', 'S2', 'S4', 'S6',
+    'DS1', 'DS2', 'DS3', 'DS4'
 ];
 
 function buildSignalPopup(signalId) {
@@ -601,37 +618,39 @@ function buildSignalPopup(signalId) {
 	container.style.cssText = 'min-width:200px;font-family:sans-serif';
 	container.innerHTML = `
 		<strong style="font-size:1.1em">${signalId}</strong>
-		<div style="margin:6px 0">
-			Mode: <strong id="sig-mode-label-${signalId}">${state.mode}</strong>
-		</div>
-		<label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer">
-			<input type="checkbox" id="sig-manual-${signalId}" ${isManual ? 'checked' : ''}>
-			Manual control
-		</label>
-		<div id="sig-aspect-row-${signalId}" style="display:${isManual ? 'block' : 'none'}">
-			<div style="margin-bottom:4px">Set aspect:</div>
-			<select id="sig-aspect-select-${signalId}" style="width:100%;margin-bottom:8px;max-height:120px;overflow-y:auto">
-				${SIGNAL_ASPECTS.map(a =>
-					`<option value="${a}" ${a === state.aspect ? 'selected' : ''}>${a}</option>`
-				).join('')}
-			</select>
-			<button id="sig-apply-${signalId}"
-				style="width:100%;padding:4px;background:#2a6;color:#fff;border:none;border-radius:3px;cursor:pointer">
-				Apply aspect
-			</button>
-		</div>
-		<div id="sig-status-${signalId}" style="margin-top:6px;font-size:0.85em;color:gray"></div>
-	`;
+			<div style="margin:6px 0">
+				Mode: <strong id="sig-mode-label-${makeSafeSignalId(signalId)}">${state.mode}</strong>
+			</div>
+			<label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer">
+				<input type="checkbox" id="sig-manual-${makeSafeSignalId(signalId)}" ${isManual ? 'checked' : ''}>
+				Manual control
+			</label>
+			<div id="sig-aspect-row-${makeSafeSignalId(signalId)}" style="display:${isManual ? 'block' : 'none'}">
+				<div style="margin-bottom:4px">Set aspect:</div>
+				<select id="sig-aspect-select-${makeSafeSignalId(signalId)}" style="width:100%;margin-bottom:8px;max-height:120px;overflow-y:auto">
+					${SIGNAL_ASPECTS.map(a =>
+						`<option value="${a}" ${a === state.aspect ? 'selected' : ''}>${a}</option>`
+					).join('')}
+				</select>
+				<button id="sig-apply-${makeSafeSignalId(signalId)}"
+					style="width:100%;padding:4px;background:#2a6;color:#fff;border:none;border-radius:3px;cursor:pointer">
+					Apply aspect
+				</button>
+			</div>
+			<div id="sig-status-${makeSafeSignalId(signalId)}" style="margin-top:6px;font-size:0.85em;color:gray"></div>
+		`;
 
-	container.querySelector(`[id="sig-manual-${signalId}"]`)
-		.addEventListener('change', e => {
+	const manualCheckbox = container.querySelector(`#sig-manual-${makeSafeSignalId(signalId)}`);
+	if (manualCheckbox) {
+		manualCheckbox.addEventListener('change', e => {
 			const newMode = e.target.checked ? 'Manual' : 'Automatic';
 			postSignalControl(signalId, { mode: newMode })
 				.then(ok => {
 					if (ok) {
-						container.querySelector(`#sig-mode-label-${signalId}`).textContent = newMode;
-						container.querySelector(`#sig-aspect-row-${signalId}`)
-							.style.display = e.target.checked ? 'block' : 'none';
+						const modeLabel = container.querySelector(`#sig-mode-label-${makeSafeSignalId(signalId)}`);
+						if (modeLabel) modeLabel.textContent = newMode;
+						const aspectRow = container.querySelector(`#sig-aspect-row-${makeSafeSignalId(signalId)}`);
+						if (aspectRow) aspectRow.style.display = e.target.checked ? 'block' : 'none';
 						setSignalStatus(signalId, container, `Mode set to ${newMode}.`);
 					} else {
 						setSignalStatus(signalId, container, 'Failed to set mode.', true);
@@ -639,34 +658,54 @@ function buildSignalPopup(signalId) {
 					}
 				});
 		});
+	}
 
-	container.querySelector(`#sig-apply-${signalId}`)
-		.addEventListener('click', () => {
-			const aspect = 	container.querySelector(`[id="sig-aspect-select-${signalId}"]`).value;
+	const applyButton = container.querySelector(`#sig-apply-${makeSafeSignalId(signalId)}`);
+	if (applyButton) {
+		applyButton.addEventListener('click', () => {
+			const aspectSelect = container.querySelector(`#sig-aspect-select-${makeSafeSignalId(signalId)}`);
+			if (!aspectSelect) return;
+			const aspect = aspectSelect.value;
 			postSignalControl(signalId, { aspect })
 				.then(ok => {
 					setSignalStatus(signalId, container,
 						ok ? `Aspect set to ${aspect}.` : 'Failed to set aspect.', !ok);
 				});
 		});
+	}
 
 	return container;
 }
 
-	function setSignalStatus(signalId, container, msg, isError = false) {
-		const el = container.querySelector(`[id="sig-status-${signalId}"]`);
-		if (el) {
-			el.textContent = msg;
-			el.style.color = isError ? '#c44' : 'gray';
-		}
+function setSignalStatus(signalId, container, msg, isError = false) {
+		const statusEl = container.querySelector(`#sig-status-${makeSafeSignalId(signalId)}`);
+	if (statusEl) {
+		statusEl.textContent = msg;
+		statusEl.style.color = isError ? '#c44' : 'gray';
 	}
+}
 
 function postSignalControl(signalId, params) {
-	const qs = new URLSearchParams(params).toString();
-	return fetch(new URL(`/signal/${encodeURIComponent(signalId)}/control?${qs}`, location),
-		{ method: 'POST' })
-		.then(r => r.ok || r.status === 204)
-		.catch(() => false);
+  return fetch(new URL(`/signal/${encodeURIComponent(signalId)}/control`, location), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  })
+  .then(r => {
+    if (r.ok || r.status === 204) return true;
+    
+    if (r.status === 403) console.warn('No permission to control signal #' + signalId);
+    else if (r.status === 404) console.warn('Signal not found: #' + signalId);
+    else if (r.status === 400) console.warn('Bad request when controlling signal ' + signalId);
+    else if (r.status === 401) console.warn('Unauthorized to control signal ' + signalId);
+    else if (r.status >= 500) console.warn('Server error (' + r.status + ') when controlling signal ' + signalId);
+    
+    return false;
+  })
+    .catch(err => {
+        console.error(`Failed to control signal #${signalId}:`, err);
+        return false;
+    });
 }
 
 function updateAllSignals(signalsData) {
@@ -693,10 +732,10 @@ function updateAllSignals(signalsData) {
 
 		// If the popup is currently open, patch the DOM directly so it stays live
 		if (changed && existing.marker.isPopupOpen()) {
-			const modeLabel = document.getElementById(`sig-mode-label-${signalId}`);
-			const manualCb  = document.getElementById(`sig-manual-${signalId}`);
-			const aspectSel = document.getElementById(`sig-aspect-select-${signalId}`);
-			const aspectRow = document.getElementById(`sig-aspect-row-${signalId}`);
+			const modeLabel = document.getElementById(`sig-mode-label-${makeSafeSignalId(signalId)}`);
+			const manualCb  = document.getElementById(`sig-manual-${makeSafeSignalId(signalId)}`);
+			const aspectSel = document.getElementById(`sig-aspect-select-${makeSafeSignalId(signalId)}`);
+			const aspectRow = document.getElementById(`sig-aspect-row-${makeSafeSignalId(signalId)}`);
 
 			if (modeLabel)  modeLabel.textContent  = mode;
 			if (manualCb)   manualCb.checked       = mode === 'Manual';
@@ -1372,9 +1411,16 @@ function updateLoop() {
 
 const signalsReady = junctionsReady
 	.then(_ => fetch(new URL('/signals', location)))
-	.then(resp => resp.json())
+	.then(resp => {
+		if (!resp.ok) throw new Error(`Signals endpoint failed: HTTP ${resp.status} ${resp.statusText}`);
+		return resp.json();
+	})
+	.catch(err => {
+		console.error('Failed to load signal data:', err);
+		return null;
+	})
 	.then(allSignalsData =>
-		Object.entries(allSignalsData).forEach(([signalId, signalData]) =>
+		allSignalsData === null ? [] : Object.entries(allSignalsData).forEach(([signalId, signalData]) =>
 			createSignalMarker(signalId, signalData))
 	);
 

@@ -230,22 +230,67 @@ namespace DvMod.RemoteDispatch
 				return;
 			}
 
-			var success = false;
-			if (context.Request.QueryString != null)
+			bool success = true;
+			bool bodyRead = false;
+			string? mode = null;
+			string? aspect = null;
+
+			try
 			{
-				foreach (var key in context.Request.QueryString.AllKeys)
+				const int maxBodySize = 65536;
+				using var stream = context.Request.InputStream;
+				var buffer = new byte[8192];
+				int totalRead = 0;
+
+				while (stream.CanRead)
 				{
-					if (key.Equals("mode", StringComparison.OrdinalIgnoreCase))
+					int 					bytesRead = stream.Read(buffer, 0, buffer.Length);
+					if (bytesRead == 0) break;
+					
+					totalRead += bytesRead;
+					if (totalRead > maxBodySize)
 					{
-						string? modeParam = context.Request.QueryString.Get(key);
-						success &= SignalsShim.SetSignalMode(signalId!, modeParam!);
-					}
-					else if (key.Equals("aspect", StringComparison.OrdinalIgnoreCase))
-					{
-						string? aspectParam = context.Request.QueryString.Get(key);
-						success &= SignalsShim.SetSignalAspect(signalId!, aspectParam!);
+						throw new Exception("Request body too large");
 					}
 				}
+
+				string? bodyText = Encoding.UTF8.GetString(buffer, 0, totalRead);
+
+				if (!string.IsNullOrEmpty(bodyText))
+				{
+					var requestData = JObject.Parse(bodyText);
+					bodyRead = true;
+
+					if (requestData.TryGetValue("mode", out JToken? modeToken))
+					{
+						mode = modeToken.Value<string?>();
+					}
+					else if (requestData.TryGetValue("aspect", out JToken? aspectToken))
+					{
+						aspect = aspectToken.Value<string?>();
+					}
+				}
+
+				if (mode != null)
+				{
+					Main.DebugLog($"Setting signal {signalId} mode to {mode}");
+					success &= SignalsShim.SetSignalMode(signalId!, mode!);
+				}
+				else if (aspect != null)
+				{
+					Main.DebugLog($"Setting signal {signalId} aspect to {aspect}");
+					success &= SignalsShim.SetSignalAspect(signalId!, aspect!);
+				}
+
+				if (!bodyRead)
+				{
+					Main.Warning($"Signal control request lacks 'mode' or 'aspect'): {url}");
+				}
+			}
+			catch (Exception e)
+			{
+				Main.Warning($"Failed to parse signal control request body: {e.Message}");
+				success = false;
 			}
 
 			RenderEmpty(context, success ? 204 : 400);

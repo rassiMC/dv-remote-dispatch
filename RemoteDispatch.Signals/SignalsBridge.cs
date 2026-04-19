@@ -158,6 +158,7 @@ namespace DvMod.RemoteDispatch.Signals
 		/// </summary>
 		internal bool SetSignalAspect(string signalId, string aspect)
 		{
+			LoggingReturn.DebugLog?.Invoke($"[RemoteDispatch.Signals] Attempting to set signal aspect: {signalId} -> {aspect}");
 			try
 			{
 				return SignalsAPI.SetSignalAspect(signalId, aspect);
@@ -176,10 +177,14 @@ namespace DvMod.RemoteDispatch.Signals
 		/// <param name="mode">The mode as a string ("Manual" or "Automatic")</param>
 		internal bool SetSignalMode(string signalId, string mode)
 		{
+			LoggingReturn.DebugLog?.Invoke($"[RemoteDispatch.Signals] Attempting to set signal mode: {signalId} -> {mode}");
 			try
 			{
 				if (!Enum.TryParse<SignalMode>(mode, true, out var parsed))
+				{
+					LoggingReturn.DebugLog?.Invoke($"[RemoteDispatch.Signals] Failed to parse signal mode: {signalId} -> {mode}");
 					return false;
+				}
 				return SignalsAPI.SetSignalMode(signalId, parsed);
 			}
 			catch (Exception ex)

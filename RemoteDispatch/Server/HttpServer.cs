@@ -274,12 +274,32 @@ namespace DvMod.RemoteDispatch
 				if (mode != null)
 				{
 					Main.DebugLog($"Setting signal {signalId} mode to {mode}");
-					success &= SignalsShim.SetSignalMode(signalId!, mode!);
+					bool result = SignalsShim.SetSignalMode(signalId!, mode!);
+
+					if (!result && SignalsShim.IsInitialized == false)
+					{
+						Main.Warning($"[SIGNAL] Integration not initialized - cannot set mode: {mode}/{signalId}");
+						Main.DebugLog("  -> Check that DVSignals mod is enabled in GameMods list");
+					}
+					else if (!result && SignalsShim.IsInitialized == true)
+					{
+						Main.Warning($"[SIGNAL] API call failed: signal={signalId}, mode={mode}");
+						Main.DebugLog("  -> Check Signal exists, spelling correct, aspect not already set");
+					}
+
+					success = result;
 				}
 				else if (aspect != null)
 				{
 					Main.DebugLog($"Setting signal {signalId} aspect to {aspect}");
-					success &= SignalsShim.SetSignalAspect(signalId!, aspect!);
+					bool result2 = SignalsShim.SetSignalAspect(signalId!, aspect!);
+
+					if (!result2)
+					{
+						Main.Warning($"[SIGNAL] API call failed: signal={signalId}, aspect={aspect}");
+					}
+
+					success &= result2;
 				}
 
 				if (!bodyRead)

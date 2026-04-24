@@ -91,3 +91,9 @@ dotnet test RemoteDispatch.Tests/RemoteDispatch.Tests.csproj --filter "Test1"
 - Document public methods with XML comments
 - Use TODO comments for incomplete features
 - Keep inline comments brief and focused
+
+### Syntax Safety Checklist
+- **NEVER** use replaceAll on multi-line spans without precise boundary matching
+- Always verify there are no duplicate code blocks after editing
+- When replacing text, include enough surrounding context to make it unique
+- After any edit, read the affected file to confirm syntax integrity

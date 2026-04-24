@@ -12,6 +12,7 @@ namespace DvMod.RemoteDispatch.Signals
 		public static Dictionary<string, object>? GetAllSignals() => _bridge?.GetAllSignals();
 		public static string? GetSignalAspect(string signalId) => _bridge?.GetSignalAspect(signalId);
 		public static bool SetSignalAspect(string signalId, string aspect) => _bridge?.SetSignalAspect(signalId, aspect) ?? false;
+		public static bool SetSignalMode(string signalId, string mode) => _bridge?.SetSignalMode(signalId, mode) ?? false;
 
 		/// <summary>
 		/// Initialize the bridge and set up logging. This should be called by the main mod during its initialization.
@@ -21,9 +22,7 @@ namespace DvMod.RemoteDispatch.Signals
 		/// <param name="warning"></param>
 		public static void Initialize(Action<string> log, Action<string> debugLog, Action<string> warning)
 		{
-			LoggingReturn.Log = log;
-			LoggingReturn.DebugLog = debugLog;
-			LoggingReturn.Warning = warning;
+			LoggingReturn.Initialize(log, debugLog, warning);
 			try
 			{
 				_bridge = new SignalsBridge();

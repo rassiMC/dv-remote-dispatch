@@ -122,10 +122,11 @@ namespace DvMod.RemoteDispatch.Signals
 					return result;
 				}
 
+				LoggingReturn.DebugLog?.Invoke($"Found {signals.Count} signals.");
 				foreach (var signal in signals)
 				{
 					var aspect = signal.CurrentAspectId ?? "OFF";
-					LoggingReturn.DebugLog?.Invoke($"Found signal: {signal.Id} at {signal.Position} with aspect {aspect} and mode {signal.Mode}");
+					//LoggingReturn.DebugLog?.Invoke($"Found signal: {signal.Id} at {signal.Position} with aspect {aspect} and mode {signal.Mode}");
 
 					result[signal.Id] = new
 					{
@@ -146,7 +147,7 @@ namespace DvMod.RemoteDispatch.Signals
 			}
 			catch (Exception ex)
 			{
-				LoggingReturn.Warning?.Invoke($"[RemoteDispatch.Signals] GetAllSignals failed: {ex.Message}");
+				LoggingReturn.Warning?.Invoke($"GetAllSignals failed: {ex.Message}");
 				return result;
 			}
 
@@ -158,7 +159,7 @@ namespace DvMod.RemoteDispatch.Signals
 		/// </summary>
 		internal bool SetSignalAspect(string signalId, string aspect)
 		{
-			LoggingReturn.DebugLog?.Invoke($"[RemoteDispatch.Signals] Attempting to set signal aspect: {signalId} -> {aspect}");
+			LoggingReturn.Log?.Invoke($"Attempting to set signal aspect: {signalId} -> {aspect}");
 			try
 			{
 				return SignalsAPI.SetSignalAspect(signalId, aspect);
@@ -174,22 +175,21 @@ namespace DvMod.RemoteDispatch.Signals
 		/// Sets a signal to the specified mode. Returns true on success.
 		/// </summary>
 		/// <param name="signalId">The ID of the signal</param>
-		/// <param name="mode">The mode as a string ("Manual" or "Automatic")</param>
 		internal bool SetSignalMode(string signalId, string mode)
 		{
-			LoggingReturn.DebugLog?.Invoke($"[RemoteDispatch.Signals] Attempting to set signal mode: {signalId} -> {mode}");
+			LoggingReturn.DebugLog?.Invoke($"Attempting to set signal mode: {signalId} -> {mode}");
 			try
 			{
 				if (!Enum.TryParse<SignalMode>(mode, true, out var parsed))
 				{
-					LoggingReturn.DebugLog?.Invoke($"[RemoteDispatch.Signals] Failed to parse signal mode: {signalId} -> {mode}");
+					LoggingReturn.DebugLog?.Invoke($"Failed to parse signal mode: {signalId} -> {mode}");
 					return false;
 				}
 				return SignalsAPI.SetSignalMode(signalId, parsed);
 			}
 			catch (Exception ex)
 			{
-				LoggingReturn.Warning?.Invoke($"[RemoteDispatch.Signals] SetSignalMode({signalId}, {mode}) failed: {ex.Message}");
+				LoggingReturn.Warning?.Invoke($"SetSignalMode({signalId}, {mode}) failed: {ex.Message}");
 				return false;
 			}
 		}

@@ -448,17 +448,17 @@ const junctionsReady = tracksReady
 	);
 
 function toggleJunction(junctionId) {
-  return fetch(new URL(`/junction/${junctionId}/toggle`, location), { method: 'POST' })
-    .then(r => {
-      if (r.status === 403) console.warn('No permission to toggle junction #' + junctionId);
-      else if (r.status === 404) console.warn('Junction not found: #' + junctionId);
-      
-      return r.json();
-    })
-    .catch(err => {
-      console.error(`Failed to toggle junction #${junctionId}:`, err);
-      throw err;
-    });
+	return fetch(new URL(`/junction/${junctionId}/toggle`, location), { method: 'POST' })
+		.then(r => {
+			if (r.status === 403) console.warn('No permission to toggle junction #' + junctionId);
+			else if (r.status === 404) console.warn('Junction not found: #' + junctionId);
+
+			return r.json();
+		})
+		.catch(err => {
+			console.error(`Failed to toggle junction #${junctionId}:`, err);
+			throw err;
+		});
 }
 
 const junctionCanvasSize = 60;
@@ -596,16 +596,16 @@ function createSignalMarker(signalId, signalData) {
 		title: signalId,
 		zIndexOffset: Math.floor(position[0] * 100000 + position[1] * 100000),
 	})
-	.bindPopup(() => buildSignalPopup(signalId), { maxWidth: 260 })
-	.addTo(map);
+		.bindPopup(() => buildSignalPopup(signalId), { maxWidth: 260 })
+		.addTo(map);
 
 	signalMarkers.set(signalId, { marker, aspect, mode });
 }
 
 // Supported aspects match icon set. 
 const SIGNAL_ASPECTS = [
-    'S1', 'S2', 'S4', 'S6',
-    'DS1', 'DS2', 'DS3', 'DS4'
+	'S1', 'S2', 'S4', 'S6',
+	'DS1', 'DS2', 'DS3', 'DS4'
 ];
 
 function buildSignalPopup(signalId) {
@@ -629,8 +629,8 @@ function buildSignalPopup(signalId) {
 				<div style="margin-bottom:4px">Set aspect:</div>
 				<select id="sig-aspect-select-${makeSafeSignalId(signalId)}" style="width:100%;margin-bottom:8px;max-height:120px;overflow-y:auto">
 					${SIGNAL_ASPECTS.map(a =>
-						`<option value="${a}" ${a === state.aspect ? 'selected' : ''}>${a}</option>`
-					).join('')}
+		`<option value="${a}" ${a === state.aspect ? 'selected' : ''}>${a}</option>`
+	).join('')}
 				</select>
 				<button id="sig-apply-${makeSafeSignalId(signalId)}"
 					style="width:100%;padding:4px;background:#2a6;color:#fff;border:none;border-radius:3px;cursor:pointer">
@@ -678,7 +678,7 @@ function buildSignalPopup(signalId) {
 }
 
 function setSignalStatus(signalId, container, msg, isError = false) {
-		const statusEl = container.querySelector(`#sig-status-${makeSafeSignalId(signalId)}`);
+	const statusEl = container.querySelector(`#sig-status-${makeSafeSignalId(signalId)}`);
 	if (statusEl) {
 		statusEl.textContent = msg;
 		statusEl.style.color = isError ? '#c44' : 'gray';
@@ -686,26 +686,26 @@ function setSignalStatus(signalId, container, msg, isError = false) {
 }
 
 function postSignalControl(signalId, params) {
-  return fetch(new URL(`/signal/${encodeURIComponent(signalId)}/control`, location), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params)
-  })
-  .then(r => {
-    if (r.ok || r.status === 204) return true;
-    
-    if (r.status === 403) console.warn('No permission to control signal #' + signalId);
-    else if (r.status === 404) console.warn('Signal not found: #' + signalId);
-    else if (r.status === 400) console.warn('Bad request when controlling signal ' + signalId);
-    else if (r.status === 401) console.warn('Unauthorized to control signal ' + signalId);
-    else if (r.status >= 500) console.warn('Server error (' + r.status + ') when controlling signal ' + signalId);
-    
-    return false;
-  })
-    .catch(err => {
-        console.error(`Failed to control signal #${signalId}:`, err);
-        return false;
-    });
+	return fetch(new URL(`/signal/${encodeURIComponent(signalId)}/control`, location), {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(params)
+	})
+		.then(r => {
+			if (r.ok || r.status === 204) return true;
+
+			if (r.status === 403) console.warn('No permission to control signal #' + signalId);
+			else if (r.status === 404) console.warn('Signal not found: #' + signalId);
+			else if (r.status === 400) console.warn('Bad request when controlling signal ' + signalId);
+			else if (r.status === 401) console.warn('Unauthorized to control signal ' + signalId);
+			else if (r.status >= 500) console.warn('Server error (' + r.status + ') when controlling signal ' + signalId);
+
+			return false;
+		})
+		.catch(err => {
+			console.error(`Failed to control signal #${signalId}:`, err);
+			return false;
+		});
 }
 
 function updateAllSignals(signalsData) {
@@ -717,30 +717,31 @@ function updateAllSignals(signalsData) {
 			return;
 
 		const aspect = signalData.CurrentAspectId || 'OFF';
-		const mode   = signalData.Mode ?? existing.mode;
+		const mode = signalData.Mode ?? existing.mode;
 
-		let changed = false;
-		if (existing.aspect !== aspect) {
-			existing.marker.setIcon(getSignalIcon(aspect, existing.mode));
-			existing.aspect = aspect;
-			changed = true;
-		}
-		if (existing.mode !== mode) {
-			existing.mode = mode;
-			changed = true;
+		const aspectChanged = existing.aspect !== aspect;
+		const modeChanged = existing.mode !== mode;
+
+		// Update state first so setIcon uses the correct aspect+mode combination
+		if (aspectChanged) existing.aspect = aspect;
+		if (modeChanged) existing.mode = mode;
+
+		// Regenerate icon whenever aspect OR mode changes (both affect the icon URL)
+		if (aspectChanged || modeChanged) {
+			existing.marker.setIcon(getSignalIcon(existing.aspect, existing.mode));
 		}
 
 		// If the popup is currently open, patch the DOM directly so it stays live
-		if (changed && existing.marker.isPopupOpen()) {
+		if ((aspectChanged || modeChanged) && existing.marker.isPopupOpen()) {
 			const modeLabel = document.getElementById(`sig-mode-label-${makeSafeSignalId(signalId)}`);
-			const manualCb  = document.getElementById(`sig-manual-${makeSafeSignalId(signalId)}`);
+			const manualCb = document.getElementById(`sig-manual-${makeSafeSignalId(signalId)}`);
 			const aspectSel = document.getElementById(`sig-aspect-select-${makeSafeSignalId(signalId)}`);
 			const aspectRow = document.getElementById(`sig-aspect-row-${makeSafeSignalId(signalId)}`);
 
-			if (modeLabel)  modeLabel.textContent  = mode;
-			if (manualCb)   manualCb.checked       = mode === 'Manual';
-			if (aspectRow)  aspectRow.style.display = mode === 'Manual' ? 'block' : 'none';
-			if (aspectSel)  aspectSel.value         = aspect;
+			if (modeLabel) modeLabel.textContent = mode;
+			if (manualCb) manualCb.checked = mode === 'Manual';
+			if (aspectRow) aspectRow.style.display = mode === 'Manual' ? 'block' : 'none';
+			if (aspectSel) aspectSel.value = aspect;
 		}
 	});
 }

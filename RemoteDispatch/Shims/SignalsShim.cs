@@ -145,7 +145,7 @@ namespace DvMod.RemoteDispatch
 				var minimalData = SignalsShimHelpers.MinimalSignalDataProjection.Create(data);
 				
 				var jMinimalData = JObject.FromObject(minimalData);
-				Main.DebugLog($"SignalsShim.GetAllSignalsData returned: {JsonConvert.SerializeObject(jMinimalData).Replace('\n', ' ').Replace('\r', ' ')}");
+				//Main.DebugLog($"SignalsShim.GetAllSignalsData returned: {JsonConvert.SerializeObject(jMinimalData).Replace('\n', ' ').Replace('\r', ' ')}");
 				return jMinimalData;
 			}
 

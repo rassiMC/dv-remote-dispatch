@@ -640,39 +640,52 @@ function buildSignalPopup(signalId) {
 			<div id="sig-status-${makeSafeSignalId(signalId)}" style="margin-top:6px;font-size:0.85em;color:gray"></div>
 		`;
 
-	const manualCheckbox = container.querySelector(`#sig-manual-${makeSafeSignalId(signalId)}`);
-	if (manualCheckbox) {
-		manualCheckbox.addEventListener('change', e => {
-			const newMode = e.target.checked ? 'Manual' : 'Automatic';
-			postSignalControl(signalId, { mode: newMode })
-				.then(ok => {
-					if (ok) {
-						const modeLabel = container.querySelector(`#sig-mode-label-${makeSafeSignalId(signalId)}`);
-						if (modeLabel) modeLabel.textContent = newMode;
-						const aspectRow = container.querySelector(`#sig-aspect-row-${makeSafeSignalId(signalId)}`);
-						if (aspectRow) aspectRow.style.display = e.target.checked ? 'block' : 'none';
-						setSignalStatus(signalId, container, `Mode set to ${newMode}.`);
-					} else {
-						setSignalStatus(signalId, container, 'Failed to set mode.', true);
-						e.target.checked = !e.target.checked; // revert on failure
-					}
-				});
-		});
-	}
+		const manualCheckbox = container.querySelector(`#sig-manual-${makeSafeSignalId(signalId)}`);
+		if (manualCheckbox) {
+			manualCheckbox.addEventListener('change', e => {
+				const newMode = e.target.checked ? 'Manual' : 'Automatic';
+				if (newMode === state.mode) return; // already in this mode, skip
+				postSignalControl(signalId, { mode: newMode })
+					.then(ok => {
+						if (ok) {
+							const entry = signalMarkers.get(signalId);
+							if (entry) {
+								entry.mode = newMode;
+								entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode));
+							}
+							const modeLabel = container.querySelector(`#sig-mode-label-${makeSafeSignalId(signalId)}`);
+							if (modeLabel) modeLabel.textContent = newMode;
+							const aspectRow = container.querySelector(`#sig-aspect-row-${makeSafeSignalId(signalId)}`);
+							if (aspectRow) aspectRow.style.display = e.target.checked ? 'block' : 'none';
+							setSignalStatus(signalId, container, `Mode set to ${newMode}.`);
+						} else {
+							setSignalStatus(signalId, container, 'Failed to set mode.', true);
+							e.target.checked = !e.target.checked; // revert on failure
+						}
+					});
+			});
+		}
 
-	const applyButton = container.querySelector(`#sig-apply-${makeSafeSignalId(signalId)}`);
-	if (applyButton) {
-		applyButton.addEventListener('click', () => {
-			const aspectSelect = container.querySelector(`#sig-aspect-select-${makeSafeSignalId(signalId)}`);
-			if (!aspectSelect) return;
-			const aspect = aspectSelect.value;
-			postSignalControl(signalId, { aspect })
-				.then(ok => {
-					setSignalStatus(signalId, container,
-						ok ? `Aspect set to ${aspect}.` : 'Failed to set aspect.', !ok);
-				});
-		});
-	}
+		const applyButton = container.querySelector(`#sig-apply-${makeSafeSignalId(signalId)}`);
+		if (applyButton) {
+			applyButton.addEventListener('click', () => {
+				const aspectSelect = container.querySelector(`#sig-aspect-select-${makeSafeSignalId(signalId)}`);
+				if (!aspectSelect) return;
+				const aspect = aspectSelect.value;
+				postSignalControl(signalId, { aspect })
+					.then(ok => {
+						setSignalStatus(signalId, container,
+							ok ? `Aspect set to ${aspect}.` : 'Failed to set aspect.', !ok);
+						if (ok) {
+							const entry = signalMarkers.get(signalId);
+							if (entry) {
+								entry.aspect = aspect;
+								entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode));
+							}
+						}
+					});
+			});
+		}
 
 	return container;
 }

@@ -20,12 +20,14 @@ namespace DvMod.RemoteDispatch.Signals
 		/// <param name="log"></param>
 		/// <param name="debugLog"></param>
 		/// <param name="warning"></param>
-		public static void Initialize(Action<string> log, Action<string> debugLog, Action<string> warning)
+		/// <param name="onAspectChanged">Callback for aspect changes</param>
+		/// <param name="onModeChanged">Callback for mode changes</param>
+		public static void Initialize(Action<string> log, Action<string> debugLog, Action<string> warning, Action<string, string>? onAspectChanged = null, Action<string, string>? onModeChanged = null)
 		{
 			LoggingReturn.Initialize(log, debugLog, warning);
 			try
 			{
-				_bridge = new SignalsBridge();
+				_bridge = new SignalsBridge(onAspectChanged, onModeChanged);
 				_bridge.Register();
 				LoggingReturn.Log?.Invoke("Signals bridge initialized.");
 			}

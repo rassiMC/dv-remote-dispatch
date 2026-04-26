@@ -96,7 +96,15 @@ namespace DvMod.RemoteDispatch
 				{
 					new Action<string>(msg => Main.Log(msg)),
 					new Action<string>(msg => Main.DebugLog(msg)),
-					new Action<string>(msg => Main.Warning(msg))
+					new Action<string>(msg => Main.Warning(msg)),
+					new Action<string, string>((signalId, aspect) => {
+						Main.DebugLog($"[Signals] Aspect changed: {signalId} -> {aspect}, pushing update");
+						Sessions.AddTag("signals");
+					}),
+					new Action<string, string>((signalId, mode) => {
+						Main.DebugLog($"[Signals] Mode changed: {signalId} -> {mode}, pushing update");
+						Sessions.AddTag("signals");
+					}),
 
 				});
 

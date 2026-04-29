@@ -537,11 +537,8 @@ function updateAllJunctions(states) {
 // signals
 
 const signalMarkers = new Map();
-const signalIconSize = [8, 32];
 const signalIconAnchor = [12, 12];
 
-// Cache L.Icon instances per aspect to avoid recreating them on every update
-const signalIconCache = new Map();
 
 function makeSafeSignalId(id) {
 	if (!id) return '';
@@ -552,67 +549,103 @@ function makeSafeSignalId(id) {
 	return id.replace(/[\.\:\[\]\#\$%\{\}\(\)\*\+\>\s]+/g, '_');
 }
 
-function getSignalIconUrl(aspect, mode) {
+function getSignalIconUrl(aspect, mode, type) {
 	if (loggingEnabled)
-		console.log(`Getting signal icon for aspect ${aspect} and mode ${mode}`);
+		console.log(`Getting signal icon for aspect ${aspect} and mode ${mode}, of type ${type}`);
 	if (!aspect || aspect === 'OFF')
 		return 'res/signals.off.webp';
 
-	const lowerAspect = aspect.toLowerCase();
+	if (type === "Distant") {
+		// Distant signals do not have a manual image
+		if (loggingEnabled)
+			console.log("Signal is of type 'distant'")
+		mode = "automatic";
+	}
+	const imageName = `${aspect.toLowerCase()}_${mode.toLowerCase()}`;
 
 	// Match all known aspects by lowercasing the input
-	const supportedAspects = [
-		's1', 's2', 's4', 's6',
-		'ds1', 'ds2', 'ds3', 'ds4'
+	const imageNames = [
+		's1_manual', 's1c_manual', 's2_manual', 's4_manual', 's6_manual',
+		's1_automatic', 's1c_automatic', 's2_automatic', 's4_automatic', 's6_automatic',
+		'ds1_automatic', 'ds2_automatic', 'ds3_automatic', 'ds4_automatic'
 	].map(x => x.toLowerCase());
 
-	if (supportedAspects.includes(lowerAspect)) {
-		return `res/signals.${lowerAspect}_${mode.toLowerCase()}.webp`;
+	if (!imageNames.includes(imageName)) {
+		console.log(`No valid image found for a signal with aspect ${aspect} and mode ${mode} of type ${type}. imageName var was ${imageName}`);
+		return 'res/signals.all.webp';
 	}
 
-	return 'res/signals.all.webp';
+	return `res/signals.${imageName}.webp`;
 }
 
-function getSignalIcon(aspect, mode) {
-	const url = getSignalIconUrl(aspect, mode);
-	if (!signalIconCache.has(url)) {
-		signalIconCache.set(url, L.icon({
-			iconUrl: url,
-			iconSize: signalIconSize,
-			iconAnchor: signalIconAnchor,
-		}));
-	}
-	return signalIconCache.get(url);
+const signalIconBaseSize = { normal: [16, 80], distant: [16, 32] };
+const signalIconMaxScale = 3; // cap: icons won't grow beyond 3× their base size
+
+function getSignalIconSize(type) {
+    const base = type === "Distant" ? signalIconBaseSize.distant : signalIconBaseSize.normal;
+    const zoom = map.getZoom();
+    const scale = zoom < initialZoom - 4 ? 1 / (2 ** (initialZoom - 4 - zoom)) : 1;
+    const minScale = 1 / signalIconMaxScale; // floor so they don't vanish entirely
+    const s = Math.max(scale, minScale);
+    return [Math.round(base[0] * s), Math.round(base[1] * s)];
+}
+
+function getSignalIcon(aspect, mode, type) {
+	const url = getSignalIconUrl(aspect, mode, type);
+	const iconSize = getSignalIconSize(type);
+	return L.icon({
+		iconUrl: url,
+		iconSize: iconSize,
+		iconAnchor: signalIconAnchor,
+	});
 }
 
 function createSignalMarker(signalId, signalData) {
 	const aspect = signalData.CurrentAspectId || 'OFF';
 	const mode = signalData.Mode || 'Automatic';
+	const signalType = signalData.Type
 	const position = signalData.Position;
 
 	const marker = L.marker(position, {
-		icon: getSignalIcon(aspect, mode),
+		icon: getSignalIcon(aspect, mode, signalType),
 		interactive: true,
 		title: signalId,
 		zIndexOffset: Math.floor(position[0] * 100000 + position[1] * 100000),
 	})
-		.bindPopup(() => buildSignalPopup(signalId), { maxWidth: 260 })
+		.bindPopup(() => buildSignalPopup(signalId, signalType), { maxWidth: 260 })
 		.addTo(map);
 
-	signalMarkers.set(signalId, { marker, aspect, mode });
+	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType });
 }
 
-// Supported aspects match icon set. 
-const SIGNAL_ASPECTS = [
-	'S1', 'S2', 'S4', 'S6',
-	'DS1', 'DS2', 'DS3', 'DS4'
-];
+function buildSignalPopup(signalId, signalType) {
+	if (loggingEnabled) {
+		console.log("buildSignalPopup called");
+		console.log(`Signal ID   : ${signalId}`);
+		console.log(`Signal type : ${signalType}`);
+	}
 
-function buildSignalPopup(signalId) {
 	const state = signalMarkers.get(signalId);
-	if (!state) return '';
+	if (!state)
+		return '';
 
+	if (signalType == "Distant") {
+		const el = document.createElement('strong');
+		el.style.fontSize = '1.1em';
+		el.textContent = signalId;
+		return el;
+	}
+
+	// If mode is not known, assume manual
 	const isManual = state.mode === 'Manual';
+	// Get valid aspects
+	var validTypeAspects = [
+		{"aspect":"S2","name":"Clear"},
+		{"aspect":"S4","name":"Expect Caution"},
+		{"aspect":"S6","name":"Caution"},
+		{"aspect":"S1","name":"Stop"},
+		{"aspect":"S1c","name":"Stop, train crossing"}
+	]
 
 	const container = document.createElement('div');
 	container.style.cssText = 'min-width:200px;font-family:sans-serif';
@@ -628,8 +661,8 @@ function buildSignalPopup(signalId) {
 			<div id="sig-aspect-row-${makeSafeSignalId(signalId)}" style="display:${isManual ? 'block' : 'none'}">
 				<div style="margin-bottom:4px">Set aspect:</div>
 				<select id="sig-aspect-select-${makeSafeSignalId(signalId)}" style="width:100%;margin-bottom:8px;max-height:120px;overflow-y:auto">
-					${SIGNAL_ASPECTS.map(a =>
-		`<option value="${a}" ${a === state.aspect ? 'selected' : ''}>${a}</option>`
+					${validTypeAspects.map(a =>
+		`<option value="${a.aspect}" ${a.aspect === state.aspect ? 'selected' : ''}>${a.name}</option>`
 	).join('')}
 				</select>
 				<button id="sig-apply-${makeSafeSignalId(signalId)}"
@@ -651,7 +684,7 @@ function buildSignalPopup(signalId) {
 							const entry = signalMarkers.get(signalId);
 							if (entry) {
 								entry.mode = newMode;
-								entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode));
+								entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType));
 							}
 							const modeLabel = container.querySelector(`#sig-mode-label-${makeSafeSignalId(signalId)}`);
 							if (modeLabel) modeLabel.textContent = newMode;
@@ -680,7 +713,7 @@ function buildSignalPopup(signalId) {
 							const entry = signalMarkers.get(signalId);
 							if (entry) {
 								entry.aspect = aspect;
-								entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode));
+								entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType));
 							}
 						}
 					});
@@ -741,7 +774,7 @@ function updateAllSignals(signalsData) {
 
 		// Regenerate icon whenever aspect OR mode changes (both affect the icon URL)
 		if (aspectChanged || modeChanged) {
-			existing.marker.setIcon(getSignalIcon(existing.aspect, existing.mode));
+			existing.marker.setIcon(getSignalIcon(existing.aspect, existing.mode, signalData.Type));
 		}
 
 		// If the popup is currently open, patch the DOM directly so it stays live
@@ -1233,6 +1266,11 @@ function updatescaleMarkerFactor() {
 			overlay.setBounds(getPlayerOverlayBounds(position));
 		});
 	}
+
+	// Refresh signal icons so their size tracks the current zoom level
+	signalMarkers.forEach(({ marker, aspect, mode, type }) => {
+		marker.setIcon(getSignalIcon(aspect, mode, type));
+	});
 }
 
 // Update the loco selection sidebar. Shows ordered list of L- IDs with checkboxes.

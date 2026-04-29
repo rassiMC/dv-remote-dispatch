@@ -15,9 +15,11 @@ frames = {
     "off": Image.open("source-off.png"),
     "red": Image.open("source-red.png"),
     "redwhite": Image.open("source-red-white.png"),
+    "redyellow": Image.open("source-red-yellow.png"),
+    "redyellowwhite": Image.open("source-red-yellow-white.png"),
     "yellow": Image.open("source-yellow.png"),
-    "yellowredyellow": Image.open("source-yellow-red-yellow.png"),
-    "yellowredyellowwhite": Image.open("source-yellow-red-yellow-white.png"),
+    "yellowred": Image.open("source-yellow-red.png"),
+    "yellowredwhite": Image.open("source-yellow-red-white.png"),
     "yellowwhite": Image.open("source-yellow-white.png")
 }
 
@@ -74,18 +76,18 @@ frames["redwhite"].save(
 )
 
 #stop, train crossing
-frames["yellowredyellow"].save(
+frames["redyellow"].save(
     "s1c_automatic.webp",
     save_all=True,
-    append_images=[frames["red"]],
+    append_images=[frames["yellowred"]],
     duration=500,
     loop=0,
     lossless=True
 )
-frames["yellowredyellowwhite"].save(
+frames["redyellowwhite"].save(
     "s1c_manual.webp",
     save_all=True,
-    append_images=[frames["redwhite"]],
+    append_images=[frames["yellowredwhite"]],
     duration=500,
     loop=0,
     lossless=True

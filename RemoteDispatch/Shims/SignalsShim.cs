@@ -98,7 +98,7 @@ namespace DvMod.RemoteDispatch
 					new Action<string>(msg => Main.DebugLog(msg)),
 					new Action<string>(msg => Main.Warning(msg)),
 					new Action<string, string>((signalId, aspect) => {
-						Main.DebugLog($"[Signals] Aspect changed: {signalId} -> {aspect}, pushing update");
+						Main.DebugLog($"Signals Action triggered: Aspect changed: {signalId} -> {aspect}, pushing update");
 						Sessions.AddTag("signals");
 						// Distant signals upstream of this one update automatically in-game, but their
 						// SignalAspectChanged event may fire after the client already consumed the first
@@ -108,7 +108,7 @@ namespace DvMod.RemoteDispatch
 						System.Threading.Tasks.Task.Delay(200).ContinueWith(_ => Sessions.AddTag("signals"));
 					}),
 					new Action<string, string>((signalId, mode) => {
-						Main.DebugLog($"[Signals] Mode changed: {signalId} -> {mode}, pushing update");
+						Main.DebugLog($"Signals Action triggered: Mode changed: {signalId} -> {mode}, pushing update");
 						Sessions.AddTag("signals");
 					}),
 

@@ -83,7 +83,7 @@ namespace DvMod.RemoteDispatch.Signals
 		/// aspects.</param>
 		private void OnAspectChanged(SignalState state)
 		{
-			LoggingReturn.DebugLog?.Invoke($"Aspect changed: {state.Id} -> {state.CurrentAspectId ?? "OFF"}");
+			LoggingReturn.DebugLog?.Invoke($"Signals Action triggered: Aspect changed: {state.Id} -> {state.CurrentAspectId ?? "OFF"}");
 			_onAspectChanged?.Invoke(state.Id, state.CurrentAspectId ?? "OFF");
 		}
 
@@ -94,7 +94,7 @@ namespace DvMod.RemoteDispatch.Signals
 		/// <param name="newMode"></param>
 		private void OnModeChanged(string signalId, SignalMode newMode)
 		{
-			LoggingReturn.DebugLog?.Invoke($"Mode changed: {signalId} -> {newMode}");
+			LoggingReturn.DebugLog?.Invoke($"Signals Action triggered: Mode changed: {signalId} -> {newMode}");
 			_onModeChanged?.Invoke(signalId, newMode.ToString());
 		}
 
@@ -173,7 +173,7 @@ namespace DvMod.RemoteDispatch.Signals
 			}
 			catch (Exception ex)
 			{
-				LoggingReturn.Warning?.Invoke($"[RemoteDispatch.Signals] SetSignalAspect({signalId}, {aspect}) failed: {ex.Message}");
+				LoggingReturn.Warning?.Invoke($"SetSignalAspect({signalId}, {aspect}) failed: {ex.Message}");
 				return false;
 			}
 		}

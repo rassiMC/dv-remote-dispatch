@@ -202,7 +202,7 @@ namespace DvMod.RemoteDispatch
 			var url = context.Request.Url;
 			var segments = url.Segments;
 
-			if (segments.Length < 4 || !segments[3].TrimEnd('/').Equals("control", StringComparison.OrdinalIgnoreCase))
+			if (segments.Length < 3 || !segments[2].TrimEnd('/').Equals("control", StringComparison.OrdinalIgnoreCase))
 			{
 				Main.Warning($"Invalid signal control request URL: {url}");
 				Main.DebugLog($"Number of URL segments: {segments.Length}");
@@ -220,20 +220,11 @@ namespace DvMod.RemoteDispatch
 				return;
 			}
 
-			var signalIdString = segments[2];
-
-			string? signalId = signalIdString.TrimEnd('/');
-			if (string.IsNullOrEmpty(signalId))
-			{
-				Main.Warning($"No signal ID provided in URL: {url}");
-				RenderEmpty(context, 404);
-				return;
-			}
-
 			bool success = true;
 			bool bodyRead = false;
 			string? mode = null;
 			string? aspect = null;
+			string? signalId = null;
 
 			try
 			{
@@ -261,6 +252,11 @@ namespace DvMod.RemoteDispatch
 					var requestData = JObject.Parse(bodyText);
 					bodyRead = true;
 
+					if (requestData.TryGetValue("signalId", out JToken? idToken))
+					{
+						signalId = idToken.Value<string?>();
+					}
+
 					if (requestData.TryGetValue("mode", out JToken? modeToken))
 					{
 						mode = modeToken.Value<string?>();
@@ -269,6 +265,13 @@ namespace DvMod.RemoteDispatch
 					{
 						aspect = aspectToken.Value<string?>();
 					}
+				}
+
+				if (string.IsNullOrEmpty(signalId))
+				{
+					Main.Warning("Signal control request missing 'signalId' in body");
+					RenderEmpty(context, 400);
+					return;
 				}
 
 				if (mode != null)

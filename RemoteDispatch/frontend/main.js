@@ -552,8 +552,10 @@ function makeSafeSignalId(id) {
 function getSignalIconUrl(aspect, mode, type) {
 	if (loggingEnabled)
 		console.log(`Getting signal icon for aspect ${aspect} and mode ${mode}, of type ${type}`);
-	if (!aspect || aspect === 'OFF')
+	if (!aspect || aspect === 'OFF') {
+		if (type == "Distant") return 'res/signals.distant_off.webp';
 		return 'res/signals.off.webp';
+	}
 
 	if (type === "Distant") {
 		// Distant signals do not have a manual image
@@ -582,12 +584,12 @@ const signalIconBaseSize = { normal: [16, 80], distant: [16, 32] };
 const signalIconMaxScale = 3; // cap: icons won't grow beyond 3× their base size
 
 function getSignalIconSize(type) {
-    const base = type === "Distant" ? signalIconBaseSize.distant : signalIconBaseSize.normal;
-    const zoom = map.getZoom();
-    const scale = zoom < initialZoom - 4 ? 1 / (2 ** (initialZoom - 4 - zoom)) : 1;
-    const minScale = 1 / signalIconMaxScale; // floor so they don't vanish entirely
-    const s = Math.max(scale, minScale);
-    return [Math.round(base[0] * s), Math.round(base[1] * s)];
+	const base = type === "Distant" ? signalIconBaseSize.distant : signalIconBaseSize.normal;
+	const zoom = map.getZoom();
+	const scale = zoom < initialZoom - 4 ? 1 / (2 ** (initialZoom - 4 - zoom)) : 1;
+	const minScale = 1 / signalIconMaxScale; // floor so they don't vanish entirely
+	const s = Math.max(scale, minScale);
+	return [Math.round(base[0] * s), Math.round(base[1] * s)];
 }
 
 function getSignalIcon(aspect, mode, type) {
@@ -640,11 +642,11 @@ function buildSignalPopup(signalId, signalType) {
 	const isManual = state.mode === 'Manual';
 	// Get valid aspects
 	var validTypeAspects = [
-		{"aspect":"S2","name":"Clear"},
-		{"aspect":"S4","name":"Expect Caution"},
-		{"aspect":"S6","name":"Caution"},
-		{"aspect":"S1","name":"Stop"},
-		{"aspect":"S1c","name":"Stop, train crossing"}
+		{ "aspect": "S2", "name": "Clear" },
+		{ "aspect": "S4", "name": "Expect Caution" },
+		{ "aspect": "S6", "name": "Caution" },
+		{ "aspect": "S1", "name": "Stop" },
+		{ "aspect": "S1c", "name": "Stop, train crossing" }
 	]
 
 	const container = document.createElement('div');
@@ -673,52 +675,52 @@ function buildSignalPopup(signalId, signalType) {
 			<div id="sig-status-${makeSafeSignalId(signalId)}" style="margin-top:6px;font-size:0.85em;color:gray"></div>
 		`;
 
-		const manualCheckbox = container.querySelector(`#sig-manual-${makeSafeSignalId(signalId)}`);
-		if (manualCheckbox) {
-			manualCheckbox.addEventListener('change', e => {
-				const newMode = e.target.checked ? 'Manual' : 'Automatic';
-				if (newMode === state.mode) return; // already in this mode, skip
-				postSignalControl(signalId, { mode: newMode })
-					.then(ok => {
-						if (ok) {
-							const entry = signalMarkers.get(signalId);
-							if (entry) {
-								entry.mode = newMode;
-								entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType));
-							}
-							const modeLabel = container.querySelector(`#sig-mode-label-${makeSafeSignalId(signalId)}`);
-							if (modeLabel) modeLabel.textContent = newMode;
-							const aspectRow = container.querySelector(`#sig-aspect-row-${makeSafeSignalId(signalId)}`);
-							if (aspectRow) aspectRow.style.display = e.target.checked ? 'block' : 'none';
-							setSignalStatus(signalId, container, `Mode set to ${newMode}.`);
-						} else {
-							setSignalStatus(signalId, container, 'Failed to set mode.', true);
-							e.target.checked = !e.target.checked; // revert on failure
+	const manualCheckbox = container.querySelector(`#sig-manual-${makeSafeSignalId(signalId)}`);
+	if (manualCheckbox) {
+		manualCheckbox.addEventListener('change', e => {
+			const newMode = e.target.checked ? 'Manual' : 'Automatic';
+			if (newMode === state.mode) return; // already in this mode, skip
+			postSignalControl(signalId, { mode: newMode })
+				.then(ok => {
+					if (ok) {
+						const entry = signalMarkers.get(signalId);
+						if (entry) {
+							entry.mode = newMode;
+							entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType));
 						}
-					});
-			});
-		}
+						const modeLabel = container.querySelector(`#sig-mode-label-${makeSafeSignalId(signalId)}`);
+						if (modeLabel) modeLabel.textContent = newMode;
+						const aspectRow = container.querySelector(`#sig-aspect-row-${makeSafeSignalId(signalId)}`);
+						if (aspectRow) aspectRow.style.display = e.target.checked ? 'block' : 'none';
+						setSignalStatus(signalId, container, `Mode set to ${newMode}.`);
+					} else {
+						setSignalStatus(signalId, container, 'Failed to set mode.', true);
+						e.target.checked = !e.target.checked; // revert on failure
+					}
+				});
+		});
+	}
 
-		const applyButton = container.querySelector(`#sig-apply-${makeSafeSignalId(signalId)}`);
-		if (applyButton) {
-			applyButton.addEventListener('click', () => {
-				const aspectSelect = container.querySelector(`#sig-aspect-select-${makeSafeSignalId(signalId)}`);
-				if (!aspectSelect) return;
-				const aspect = aspectSelect.value;
-				postSignalControl(signalId, { aspect })
-					.then(ok => {
-						setSignalStatus(signalId, container,
-							ok ? `Aspect set to ${aspect}.` : 'Failed to set aspect.', !ok);
-						if (ok) {
-							const entry = signalMarkers.get(signalId);
-							if (entry) {
-								entry.aspect = aspect;
-								entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType));
-							}
+	const applyButton = container.querySelector(`#sig-apply-${makeSafeSignalId(signalId)}`);
+	if (applyButton) {
+		applyButton.addEventListener('click', () => {
+			const aspectSelect = container.querySelector(`#sig-aspect-select-${makeSafeSignalId(signalId)}`);
+			if (!aspectSelect) return;
+			const aspect = aspectSelect.value;
+			postSignalControl(signalId, { aspect })
+				.then(ok => {
+					setSignalStatus(signalId, container,
+						ok ? `Aspect set to ${aspect}.` : 'Failed to set aspect.', !ok);
+					if (ok) {
+						const entry = signalMarkers.get(signalId);
+						if (entry) {
+							entry.aspect = aspect;
+							entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType));
 						}
-					});
-			});
-		}
+					}
+				});
+		});
+	}
 
 	return container;
 }
@@ -732,10 +734,10 @@ function setSignalStatus(signalId, container, msg, isError = false) {
 }
 
 function postSignalControl(signalId, params) {
-	return fetch(new URL(`/signal/${encodeURIComponent(signalId)}/control`, location), {
+	return fetch(new URL(`/signal/control`, location), {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(params)
+		body: JSON.stringify({ signalId, ...params })
 	})
 		.then(r => {
 			if (r.ok || r.status === 204) return true;
@@ -1461,6 +1463,112 @@ function updateLoop() {
 		});
 }
 
+/////////////////////
+// signal visibility
+
+const validYards = new Set([
+	'IMW', 'MF', 'CP', 'CW', 'SW', 'FRS', 'OWC', 'FM', 'SM', 'FRC',
+	'OR', 'FF', 'IME', 'MB', 'OWN', 'GF', 'CME', 'HB', 'CS', 'CMS'
+]);
+
+const signalVisibility = {
+	show: true,
+	all: true,
+	distant: true,
+	yards: {}
+};
+
+function yardFromSignalId(signalId) {
+	const stripped = signalId.startsWith('#') ? signalId.slice(1) : signalId;
+	const part = stripped.split('-')[2];
+	return part ? part.split(':')[0] : null;
+}
+
+function applySignalVisibility() {
+	signalMarkers.forEach(({ marker, type }, signalId) => {
+		const yard = yardFromSignalId(signalId);
+		const yardVisible = yard ? (signalVisibility.yards[yard] ?? true) : true;
+		const distantVisible = type === 'Distant' ? signalVisibility.distant : true;
+		const visible = signalVisibility.show
+			&& signalVisibility.all
+			&& yardVisible
+			&& distantVisible;
+
+		if (visible) {
+			if (!map.hasLayer(marker)) marker.addTo(map);
+		} else {
+			if (map.hasLayer(marker)) marker.remove();
+		}
+	});
+}
+
+function buildSignalsSidebar(installed) {
+	const content = document.getElementById('signals-sidebar-content');
+	if (!content) return;
+
+	if (!installed) {
+		content.innerHTML = '<p style="margin:12px 16px;color:#888;font-style:italic;">Signals mod not installed.</p>';
+		return;
+	}
+
+	const presentYards = [...new Set(
+		[...signalMarkers.keys()].map(yardFromSignalId).filter(y => y && validYards.has(y))
+	)].sort();
+
+	presentYards.forEach(yard => { signalVisibility.yards[yard] = true; });
+
+	const yardCheckboxes = presentYards.map(yard => `
+		<label class="sig-filter-label">
+			<input type="checkbox" class="sig-filter-yard" data-yard="${yard}" checked>
+			<span>${yard}</span>
+		</label>`).join('');
+
+	content.innerHTML = `
+		<div class="sig-filter-section">
+			<label class="sig-filter-label sig-filter-master">
+				<input type="checkbox" id="sig-filter-show" checked>
+				<span>Show all signals</span>
+			</label>
+		</div>
+		<div id="sig-filter-sub" class="sig-filter-section">
+			<label class="sig-filter-label">
+				<input type="checkbox" id="sig-filter-distant" checked>
+				<span>Show Distant signals</span>
+			</label>
+			<div class="sig-filter-divider">Yards</div>
+			<div class="sig-filter-yard-grid">
+				${yardCheckboxes}
+			</div>
+		</div>`;
+
+	const subSection = content.querySelector('#sig-filter-sub');
+	const allSubInputs = () => subSection.querySelectorAll('input');
+
+	const showCb = content.querySelector('#sig-filter-show');
+	showCb.addEventListener('change', e => {
+		signalVisibility.show = e.target.checked;
+		allSubInputs().forEach(el => { el.disabled = !e.target.checked; });
+		subSection.style.opacity = e.target.checked ? '' : '0.4';
+		applySignalVisibility();
+	});
+
+	const distantCb = content.querySelector('#sig-filter-distant');
+	distantCb.addEventListener('change', e => {
+		signalVisibility.distant = e.target.checked;
+		applySignalVisibility();
+	});
+
+	const yardGrid = content.querySelector('.sig-filter-yard-grid');
+	yardGrid.addEventListener('change', e => {
+		const cb = e.target;
+		if (!cb.matches('.sig-filter-yard')) return;
+		signalVisibility.yards[cb.dataset.yard] = cb.checked;
+		applySignalVisibility();
+	});
+}
+
+let signalsInstalled = false;
+
 const signalsReady = junctionsReady
 	.then(_ => fetch(new URL('/signals', location)))
 	.then(resp => {
@@ -1471,11 +1579,15 @@ const signalsReady = junctionsReady
 		console.error('Failed to load signal data:', err);
 		return null;
 	})
-	.then(allSignalsData =>
-		allSignalsData === null ? [] : Object.entries(allSignalsData).forEach(([signalId, signalData]) =>
-			createSignalMarker(signalId, signalData))
-	);
+	.then(allSignalsData => {
+		if (allSignalsData !== null) {
+			signalsInstalled = true;
+			Object.entries(allSignalsData).forEach(([signalId, signalData]) =>
+				createSignalMarker(signalId, signalData));
+		}
+	});
 
 signalsReady.then(_ => {
+	buildSignalsSidebar(signalsInstalled);
 	updateLoop();
 });

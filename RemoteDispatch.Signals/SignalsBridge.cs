@@ -30,6 +30,13 @@ namespace DvMod.RemoteDispatch.Signals
 			SignalsAPI.Loaded += OnSignalsLoaded;
 			// When SignalsAPI is Unloaded, run OnSignalsUnloaded
 			SignalsAPI.Unloaded += OnSignalsUnloaded;
+
+			// If SignalsAPI is already loaded before we registered, we missed the event.
+			// Subscribe to instance events directly now.
+			if (SignalsAPI.Instance != null)
+			{
+				OnSignalsLoaded();
+			}
 		}
 
 		/// <summary>

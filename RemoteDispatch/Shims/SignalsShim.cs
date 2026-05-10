@@ -86,7 +86,7 @@ namespace DvMod.RemoteDispatch
 				_getAllSignalsMethod = bootstrap.GetMethod("GetAllSignals", BindingFlags.Public | BindingFlags.Static);
 				_getSignalAspectMethod = bootstrap.GetMethod("GetSignalAspect", BindingFlags.Public | BindingFlags.Static);
 				_setSignalAspectMethod = bootstrap.GetMethod("SetSignalAspect", BindingFlags.Public | BindingFlags.Static);
-				
+
 				// Retrieve SetSignalMode method from Bootstrap (in RemoteDispatch.Signals DLL)
 				// This maintains the same dependency chain as SetSignalAspect:
 				// Signals.API → RemoteDispatch.Signals (bridge logic) → RemoteDispatch.Shims (reflection wrapper)
@@ -100,6 +100,12 @@ namespace DvMod.RemoteDispatch
 					new Action<string, string>((signalId, aspect) => {
 						Main.DebugLog($"[Signals] Aspect changed: {signalId} -> {aspect}, pushing update");
 						Sessions.AddTag("signals");
+						// Distant signals upstream of this one update automatically in-game, but their
+						// SignalAspectChanged event may fire after the client already consumed the first
+						// "signals" tag and took a snapshot - leaving the Distant icon stale with no
+						// follow-up push ever arriving. Schedule a second push so any cascaded Distant
+						// signal change always reaches connected clients.
+						System.Threading.Tasks.Task.Delay(200).ContinueWith(_ => Sessions.AddTag("signals"));
 					}),
 					new Action<string, string>((signalId, mode) => {
 						Main.DebugLog($"[Signals] Mode changed: {signalId} -> {mode}, pushing update");
@@ -151,7 +157,7 @@ namespace DvMod.RemoteDispatch
 			if (signalsData is Dictionary<string, object> data)
 			{
 				var minimalData = SignalsShimHelpers.MinimalSignalDataProjection.Create(data);
-				
+
 				var jMinimalData = JObject.FromObject(minimalData);
 				//Main.DebugLog($"SignalsShim.GetAllSignalsData returned: {JsonConvert.SerializeObject(jMinimalData).Replace('\n', ' ').Replace('\r', ' ')}");
 				return jMinimalData;

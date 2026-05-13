@@ -126,6 +126,12 @@ namespace DvMod.RemoteDispatch
 #endif
 				Render200(context, ContentTypes.Json, await RailTracks.GetTrackPointJSON().ConfigureAwait(false));
 				break;
+			case "graph":
+#if DEBUG
+				Main.Log("/graph endpoint hit");
+#endif
+				Render200(context, ContentTypes.Json, Junctions.GetTrackGraphJSON());
+				break;
 			case "updates":
 #if DEBUG
 				Main.Log("/updates endpoint hit");

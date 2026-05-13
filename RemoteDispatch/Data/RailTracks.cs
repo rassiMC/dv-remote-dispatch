@@ -110,6 +110,8 @@ namespace DvMod.RemoteDispatch
 
 	public static class Junctions
 	{
+		private const float CONNECTION_THRESHOLD = 20f;
+
 		private static string junctionPointJSON = string.Empty;
 
 		public static string GetJunctionPointJSON()
@@ -144,5 +146,92 @@ namespace DvMod.RemoteDispatch
 		{
 			return JsonConvert.SerializeObject(GetAllJunctionStates());
 		}
+
+		public static Dictionary<string, JunctionGraphData> BuildTrackGraph()
+		{
+			if (!WorldStreamingInit.Instance || !WorldStreamingInit.IsLoaded)
+				throw new Exception("World not yet loaded");
+
+			var allTracks = GetAllTrackPoints();
+			var junctions = RailTrackRegistry.Instance.OrderedJunctions;
+			
+			var trackToJunctionMap = new Dictionary<string, List<(int junctionIndex, World.Position endpoint)>>();
+			
+			foreach (var kvp in allTracks)
+			{
+				var trackId = kvp.Key.LogicTrack().ID.ToString();
+				var points = kvp.Value.ToList();
+				
+				if (points.Count < 2)
+					continue;
+
+				var startPoint = points.First();
+				var endPoint = points.Last();
+
+				for (int j = 0; j < junctions.Length; j++)
+				{
+					var junction = junctions[j];
+					var junctionPos = new World.Position(junction.position - WorldMover.currentMove);
+					
+					if (Vector3.Distance(new Vector3(startPoint.x, 0, startPoint.z), new Vector3(junctionPos.x, 0, junctionPos.z)) < CONNECTION_THRESHOLD)
+					{
+						if (!trackToJunctionMap.ContainsKey(trackId))
+							trackToJunctionMap[trackId] = new List<(int, World.Position)>();
+						trackToJunctionMap[trackId].Add((j, startPoint));
+					}
+
+					if (Vector3.Distance(new Vector3(endPoint.x, 0, endPoint.z), new Vector3(junctionPos.x, 0, junctionPos.z)) < CONNECTION_THRESHOLD)
+					{
+						if (!trackToJunctionMap.ContainsKey(trackId))
+							trackToJunctionMap[trackId] = new List<(int, World.Position)>();
+						trackToJunctionMap[trackId].Add((j, endPoint));
+					}
+				}
+			}
+
+			var graphData = new Dictionary<string, JunctionGraphData>();
+
+			for (int i = 0; i < junctions.Length; i++)
+			{
+				var junction = junctions[i];
+				var movedPos = junction.position - WorldMover.currentMove;
+				
+				var incomingTracks = new List<string>();
+				foreach (var kvp in trackToJunctionMap)
+				{
+					if (kvp.Value.Count == 2 && kvp.Value.Any(x => x.junctionIndex == i))
+					{
+						incomingTracks.Add(kvp.Key);
+					}
+				}
+
+				var outgoingTrackIds = junction.outBranches.Select(b => b.track.LogicTrack().ID.ToString()).ToList();
+
+				graphData[junction.junctionData.junctionIdLong.ToString()] = new JunctionGraphData
+				{
+					junctionIndex = i,
+					position = new World.Position(movedPos.x, movedPos.z).ToLatLon(),
+					incomingTracks = incomingTracks,
+					outgoingTracks = outgoingTrackIds,
+					currentBranch = junction.selectedBranch
+				};
+			}
+
+			return graphData;
+		}
+
+		public static string GetTrackGraphJSON()
+		{
+			return JsonConvert.SerializeObject(BuildTrackGraph());
+		}
+	}
+
+	public class JunctionGraphData
+	{
+		public int junctionIndex { get; set; }
+		public World.LatLon position { get; set; } = default!;
+		public List<string> incomingTracks { get; set; } = new();
+		public List<string> outgoingTracks { get; set; } = new();
+		public byte currentBranch { get; set; }
 	}
 }

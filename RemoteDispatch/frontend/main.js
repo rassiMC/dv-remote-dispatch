@@ -1642,8 +1642,8 @@ function initSwitchboard() {
 }
 
 function loadSampleTrackData() {
-	// Load RD_1.0.2.json sample data
-	fetch('res/RD_1.0.2.json')
+	// Load RD_1.0.4.json sample data
+		fetch('res/RD_1.0.4.json')
 		.then(response => {
 			if (!response.ok) {
 				throw new Error('Failed to load sample data');

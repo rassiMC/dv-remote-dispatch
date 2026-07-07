@@ -530,7 +530,10 @@ function createJunctionMarker(p, junctionId, displayName) {
 }
 
 function updateAllJunctions(states) {
-	states.forEach((state, index) => updateJunctionOverlay(index, state))
+	states.forEach((state, index) => updateJunctionOverlay(index, state));
+	if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
+		switchboardRenderer.updateSwitchStates(states);
+	}
 }
 
 /////////////////////
@@ -1638,6 +1641,12 @@ function initSwitchboard() {
 			// Load sample data
 			loadSampleTrackData();
 		}
+
+		const dumpBtn = document.getElementById('dumpGraphBtn');
+		if (dumpBtn && !dumpBtn._wired) {
+			dumpBtn._wired = true;
+			dumpBtn.addEventListener('click', () => SwitchboardMapper.dumpToFile());
+		}
 	}
 }
 
@@ -1727,6 +1736,9 @@ async function buildSwitchMapping() {
 
 		console.log(`Anchor: ${SWITCHBOARD_ANCHOR.switchboardId} (deg ${sbSwitch.degree}) -> junction ${SWITCHBOARD_ANCHOR.ingameJunctionIndex} (deg ${ingameJunction.degree})`);
 
+		SwitchboardMapper.dumpIngameGraph();
+		SwitchboardMapper.dumpSwitchboardGraph();
+
 		const mapping = SwitchboardMapper.runParallelWalk(
 			SWITCHBOARD_ANCHOR.switchboardId,
 			SWITCHBOARD_ANCHOR.ingameJunctionIndex
@@ -1734,6 +1746,10 @@ async function buildSwitchMapping() {
 
 		console.log(`Mapping complete: ${mapping.size} pairs`);
 		SwitchboardMapper.printMapping();
+
+		if (switchboardRenderer) {
+			switchboardRenderer.rerenderAllSegments();
+		}
 	} catch (e) {
 		console.error('Failed to build switch mapping:', e);
 	}

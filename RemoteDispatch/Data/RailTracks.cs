@@ -238,7 +238,7 @@ namespace DvMod.RemoteDispatch
 					string farKey = $"{farPos.x:F1},{farPos.z:F1}";
 
 					var visited = new HashSet<string> { btId };
-					var neighbors = TraceToJunctions(farKey, btId, endpointAdj, trackLookup, trackEndpointJunctions, visited, 0);
+					var neighbors = TraceToJunctions(farKey, btId, endpointAdj, trackLookup, trackEndpointJunctions, visited);
 
 					foreach (var n in neighbors)
 					{
@@ -306,18 +306,15 @@ namespace DvMod.RemoteDispatch
 			Dictionary<string, List<(string trackId, bool atStart)>> endpointAdj,
 			Dictionary<string, RailTrack> trackLookup,
 			Dictionary<string, List<(int junctionIdx, bool atStart)>> trackEndpointJunctions,
-			HashSet<string> visited,
-			int depth)
+			HashSet<string> visited)
 		{
-			const int MAX_DEPTH = 15;
 			var result = new List<int>();
-			var queue = new Queue<(string key, string trackId, bool atStart, int d)>();
-			queue.Enqueue((farKey, originTrackId, false, 0));
+			var queue = new Queue<(string key, string trackId, bool atStart)>();
+			queue.Enqueue((farKey, originTrackId, false));
 
 			while (queue.Count > 0)
 			{
-				var (key, prevTrackId, atStart, d) = queue.Dequeue();
-				if (d > MAX_DEPTH) continue;
+				var (key, prevTrackId, atStart) = queue.Dequeue();
 				if (!endpointAdj.TryGetValue(key, out var connected)) continue;
 
 				foreach (var (ctId, ctAtStart) in connected)
@@ -349,7 +346,7 @@ namespace DvMod.RemoteDispatch
 								? ps.points[ps.points.Length - 1].position
 								: ps.points[0].position;
 							string otherFarKey = $"{otherFarPos.x:F1},{otherFarPos.z:F1}";
-							queue.Enqueue((otherFarKey, ctId, ctAtStart, d + 1));
+							queue.Enqueue((otherFarKey, ctId, ctAtStart));
 						}
 					}
 				}

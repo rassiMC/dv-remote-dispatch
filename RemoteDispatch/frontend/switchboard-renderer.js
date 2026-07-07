@@ -188,7 +188,7 @@ const TrackRenderer = {
         const rect = L.rectangle(rectBounds, {
             color: '#555',
             weight: 2,
-            fillColor: '#666',
+            fillColor: '#102020',
             fillOpacity: 0.7
         });
         rect.addTo(group);
@@ -196,21 +196,40 @@ const TrackRenderer = {
 
         this.switchBounds.set(segment.id, { minX, maxX, minY, maxY });
 
+        const activeColor = '#ffffff';
+        const inactiveColor = '#444';
+
+        const jIdx = SwitchboardMapper.getIngameJunctionIndex(segment.id);
+        const ingameData = jIdx !== null ? SwitchboardMapper.ingameGraph?.get(jIdx) : null;
+        const currentBranch = ingameData?.currentBranch;
+
+        let out1Color, out2Color;
+        if (currentBranch === 0) {
+            out1Color = activeColor;
+            out2Color = inactiveColor;
+        } else if (currentBranch === 1) {
+            out1Color = inactiveColor;
+            out2Color = activeColor;
+        } else {
+            out1Color = inactiveColor;
+            out2Color = inactiveColor;
+        }
+
         L.polyline([inboundPos, out1Pos], {
-            color: '#E74C3C',
+            color: out1Color,
             weight: 5,
             opacity: 1
         }).addTo(group);
 
         L.polyline([inboundPos, out2Pos], {
-            color: '#E74C3C',
+            color: out2Color,
             weight: 5,
             opacity: 1
         }).addTo(group);
 
         L.circle(inboundPos, {
             radius: 0.1,
-            fillColor: '#E74C3C',
+            fillColor: activeColor,
             fillOpacity: 1,
             color: '#fff',
             weight: 2
@@ -219,7 +238,6 @@ const TrackRenderer = {
         group.addTo(this.map);
         group.on('mouseover', () => { console.log('Switch segment:', segment.id); });
         group.on('click', () => {
-            const jIdx = SwitchboardMapper.getIngameJunctionIndex(segment.id);
             if (jIdx !== null) {
                 const jData = SwitchboardMapper.ingameGraph?.get(jIdx);
                 console.log(`%c[${segment.id}] -> ingame junction ${jIdx} (deg ${jData?.degree ?? '?'}, id ${jData?.junctionId ?? '?'})`, 'color: #00ff00');
@@ -266,6 +284,19 @@ const TrackRenderer = {
 
         for (const node of TrackData.nodes.values()) {
             this.renderNode(node);
+        }
+    },
+
+    updateSwitchStates(states) {
+        if (!SwitchboardMapper.ingameGraph || !SwitchboardMapper.mapping) return;
+        for (const seg of TrackData.segments.values()) {
+            if (seg.type !== 'switch') continue;
+            const jIdx = SwitchboardMapper.getIngameJunctionIndex(seg.id);
+            if (jIdx === null || jIdx >= states.length) continue;
+            const ingameData = SwitchboardMapper.ingameGraph.get(jIdx);
+            if (!ingameData) continue;
+            ingameData.currentBranch = states[jIdx];
+            this.renderSegment(seg);
         }
     },
 

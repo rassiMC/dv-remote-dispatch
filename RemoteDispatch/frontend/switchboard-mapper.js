@@ -172,25 +172,147 @@ const SwitchboardMapper = {
         return unmapped;
     },
 
+    dumpIngameGraph() {
+        if (!this.ingameGraph) {
+            console.log('No ingame graph loaded.');
+            return;
+        }
+        console.log(`%c=== Ingame Graph (${this.ingameGraph.size} junctions) ===`, 'color: #00BFFF; font-weight: bold');
+        for (const [idx, data] of [...this.ingameGraph.entries()].sort((a, b) => a[0] - b[0])) {
+            const ports = [
+                data.commonNeighbor !== null ? `common=${data.commonNeighbor}` : 'common=null',
+                data.leftNeighbor !== null ? `left=${data.leftNeighbor}` : 'left=null',
+                data.rightNeighbor !== null ? `right=${data.rightNeighbor}` : 'right=null'
+            ].join(', ');
+            const hasNull = data.commonNeighbor === null || data.leftNeighbor === null || data.rightNeighbor === null;
+            const style = hasNull ? 'color: #ff4444' : '';
+            console.log(`  J${idx}: deg=${data.degree}, neighbors=[${data.neighbors.join(',')}], ${ports}${hasNull ? ' ⚠ NULL PORT' : ''}`, style ? '' : '');
+        }
+    },
+
+    dumpSwitchboardGraph() {
+        if (!this.switchboardGraph) {
+            console.log('No switchboard graph loaded.');
+            return;
+        }
+        console.log(`%c=== Switchboard Graph (${this.switchboardGraph.size} switches) ===`, 'color: #00ff00; font-weight: bold');
+        for (const [sbId, data] of this.switchboardGraph) {
+            const neighborStrs = data.neighbors.map(n => `${n.switchId}(${n.port})`);
+            console.log(`  ${sbId}: deg=${data.degree}, neighbors=[${neighborStrs.join(', ')}]`);
+        }
+    },
+
     printMapping() {
         if (!this.mapping) {
             console.log('No mapping built yet.');
             return;
         }
-        console.log(`Switch mapping (${this.mapping.size} pairs):`);
+        console.log(`%c=== Switch Mapping (${this.mapping.size} pairs) ===`, 'color: #ffaa00; font-weight: bold');
         for (const [sbId, ingameIdx] of this.mapping) {
             const sbData = this.switchboardGraph?.get(sbId);
             const ingameData = this.ingameGraph?.get(ingameIdx);
-            console.log(`  ${sbId} (deg ${sbData?.degree ?? '?'}) -> junction ${ingameIdx} (deg ${ingameData?.degree ?? '?'})`);
+            const degMatch = sbData?.degree === ingameData?.degree;
+            console.log(`  ${sbId} (deg ${sbData?.degree ?? '?'}) -> J${ingameIdx} (deg ${ingameData?.degree ?? '?'})${degMatch ? '' : ' ⚠ DEG MISMATCH'}`);
         }
 
         const unmappedSb = this.getUnmappedSwitches();
         const unmappedIn = this.getUnmappedJunctions();
         if (unmappedSb.length > 0) {
-            console.warn(`Unmapped switchboard switches: ${unmappedSb.join(', ')}`);
+            console.warn(`%c=== Unmapped Switchboard Switches (${unmappedSb.length}) ===`, 'color: #ff4444; font-weight: bold');
+            for (const sbId of unmappedSb) {
+                const sbData = this.switchboardGraph?.get(sbId);
+                const neighborStrs = sbData?.neighbors.map(n => `${n.switchId}(${n.port})`) ?? [];
+                const mappedNeighbors = sbData?.neighbors.filter(n => this.mapping.has(n.switchId)).map(n => `${n.switchId}->J${this.mapping.get(n.switchId)}`) ?? [];
+                console.warn(`  ${sbId}: deg=${sbData?.degree ?? '?'}, neighbors=[${neighborStrs.join(', ')}], mapped_neighbors=[${mappedNeighbors.join(', ')}]`);
+            }
         }
         if (unmappedIn.length > 0) {
-            console.warn(`Unmapped ingame junctions: ${unmappedIn.join(', ')}`);
+            console.warn(`%c=== Unmapped Ingame Junctions (${unmappedIn.length}) ===`, 'color: #ff4444; font-weight: bold');
+            for (const idx of unmappedIn) {
+                const ingameData = this.ingameGraph?.get(idx);
+                const ports = [
+                    ingameData?.commonNeighbor !== null ? `common=${ingameData?.commonNeighbor}` : 'common=null',
+                    ingameData?.leftNeighbor !== null ? `left=${ingameData?.leftNeighbor}` : 'left=null',
+                    ingameData?.rightNeighbor !== null ? `right=${ingameData?.rightNeighbor}` : 'right=null'
+                ].join(', ');
+                console.warn(`  J${idx}: deg=${ingameData?.degree ?? '?'}, neighbors=[${ingameData?.neighbors.join(',') ?? ''}], ${ports}`);
+            }
         }
+    },
+
+    dumpToFile() {
+        let lines = [];
+
+        lines.push(`=== INGAME GRAPH ===`);
+        if (this.ingameGraph) {
+            lines.push(`Junctions: ${this.ingameGraph.size}`);
+            for (const [idx, data] of [...this.ingameGraph.entries()].sort((a, b) => a[0] - b[0])) {
+                const ports = [
+                    data.commonNeighbor !== null ? `common=${data.commonNeighbor}` : 'common=null',
+                    data.leftNeighbor !== null ? `left=${data.leftNeighbor}` : 'left=null',
+                    data.rightNeighbor !== null ? `right=${data.rightNeighbor}` : 'right=null'
+                ].join(', ');
+                const hasNull = data.commonNeighbor === null || data.leftNeighbor === null || data.rightNeighbor === null;
+                lines.push(`J${idx}: deg=${data.degree}, neighbors=[${data.neighbors.join(',')}], ${ports}${hasNull ? ' WARN_NULL_PORT' : ''}`);
+            }
+        } else {
+            lines.push('No ingame graph loaded.');
+        }
+
+        lines.push('');
+        lines.push(`=== SWITCHBOARD GRAPH ===`);
+        if (this.switchboardGraph) {
+            lines.push(`Switches: ${this.switchboardGraph.size}`);
+            for (const [sbId, data] of this.switchboardGraph) {
+                const neighborStrs = data.neighbors.map(n => `${n.switchId}(${n.port})`);
+                lines.push(`${sbId}: deg=${data.degree}, neighbors=[${neighborStrs.join(', ')}]`);
+            }
+        } else {
+            lines.push('No switchboard graph loaded.');
+        }
+
+        lines.push('');
+        lines.push(`=== MAPPING ===`);
+        if (this.mapping) {
+            lines.push(`Pairs: ${this.mapping.size}`);
+            for (const [sbId, ingameIdx] of this.mapping) {
+                const sbData = this.switchboardGraph?.get(sbId);
+                const ingameData = this.ingameGraph?.get(ingameIdx);
+                const degMatch = sbData?.degree === ingameData?.degree;
+                lines.push(`${sbId} (deg ${sbData?.degree ?? '?'}) -> J${ingameIdx} (deg ${ingameData?.degree ?? '?'})${degMatch ? '' : ' WARN_DEG_MISMATCH'}`);
+            }
+
+            const unmappedSb = this.getUnmappedSwitches();
+            const unmappedIn = this.getUnmappedJunctions();
+            lines.push('');
+            lines.push(`UNMAPPED SWITCHBOARD SWITCHES (${unmappedSb.length}):`);
+            for (const sbId of unmappedSb) {
+                const sbData = this.switchboardGraph?.get(sbId);
+                const neighborStrs = sbData?.neighbors.map(n => `${n.switchId}(${n.port})`) ?? [];
+                const mappedNeighbors = sbData?.neighbors.filter(n => this.mapping.has(n.switchId)).map(n => `${n.switchId}->J${this.mapping.get(n.switchId)}`) ?? [];
+                lines.push(`  ${sbId}: deg=${sbData?.degree ?? '?'}, neighbors=[${neighborStrs.join(', ')}], mapped_neighbors=[${mappedNeighbors.join(', ')}]`);
+            }
+            lines.push('');
+            lines.push(`UNMAPPED INGAME JUNCTIONS (${unmappedIn.length}):`);
+            for (const idx of unmappedIn) {
+                const ingameData = this.ingameGraph?.get(idx);
+                const ports = [
+                    ingameData?.commonNeighbor !== null ? `common=${ingameData?.commonNeighbor}` : 'common=null',
+                    ingameData?.leftNeighbor !== null ? `left=${ingameData?.leftNeighbor}` : 'left=null',
+                    ingameData?.rightNeighbor !== null ? `right=${ingameData?.rightNeighbor}` : 'right=null'
+                ].join(', ');
+                lines.push(`  J${idx}: deg=${ingameData?.degree ?? '?'}, neighbors=[${ingameData?.neighbors.join(',') ?? ''}], ${ports}`);
+            }
+        } else {
+            lines.push('No mapping built yet.');
+        }
+
+        const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'graph_dump.txt';
+        a.click();
+        URL.revokeObjectURL(url);
     }
 };

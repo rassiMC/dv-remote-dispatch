@@ -280,7 +280,14 @@ const TrackData = {
         return [switchSeg.merging, switchSeg.nl, switchSeg.nr];
     },
 
-    findAdjacentSwitch(startNodeId, visitedNodeIds) {
+    findAdjacentSwitch(startNodeId, visitedNodeIds, callerSwitchId) {
+        const segsAtStart = this.getSegmentsForNode(startNodeId);
+        for (const seg of segsAtStart) {
+            if (seg.type === 'switch' && seg.id !== callerSwitchId && this.getSwitchNodes(seg).includes(startNodeId)) {
+                return { switchId: seg.id, viaNodeId: startNodeId };
+            }
+        }
+
         const connectedTracks = this.groupIntoBlocks_getConnectedTracks(startNodeId);
         for (const track of connectedTracks) {
             if (visitedNodeIds.has(track.id)) continue;
@@ -292,12 +299,12 @@ const TrackData = {
 
             const segsAtNode = this.getSegmentsForNode(otherNode);
             for (const seg of segsAtNode) {
-                if (seg.type === 'switch' && this.getSwitchNodes(seg).includes(otherNode)) {
+                if (seg.type === 'switch' && seg.id !== callerSwitchId && this.getSwitchNodes(seg).includes(otherNode)) {
                     return { switchId: seg.id, viaNodeId: otherNode };
                 }
             }
 
-            const found = this.findAdjacentSwitch(otherNode, visitedNodeIds);
+            const found = this.findAdjacentSwitch(otherNode, visitedNodeIds, callerSwitchId);
             if (found) return found;
         }
         return null;
@@ -314,12 +321,17 @@ const TrackData = {
             for (const nodeId of switchNodeIds) {
                 const visited = new Set();
                 visited.add(nodeId);
-                const result = this.findAdjacentSwitch(nodeId, visited);
+                const result = this.findAdjacentSwitch(nodeId, visited, sw.id);
                 if (result) {
+                    let port = 'unknown';
+                    if (nodeId === sw.merging) port = 'common';
+                    else if (nodeId === sw.nl) port = 'left';
+                    else if (nodeId === sw.nr) port = 'right';
                     neighbors.push({
                         switchId: result.switchId,
                         viaNodeId: result.viaNodeId,
-                        fromNodeId: nodeId
+                        fromNodeId: nodeId,
+                        port: port
                     });
                 }
             }
@@ -327,7 +339,10 @@ const TrackData = {
             graph.set(sw.id, {
                 switchId: sw.id,
                 neighbors: neighbors,
-                degree: neighbors.length
+                degree: neighbors.length,
+                merging: sw.merging,
+                nl: sw.nl,
+                nr: sw.nr
             });
         }
 

@@ -8,7 +8,7 @@ const SwitchboardMapper = {
         if (!resp.ok) throw new Error(`Failed to fetch /graph: ${resp.status} ${resp.statusText}`);
         const data = await resp.json();
 
-        this.ingameGraph = new Map();
+		this.ingameGraph = new Map();
         for (const [junctionId, graphData] of Object.entries(data)) {
             this.ingameGraph.set(graphData.junctionIndex, {
                 junctionId: junctionId,
@@ -17,7 +17,10 @@ const SwitchboardMapper = {
                 degree: graphData.degree || (graphData.neighbors || []).length,
                 currentBranch: graphData.currentBranch,
                 incomingTracks: graphData.incomingTracks || [],
-                outgoingTracks: graphData.outgoingTracks || []
+                outgoingTracks: graphData.outgoingTracks || [],
+                commonNeighbor: graphData.commonNeighbor ?? null,
+                leftNeighbor: graphData.leftNeighbor ?? null,
+                rightNeighbor: graphData.rightNeighbor ?? null
             });
         }
         return this.ingameGraph;
@@ -28,44 +31,68 @@ const SwitchboardMapper = {
         return this.switchboardGraph;
     },
 
-    findMatches(sbNeighbors, ingameNeighbors, usedIngameIndices) {
+    findMatches(sbNeighbors, ingameNeighbors, usedIngameIndices, ingameIdx) {
         const matches = [];
         const unmatchedIngame = ingameNeighbors.filter(idx => !usedIngameIndices.has(idx));
+        const ingameData = this.ingameGraph.get(ingameIdx);
 
-        for (const sbNeighbor of sbNeighbors) {
+        const portToIngameNeighbor = (port) => {
+            if (!ingameData) return null;
+            if (port === 'common') return ingameData.commonNeighbor;
+            if (port === 'left') return ingameData.leftNeighbor;
+            if (port === 'right') return ingameData.rightNeighbor;
+            return null;
+        };
+
+        const usedThisRound = new Set();
+
+        const sorted = [...sbNeighbors].sort((a, b) => {
+            const order = { right: 0, left: 1, common: 2 };
+            const pa = order[a.port] ?? 3;
+            const pb = order[b.port] ?? 3;
+            return pa - pb;
+        });
+
+        for (const sbNeighbor of sorted) {
             if (sbNeighbor.switchId === undefined) continue;
+            if (usedThisRound.has(sbNeighbor.switchId)) continue;
+
             const sbData = this.switchboardGraph.get(sbNeighbor.switchId);
             if (!sbData) continue;
 
-            let bestMatch = null;
-            let bestScore = -1;
+            const port = sbNeighbor.port || 'unknown';
+            let matchedIngameIdx = null;
 
-            for (const ingameIdx of unmatchedIngame) {
-                const ingameData = this.ingameGraph.get(ingameIdx);
-                if (!ingameData) continue;
+            const portTarget = portToIngameNeighbor(port);
+            if (portTarget !== null && unmatchedIngame.includes(portTarget)) {
+                matchedIngameIdx = portTarget;
+            }
 
-                if (ingameData.degree === sbData.degree) {
-                    matches.push({
-                        sbSwitchId: sbNeighbor.switchId,
-                        ingameJunctionIndex: ingameIdx
-                    });
-                    unmatchedIngame.splice(unmatchedIngame.indexOf(ingameIdx), 1);
-                    break;
-                }
-
-                const score = 1.0 / (1 + Math.abs(ingameData.degree - sbData.degree));
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestMatch = ingameIdx;
+            if (matchedIngameIdx === null) {
+                let bestScore = -1;
+                for (const ingameIdx of unmatchedIngame) {
+                    const candidateData = this.ingameGraph.get(ingameIdx);
+                    if (!candidateData) continue;
+                    if (candidateData.degree === sbData.degree) {
+                        matchedIngameIdx = ingameIdx;
+                        break;
+                    }
+                    const score = 1.0 / (1 + Math.abs(candidateData.degree - sbData.degree));
+                    if (score > bestScore) {
+                        bestScore = score;
+                        matchedIngameIdx = ingameIdx;
+                    }
                 }
             }
 
-            if (bestMatch !== null && bestScore > 0) {
+            if (matchedIngameIdx !== null) {
                 matches.push({
                     sbSwitchId: sbNeighbor.switchId,
-                    ingameJunctionIndex: bestMatch
+                    ingameJunctionIndex: matchedIngameIdx,
+                    port: port
                 });
-                unmatchedIngame.splice(unmatchedIngame.indexOf(bestMatch), 1);
+                unmatchedIngame.splice(unmatchedIngame.indexOf(matchedIngameIdx), 1);
+                usedThisRound.add(sbNeighbor.switchId);
             }
         }
 
@@ -74,7 +101,7 @@ const SwitchboardMapper = {
 
     runParallelWalk(anchorSbId, anchorIngameIdx) {
         if (!this.ingameGraph || !this.switchboardGraph) {
-            console.error('Graphs not loaded. Call fetchIngameGraph() and buildSwitchboardGraph() first.');
+            console.error('Graphs not loaded. Call fetchIngameGraph() and buildSwitchGraph() first.');
             return null;
         }
 
@@ -96,7 +123,7 @@ const SwitchboardMapper = {
             const sbNeighbors = sbData.neighbors.filter(n => !visitedSb.has(n.switchId));
             const ingameNeighbors = ingameData.neighbors.filter(idx => !usedIngame.has(idx));
 
-            const matches = this.findMatches(sbNeighbors, ingameNeighbors, usedIngame);
+            const matches = this.findMatches(sbNeighbors, ingameNeighbors, usedIngame, ingameIdx);
 
             for (const match of matches) {
                 mapping.set(match.sbSwitchId, match.ingameJunctionIndex);

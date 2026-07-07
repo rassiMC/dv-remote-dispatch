@@ -171,7 +171,7 @@ const TrackRenderer = {
         const out1Pos = this.coordsToLatLng(out1.x, out1.y);
         const out2Pos = this.coordsToLatLng(out2.x, out2.y);
 
-        const group = L.layerGroup();
+        const group = L.featureGroup();
 
         const allX = [inbound.x, out1.x, out2.x];
         const allY = [inbound.y, out1.y, out2.y];
@@ -218,6 +218,19 @@ const TrackRenderer = {
 
         group.addTo(this.map);
         group.on('mouseover', () => { console.log('Switch segment:', segment.id); });
+        group.on('click', () => {
+            const jIdx = SwitchboardMapper.getIngameJunctionIndex(segment.id);
+            if (jIdx !== null) {
+                const jData = SwitchboardMapper.ingameGraph?.get(jIdx);
+                console.log(`%c[${segment.id}] -> ingame junction ${jIdx} (deg ${jData?.degree ?? '?'}, id ${jData?.junctionId ?? '?'})`, 'color: #00ff00');
+                fetch(new URL(`/junction/${jIdx}/toggle`, location), { method: 'POST' })
+                    .then(resp => resp.ok ? resp.text() : Promise.reject(new Error(`${resp.status}`)))
+                    .then(newBranch => console.log(`%c[${segment.id}] toggled -> branch ${newBranch}`, 'color: #00ff00'))
+                    .catch(err => console.error(`%c[${segment.id}] toggle failed: ${err.message}`, 'color: #ff0000'));
+            } else {
+                console.log(`%c[${segment.id}] -> NO MAPPING (unmapped switch)`, 'color: #ff0000');
+            }
+        });
         return group;
     },
 

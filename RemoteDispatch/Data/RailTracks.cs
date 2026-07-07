@@ -152,39 +152,100 @@ namespace DvMod.RemoteDispatch
 			if (!WorldStreamingInit.Instance || !WorldStreamingInit.IsLoaded)
 				throw new Exception("World not yet loaded");
 
-			var allTracks = RailTracks.GetAllTrackPoints();
 			var junctions = RailTrackRegistry.Instance.OrderedJunctions;
-			
-			var trackToJunctionMap = new Dictionary<string, List<(int junctionIndex, World.Position endpoint)>>();
-			
-			foreach (var kvp in allTracks)
+			var junctionIndexMap = new Dictionary<Junction, int>();
+			for (int i = 0; i < junctions.Length; i++)
+				junctionIndexMap[junctions[i]] = i;
+
+			var allTracks = Component.FindObjectsOfType<RailTrack>();
+
+			var trackLookup = new Dictionary<string, RailTrack>();
+			var endpointAdj = new Dictionary<string, List<(string trackId, bool atStart)>>();
+			var trackEndpointJunctions = new Dictionary<string, List<(int junctionIdx, bool atStart)>>();
+
+			foreach (var track in allTracks)
 			{
-				var trackId = kvp.Key.LogicTrack().ID.ToString();
-				var points = kvp.Value.ToList();
-				
-				if (points.Count < 2)
-					continue;
+				var trackId = track.LogicTrack().ID.ToString();
+				trackLookup[trackId] = track;
 
-				var startPoint = points.First();
-				var endPoint = points.Last();
+				var pointSet = track.GetKinkedPointSet();
+				if (pointSet.points.Length < 1) continue;
 
-				for (int j = 0; j < junctions.Length; j++)
+				var start = pointSet.points[0].position;
+				var end = pointSet.points[pointSet.points.Length - 1].position;
+				string startKey = $"{start.x:F1},{start.z:F1}";
+				string endKey = $"{end.x:F1},{end.z:F1}";
+
+				if (!endpointAdj.ContainsKey(startKey))
+					endpointAdj[startKey] = new List<(string, bool)>();
+				endpointAdj[startKey].Add((trackId, true));
+				if (!endpointAdj.ContainsKey(endKey))
+					endpointAdj[endKey] = new List<(string, bool)>();
+				endpointAdj[endKey].Add((trackId, false));
+			}
+
+			for (int i = 0; i < junctions.Length; i++)
+			{
+				var j = junctions[i];
+				foreach (var b in j.outBranches)
 				{
-					var junction = junctions[j];
-					var junctionPos = new World.Position(junction.position - WorldMover.currentMove);
-					
-					if (Vector3.Distance(new Vector3(startPoint.x, 0, startPoint.z), new Vector3(junctionPos.x, 0, junctionPos.z)) < CONNECTION_THRESHOLD)
-					{
-						if (!trackToJunctionMap.ContainsKey(trackId))
-							trackToJunctionMap[trackId] = new List<(int, World.Position)>();
-						trackToJunctionMap[trackId].Add((j, startPoint));
-					}
+					if (b.track == null) continue;
+					var tid = b.track.LogicTrack().ID.ToString();
+					if (!trackEndpointJunctions.ContainsKey(tid))
+						trackEndpointJunctions[tid] = new List<(int, bool)>();
+					trackEndpointJunctions[tid].Add((i, b.first));
+				}
+				if (j.inBranch?.track != null)
+				{
+					var tid = j.inBranch.track.LogicTrack().ID.ToString();
+					if (!trackEndpointJunctions.ContainsKey(tid))
+						trackEndpointJunctions[tid] = new List<(int, bool)>();
+					trackEndpointJunctions[tid].Add((i, j.inBranch.first));
+				}
+			}
 
-					if (Vector3.Distance(new Vector3(endPoint.x, 0, endPoint.z), new Vector3(junctionPos.x, 0, junctionPos.z)) < CONNECTION_THRESHOLD)
+			var trackToJunctionMap = new Dictionary<string, List<int>>();
+			var portNeighborMap = new Dictionary<(int junctionIdx, string port), int>();
+
+			for (int i = 0; i < junctions.Length; i++)
+			{
+				var junction = junctions[i];
+				var branchTracks = new List<(string trackId, bool first, string port)>();
+
+				for (int bi = 0; bi < junction.outBranches.Count; bi++)
+				{
+					var b = junction.outBranches[bi];
+					if (b.track == null) continue;
+					branchTracks.Add((b.track.LogicTrack().ID.ToString(), b.first, bi == 0 ? "left" : "right"));
+				}
+				if (junction.inBranch?.track != null)
+					branchTracks.Add((junction.inBranch.track.LogicTrack().ID.ToString(), junction.inBranch.first, "common"));
+
+				foreach (var (btId, first, port) in branchTracks)
+				{
+					if (!trackToJunctionMap.ContainsKey(btId))
+						trackToJunctionMap[btId] = new List<int>();
+					if (!trackToJunctionMap[btId].Contains(i))
+						trackToJunctionMap[btId].Add(i);
+
+					if (!trackLookup.TryGetValue(btId, out var bt)) continue;
+					var ps = bt.GetKinkedPointSet();
+					if (ps.points.Length < 1) continue;
+
+					var farPos = first
+						? ps.points[ps.points.Length - 1].position
+						: ps.points[0].position;
+					string farKey = $"{farPos.x:F1},{farPos.z:F1}";
+
+					var visited = new HashSet<string> { btId };
+					var neighbors = TraceToJunctions(farKey, btId, endpointAdj, trackLookup, trackEndpointJunctions, visited, 0);
+
+					foreach (var n in neighbors)
 					{
-						if (!trackToJunctionMap.ContainsKey(trackId))
-							trackToJunctionMap[trackId] = new List<(int, World.Position)>();
-						trackToJunctionMap[trackId].Add((j, endPoint));
+						if (!trackToJunctionMap[btId].Contains(n))
+							trackToJunctionMap[btId].Add(n);
+						if (n != i && !portNeighborMap.ContainsKey((i, port)))
+							portNeighborMap[(i, port)] = n;
 					}
 				}
 			}
@@ -195,17 +256,15 @@ namespace DvMod.RemoteDispatch
 			{
 				var junction = junctions[i];
 				var movedPos = junction.position - WorldMover.currentMove;
-				
+
+				var outgoingTrackIds = junction.outBranches.Select(b => b.track.LogicTrack().ID.ToString()).ToList();
+
 				var incomingTracks = new List<string>();
 				foreach (var kvp in trackToJunctionMap)
 				{
-					if (kvp.Value.Count == 2 && kvp.Value.Any(x => x.junctionIndex == i))
-					{
+					if (kvp.Value.Count >= 2 && kvp.Value.Contains(i))
 						incomingTracks.Add(kvp.Key);
-					}
 				}
-
-				var outgoingTrackIds = junction.outBranches.Select(b => b.track.LogicTrack().ID.ToString()).ToList();
 
 				var neighbors = new List<int>();
 				var allTrackIds = new HashSet<string>(incomingTracks);
@@ -215,7 +274,7 @@ namespace DvMod.RemoteDispatch
 				{
 					if (trackToJunctionMap.TryGetValue(trackId, out var connectedJunctions))
 					{
-						foreach (var (otherIdx, _) in connectedJunctions)
+						foreach (var otherIdx in connectedJunctions)
 						{
 							if (otherIdx != i && !neighbors.Contains(otherIdx))
 								neighbors.Add(otherIdx);
@@ -231,11 +290,72 @@ namespace DvMod.RemoteDispatch
 					outgoingTracks = outgoingTrackIds,
 					currentBranch = junction.selectedBranch,
 					neighbors = neighbors,
-					degree = neighbors.Count
+					degree = neighbors.Count,
+					commonNeighbor = portNeighborMap.TryGetValue((i, "common"), out var cn) ? cn : (int?)null,
+					leftNeighbor = portNeighborMap.TryGetValue((i, "left"), out var ln) ? ln : (int?)null,
+					rightNeighbor = portNeighborMap.TryGetValue((i, "right"), out var rn) ? rn : (int?)null
 				};
 			}
 
 			return graphData;
+		}
+
+		private static List<int> TraceToJunctions(
+			string farKey,
+			string originTrackId,
+			Dictionary<string, List<(string trackId, bool atStart)>> endpointAdj,
+			Dictionary<string, RailTrack> trackLookup,
+			Dictionary<string, List<(int junctionIdx, bool atStart)>> trackEndpointJunctions,
+			HashSet<string> visited,
+			int depth)
+		{
+			const int MAX_DEPTH = 15;
+			var result = new List<int>();
+			var queue = new Queue<(string key, string trackId, bool atStart, int d)>();
+			queue.Enqueue((farKey, originTrackId, false, 0));
+
+			while (queue.Count > 0)
+			{
+				var (key, prevTrackId, atStart, d) = queue.Dequeue();
+				if (d > MAX_DEPTH) continue;
+				if (!endpointAdj.TryGetValue(key, out var connected)) continue;
+
+				foreach (var (ctId, ctAtStart) in connected)
+				{
+					if (ctId == prevTrackId) continue;
+					if (!visited.Add(ctId)) continue;
+
+					if (trackEndpointJunctions.TryGetValue(ctId, out var epJunctions))
+					{
+						bool found = false;
+						foreach (var (jIdx, jAtStart) in epJunctions)
+						{
+							if (ctAtStart == jAtStart)
+							{
+								if (!result.Contains(jIdx))
+									result.Add(jIdx);
+								found = true;
+							}
+						}
+						if (found) continue;
+					}
+
+					if (trackLookup.TryGetValue(ctId, out var ct))
+					{
+						var ps = ct.GetKinkedPointSet();
+						if (ps.points.Length >= 1)
+						{
+							var otherFarPos = ctAtStart
+								? ps.points[ps.points.Length - 1].position
+								: ps.points[0].position;
+							string otherFarKey = $"{otherFarPos.x:F1},{otherFarPos.z:F1}";
+							queue.Enqueue((otherFarKey, ctId, ctAtStart, d + 1));
+						}
+					}
+				}
+			}
+
+			return result;
 		}
 
 		public static string GetTrackGraphJSON()
@@ -253,5 +373,8 @@ namespace DvMod.RemoteDispatch
 		public byte currentBranch { get; set; }
 		public List<int> neighbors { get; set; } = new();
 		public int degree { get; set; }
+		public int? commonNeighbor { get; set; }
+		public int? leftNeighbor { get; set; }
+		public int? rightNeighbor { get; set; }
 	}
 }

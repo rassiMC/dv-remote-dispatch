@@ -1,26 +1,36 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFramework>netstandard2.0</TargetFramework>
-		<LangVersion>8.0</LangVersion>
+		<LangVersion>9.0</LangVersion>
 		<Nullable>enable</Nullable>
 		<RootNamespace>DvMod.RemoteDispatch.Signals</RootNamespace>
-		<SignalsDllPath>$(DvInstallDir)\Mods\DVSignals\Signals.API.dll</SignalsDllPath>
 	</PropertyGroup>
 
 	<ItemGroup>
-		<Reference Include="UnityEngine.CoreModule" />
-		<Reference Include="Newtonsoft.Json" />
+		<Reference Include="UnityEngine.CoreModule">
+			<HintPath>/home/rass/.local/share/Steam/steamapps/common/Derail Valley/DerailValley_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
+		</Reference>
+		<Reference Include="Newtonsoft.Json">
+			<HintPath>/home/rass/.local/share/Steam/steamapps/common/Derail Valley/DerailValley_Data/Managed/Newtonsoft.Json.dll</HintPath>
+		</Reference>
 		<PackageReference Include="UnityModManager" Version="0.27.2" />
 	</ItemGroup>
 
 	<!-- Signals -->
-	<ItemGroup>
+	<ItemGroup Condition="Exists('/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals/Signals.API.dll')">
 		<Reference Include="Signals.API">
-			<HintPath>$(SignalsDllPath)</HintPath>
+			<HintPath>/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals/Signals.API.dll</HintPath>
 			<!-- Do not copy Signals.API.dll to the output directory, we just need it for compile time reference. -->
 			<Private>false</Private>
 			<ExcludeAssets>runtime</ExcludeAssets>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup Condition="!Exists('/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals/Signals.API.dll')">
+		<Reference Include="Signals.API">
+			<HintPath>$(MSBuildThisFileDirectory)..\..\..\build\Signals.API.dll</HintPath>
+			<Private>false</Private>
 		</Reference>
 	</ItemGroup>
 

@@ -152,7 +152,7 @@ namespace DvMod.RemoteDispatch
 			if (!WorldStreamingInit.Instance || !WorldStreamingInit.IsLoaded)
 				throw new Exception("World not yet loaded");
 
-			var allTracks = GetAllTrackPoints();
+			var allTracks = RailTracks.GetAllTrackPoints();
 			var junctions = RailTrackRegistry.Instance.OrderedJunctions;
 			
 			var trackToJunctionMap = new Dictionary<string, List<(int junctionIndex, World.Position endpoint)>>();

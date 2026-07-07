@@ -1040,11 +1040,27 @@ sidebar.on("content", e => {
 	clearInterval(locoControlRefreshIntervalId);
 	if (e.id == "locoControlTab") {
 		locoControlRefreshIntervalId = setInterval(updateLocoDisplay, 1000 / 9);
+	} else if (e.id == "switchboardTab") {
+		document.body.classList.add("switchboard-active");
+		initSwitchboard();
+		if (switchboardMap) {
+			setTimeout(() => switchboardMap.invalidateSize(), 50);
+		}
+	} else {
+		document.body.classList.remove("switchboard-active");
+		if (typeof map !== 'undefined') {
+			setTimeout(() => map.invalidateSize(), 50);
+		}
 	}
 });
+
 sidebar.on("closing", e => {
 	clearInterval(locoControlRefreshIntervalId);
 	locoControlRefreshIntervalId = undefined;
+	document.body.classList.remove("switchboard-active");
+	if (typeof map !== 'undefined') {
+		setTimeout(() => map.invalidateSize(), 50);
+	}
 })
 
 function sendLocoCommand(command) {
@@ -1591,3 +1607,93 @@ signalsReady.then(_ => {
 	buildSignalsSidebar(signalsInstalled);
 	updateLoop();
 });
+
+// Switchboard functionality
+let switchboardMap;
+let switchboardRenderer;
+
+function initSwitchboard() {
+	// Initialize switchboard map if not already done
+	if (!switchboardMap) {
+		const mapContainer = document.getElementById('switchboard-map');
+		if (mapContainer) {
+		switchboardMap = L.map('switchboard-map', {
+			minZoom: 1,
+			maxZoom: 20,
+			zoomControl: false,
+			center: [0, 0],
+			zoom: 10,
+			crs: L.CRS.Simple
+		});
+
+		// Add zoom control
+		L.control.zoom({
+			position: 'topright'
+		}).addTo(switchboardMap);
+
+			// Initialize track renderer
+			switchboardRenderer = Object.create(TrackRenderer);
+			switchboardRenderer.init(switchboardMap);
+
+			// Load sample data
+			loadSampleTrackData();
+		}
+	}
+}
+
+function loadSampleTrackData() {
+	// Load RD_1.0.2.json sample data
+	fetch('res/RD_1.0.2.json')
+		.then(response => {
+			if (!response.ok) {
+				throw new Error('Failed to load sample data');
+			}
+			return response.json();
+		})
+		.then(data => {
+			// Load data into TrackData
+			TrackData.fromJSON(data);
+			
+			// Auto-assign block colors
+			TrackData.groupIntoBlocks();
+			
+			// Render all tracks on switchboard map
+			if (switchboardRenderer) {
+				switchboardRenderer.renderAll();
+				
+				// Fit map to bounds of all track elements
+				const bounds = [];
+				TrackData.nodes.forEach(node => {
+					const latlng = switchboardRenderer.coordsToLatLng(node.x, node.y);
+					bounds.push([latlng.lat, latlng.lng]);
+				});
+				
+				if (bounds.length > 0) {
+					switchboardMap.fitBounds(bounds, { padding: [20, 20] });
+				}
+			}
+			
+			// Update info display
+			const info = document.getElementById('switchboard-info');
+			if (info) {
+				info.innerHTML = `
+					<p><strong>Switchboard View - Sample Data Loaded</strong></p>
+					<p>Nodes: ${TrackData.nodes.size}</p>
+					<p>Segments: ${TrackData.segments.size}</p>
+					<p>Blocks: ${TrackData.blocks.size}</p>
+					<p>Click and drag to navigate. Use zoom controls to adjust view.</p>
+				`;
+			}
+		})
+		.catch(error => {
+			console.error('Failed to load switchboard sample data:', error);
+			const info = document.getElementById('switchboard-info');
+			if (info) {
+				info.innerHTML = `
+					<p><strong>Switchboard View - Error</strong></p>
+					<p>Failed to load sample track data: ${error.message}</p>
+					<p>Check console for details.</p>
+				`;
+			}
+		});
+}

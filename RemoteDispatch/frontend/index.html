@@ -12,6 +12,8 @@
 	<script src="https://cdn.jsdelivr.net/npm/leaflet-sidebar-v2@3.2.3/js/leaflet-sidebar.min.js" integrity="sha256-4r81BYKeNxSG+nrK/UPQq75pDlH+GkiZn/zc/xkNMLA=" crossorigin="anonymous"></script>
 	<script src="https://cdn.jsdelivr.net/npm/@zerowastemap/leaflet.zoomhome@1.0.0/index.min.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/tablesort@5.2.1/src/tablesort.js" integrity="sha256-ams/0yjSE7HGIRWB/A3VtW3Z24eOT+5z0z9d1pms7T4=" crossorigin="anonymous"></script>
+	<script src="res/switchboard-data.js"></script>
+	<script src="res/switchboard-renderer.js"></script>
 </head>
 <body>
 	<div id="sidebar" class="leaflet-sidebar collapsed">
@@ -21,6 +23,7 @@
 				<li><a href="#locoFilterTab" role="tab"><i class="fas fa-eye" title="Loco select"></i></a></li>
 				<li><a href="#jobsTab" role="tab"><i class="fas fa-clipboard-list" title="Jobs"></i></a></li>
 				<li><a href="#locoControlTab" role="tab"><i class="fas fa-gamepad" title="Loco Control"></i></a></li>
+				<li><a href="#switchboardTab" role="tab"><i class="fas fa-exchange-alt" title="Switchboard"></i></a></li>
 				<li><a href="#settingsTab" role="tab"><i class="fas fa-cog" title="Settings"></i></a></li>
 				<li><a href="#signals-sidebar" role="tab"><i class="fas fa-traffic-light" title="Signals"></i></a></li>
 			</ul>
@@ -108,6 +111,13 @@
 					<!-- Populated by buildSignalsSidebar() after signalsReady resolves -->
 				</div>
 			</div>
+		<div class="leaflet-sidebar-pane" id="switchboardTab">
+			<h1 class="leaflet-sidebar-header">
+				Switchboard
+				<span class="leaflet-sidebar-close"><i class="fa fa-caret-left"></i></span>
+			</h1>
+			<p>Click to open full-screen switchboard view.</p>
+		</div>
 			<div class="leaflet-sidebar-pane" id="settingsTab">
 				<h1 class="leaflet-sidebar-header">
 					Settings
@@ -147,6 +157,13 @@
 		</div>
 	</div>
 	<div id="map" class="dark" style="height:100vh"></div>
+	<div id="switchboard-view">
+		<div id="switchboard-map"></div>
+		<div id="switchboard-info">
+			<p><strong>Switchboard View</strong></p>
+			<p>Track layout visualization will appear here.</p>
+		</div>
+	</div>
 	<div id="search">
 		<input id="searchInput" type="text" placeholder="Go to…" autocomplete="off">
 		<ul id="searchResults"></ul>

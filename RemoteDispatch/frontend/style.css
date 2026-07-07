@@ -305,3 +305,38 @@ body {
 #sig-filter-sub {
 	transition: opacity 0.15s ease;
 }
+
+#switchboard-view {
+	position: absolute;
+	top: 0;
+	left: 310px;
+	right: 0;
+	bottom: 0;
+	display: none;
+	z-index: 999;
+	background: #222;
+}
+
+#switchboard-map {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 100%;
+}
+
+#switchboard-info {
+	position: absolute;
+	bottom: 10px;
+	left: 10px;
+	z-index: 1000;
+	background: rgba(244, 244, 244, 0.75);
+	border-radius: 6px;
+	padding: 6px 12px;
+	max-width: 400px;
+}
+
+body.switchboard-active #switchboard-view {
+	display: block;
+}

@@ -1,2 +1,10 @@
-[ ] get the project to compile
+[x] get the project to compile
 [ ] ask the user about the scope of this project
+
+[ ] Phase 2: Basic Rendering Integration (IN PROGRESS)
+    [x] 2.1 Add switchboard tab to main frontend UI
+    [x] 2.2 Create switchboard content pane
+    [x] 2.3 Load and integrate sample data (RD_1.0.2.json)
+    [ ] 2.4 Move switchboard rendering out of sidebar into full-screen view
+    [ ] 2.5 Implement basic track visualization
+    [ ] 2.6 Test rendering with sample data

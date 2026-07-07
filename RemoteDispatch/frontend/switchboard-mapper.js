@@ -3,6 +3,20 @@ const SwitchboardMapper = {
     switchboardGraph: null,
     mapping: null,
 
+    GRAPH_OVERRIDES: {
+        // Format: junctionIndex: { neighbors, addNeighbors, commonNeighbor, leftNeighbor, rightNeighbor, degree }
+        // 'neighbors' replaces the full array. 'addNeighbors' merges into existing (no duplicates).
+        // Only include fields you want to override.
+        539: { neighbors: [540, 541, 542], commonNeighbor: 542, leftNeighbor: 540, rightNeighbor: 541, degree: 3 },
+        540: { addNeighbors: [539, 541], leftNeighbor: 541, rightNeighbor: 539 },
+        541: { addNeighbors: [540, 549], leftNeighbor: 549, rightNeighbor: 540 },
+        542: { addNeighbors: [539], commonNeighbor: 539 },
+        404: { neighbors: [403, 370, 18], commonNeighbor: 18, leftNeighbor: 403, rightNeighbor: 370, degree: 3 },
+        403: { addNeighbors: [404], commonNeighbor: 404 },
+        18: { addNeighbors: [404], commonNeighbor: 404 },
+        370: { addNeighbors: [404], leftNeighbor: 404 },
+    },
+
     async fetchIngameGraph() {
         const resp = await fetch(new URL('/graph', location));
         if (!resp.ok) throw new Error(`Failed to fetch /graph: ${resp.status} ${resp.statusText}`);
@@ -23,7 +37,42 @@ const SwitchboardMapper = {
                 rightNeighbor: graphData.rightNeighbor ?? null
             });
         }
+        this.applyGraphOverrides();
         return this.ingameGraph;
+    },
+
+    applyGraphOverrides() {
+        let count = 0;
+        for (const [idx, overrides] of Object.entries(this.GRAPH_OVERRIDES)) {
+            const jIdx = parseInt(idx);
+            const existing = this.ingameGraph.get(jIdx);
+            if (existing) {
+                if (overrides.addNeighbors) {
+                    for (const n of overrides.addNeighbors) {
+                        if (!existing.neighbors.includes(n)) existing.neighbors.push(n);
+                    }
+                    delete overrides.addNeighbors;
+                    if (!overrides.degree) overrides.degree = existing.neighbors.length;
+                }
+                Object.assign(existing, overrides);
+            } else {
+                const neighbors = overrides.neighbors || overrides.addNeighbors || [];
+                this.ingameGraph.set(jIdx, {
+                    junctionId: `override_${jIdx}`,
+                    junctionIndex: jIdx,
+                    neighbors: neighbors,
+                    degree: overrides.degree ?? neighbors.length,
+                    currentBranch: overrides.currentBranch ?? 0,
+                    incomingTracks: overrides.incomingTracks || [],
+                    outgoingTracks: overrides.outgoingTracks || [],
+                    commonNeighbor: overrides.commonNeighbor ?? null,
+                    leftNeighbor: overrides.leftNeighbor ?? null,
+                    rightNeighbor: overrides.rightNeighbor ?? null
+                });
+            }
+            count++;
+        }
+        if (count > 0) console.log(`Applied ${count} graph overrides`);
     },
 
     buildSwitchboardGraph() {

@@ -1641,12 +1641,6 @@ function initSwitchboard() {
 			// Load sample data
 			loadSampleTrackData();
 		}
-
-		const dumpBtn = document.getElementById('dumpGraphBtn');
-		if (dumpBtn && !dumpBtn._wired) {
-			dumpBtn._wired = true;
-			dumpBtn.addEventListener('click', () => SwitchboardMapper.dumpToFile());
-		}
 	}
 }
 
@@ -1735,9 +1729,6 @@ async function buildSwitchMapping() {
 		}
 
 		console.log(`Anchor: ${SWITCHBOARD_ANCHOR.switchboardId} (deg ${sbSwitch.degree}) -> junction ${SWITCHBOARD_ANCHOR.ingameJunctionIndex} (deg ${ingameJunction.degree})`);
-
-		SwitchboardMapper.dumpIngameGraph();
-		SwitchboardMapper.dumpSwitchboardGraph();
 
 		const mapping = SwitchboardMapper.runParallelWalk(
 			SWITCHBOARD_ANCHOR.switchboardId,

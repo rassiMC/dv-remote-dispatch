@@ -192,7 +192,6 @@ const TrackRenderer = {
             fillOpacity: 0.7
         });
         rect.addTo(group);
-        rect.on('mouseover', () => { console.log('Switch segment:', segment.id); });
 
         this.switchBounds.set(segment.id, { minX, maxX, minY, maxY });
 
@@ -236,7 +235,6 @@ const TrackRenderer = {
         }).addTo(group);
 
         group.addTo(this.map);
-        group.on('mouseover', () => { console.log('Switch segment:', segment.id); });
         group.on('click', () => {
             if (jIdx !== null) {
                 const jData = SwitchboardMapper.ingameGraph?.get(jIdx);

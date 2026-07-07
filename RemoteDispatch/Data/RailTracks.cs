@@ -110,7 +110,7 @@ namespace DvMod.RemoteDispatch
 
 	public static class Junctions
 	{
-		private const float CONNECTION_THRESHOLD = 20f;
+		private const float CONNECTION_THRESHOLD = 1.5f;
 
 		private static string junctionPointJSON = string.Empty;
 
@@ -207,13 +207,31 @@ namespace DvMod.RemoteDispatch
 
 				var outgoingTrackIds = junction.outBranches.Select(b => b.track.LogicTrack().ID.ToString()).ToList();
 
+				var neighbors = new List<int>();
+				var allTrackIds = new HashSet<string>(incomingTracks);
+				allTrackIds.UnionWith(outgoingTrackIds);
+
+				foreach (var trackId in allTrackIds)
+				{
+					if (trackToJunctionMap.TryGetValue(trackId, out var connectedJunctions))
+					{
+						foreach (var (otherIdx, _) in connectedJunctions)
+						{
+							if (otherIdx != i && !neighbors.Contains(otherIdx))
+								neighbors.Add(otherIdx);
+						}
+					}
+				}
+
 				graphData[junction.junctionData.junctionIdLong.ToString()] = new JunctionGraphData
 				{
 					junctionIndex = i,
 					position = new World.Position(movedPos.x, movedPos.z).ToLatLon(),
 					incomingTracks = incomingTracks,
 					outgoingTracks = outgoingTrackIds,
-					currentBranch = junction.selectedBranch
+					currentBranch = junction.selectedBranch,
+					neighbors = neighbors,
+					degree = neighbors.Count
 				};
 			}
 
@@ -233,5 +251,7 @@ namespace DvMod.RemoteDispatch
 		public List<string> incomingTracks { get; set; } = new();
 		public List<string> outgoingTracks { get; set; } = new();
 		public byte currentBranch { get; set; }
+		public List<int> neighbors { get; set; } = new();
+		public int degree { get; set; }
 	}
 }

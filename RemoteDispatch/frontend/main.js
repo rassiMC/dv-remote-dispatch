@@ -1684,6 +1684,8 @@ function loadSampleTrackData() {
 					<p>Click and drag to navigate. Use zoom controls to adjust view.</p>
 				`;
 			}
+
+			buildSwitchMapping();
 		})
 		.catch(error => {
 			console.error('Failed to load switchboard sample data:', error);
@@ -1696,4 +1698,43 @@ function loadSampleTrackData() {
 				`;
 			}
 		});
+}
+
+const SWITCHBOARD_ANCHOR = {
+	switchboardId: 's1677',
+	ingameJunctionIndex: 0
+};
+
+async function buildSwitchMapping() {
+	try {
+		await SwitchboardMapper.fetchIngameGraph();
+		SwitchboardMapper.buildSwitchboardGraph();
+
+		console.log(`Ingame graph: ${SwitchboardMapper.ingameGraph.size} junctions`);
+		console.log(`Switchboard graph: ${SwitchboardMapper.switchboardGraph.size} switches`);
+
+		const sbSwitch = SwitchboardMapper.switchboardGraph.get(SWITCHBOARD_ANCHOR.switchboardId);
+		const ingameJunction = SwitchboardMapper.ingameGraph.get(SWITCHBOARD_ANCHOR.ingameJunctionIndex);
+
+		if (!sbSwitch) {
+			console.error(`Anchor switchboard switch '${SWITCHBOARD_ANCHOR.switchboardId}' not found in switchboard graph`);
+			return;
+		}
+		if (!ingameJunction) {
+			console.error(`Anchor ingame junction index ${SWITCHBOARD_ANCHOR.ingameJunctionIndex} not found in ingame graph`);
+			return;
+		}
+
+		console.log(`Anchor: ${SWITCHBOARD_ANCHOR.switchboardId} (deg ${sbSwitch.degree}) -> junction ${SWITCHBOARD_ANCHOR.ingameJunctionIndex} (deg ${ingameJunction.degree})`);
+
+		const mapping = SwitchboardMapper.runParallelWalk(
+			SWITCHBOARD_ANCHOR.switchboardId,
+			SWITCHBOARD_ANCHOR.ingameJunctionIndex
+		);
+
+		console.log(`Mapping complete: ${mapping.size} pairs`);
+		SwitchboardMapper.printMapping();
+	} catch (e) {
+		console.error('Failed to build switch mapping:', e);
+	}
 }

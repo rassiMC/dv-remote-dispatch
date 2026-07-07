@@ -266,5 +266,71 @@ const TrackData = {
         this.groupIntoBlocks_floodFill(regularSegments[0], null, { segmentIds: [] }, visited);
 
         return visited.size === regularSegments.length;
+    },
+
+    getSwitchSegments() {
+        const switches = [];
+        for (const seg of this.segments.values()) {
+            if (seg.type === 'switch') switches.push(seg);
+        }
+        return switches;
+    },
+
+    getSwitchNodes(switchSeg) {
+        return [switchSeg.merging, switchSeg.nl, switchSeg.nr];
+    },
+
+    findAdjacentSwitch(startNodeId, visitedNodeIds) {
+        const connectedTracks = this.groupIntoBlocks_getConnectedTracks(startNodeId);
+        for (const track of connectedTracks) {
+            if (visitedNodeIds.has(track.id)) continue;
+            visitedNodeIds.add(track.id);
+
+            const otherNode = track.n1 === startNodeId ? track.n2 : track.n1;
+            if (visitedNodeIds.has(otherNode)) continue;
+            visitedNodeIds.add(otherNode);
+
+            const segsAtNode = this.getSegmentsForNode(otherNode);
+            for (const seg of segsAtNode) {
+                if (seg.type === 'switch' && this.getSwitchNodes(seg).includes(otherNode)) {
+                    return { switchId: seg.id, viaNodeId: otherNode };
+                }
+            }
+
+            const found = this.findAdjacentSwitch(otherNode, visitedNodeIds);
+            if (found) return found;
+        }
+        return null;
+    },
+
+    buildSwitchGraph() {
+        const switches = this.getSwitchSegments();
+        const graph = new Map();
+
+        for (const sw of switches) {
+            const switchNodeIds = this.getSwitchNodes(sw);
+            const neighbors = [];
+
+            for (const nodeId of switchNodeIds) {
+                const visited = new Set();
+                visited.add(nodeId);
+                const result = this.findAdjacentSwitch(nodeId, visited);
+                if (result) {
+                    neighbors.push({
+                        switchId: result.switchId,
+                        viaNodeId: result.viaNodeId,
+                        fromNodeId: nodeId
+                    });
+                }
+            }
+
+            graph.set(sw.id, {
+                switchId: sw.id,
+                neighbors: neighbors,
+                degree: neighbors.length
+            });
+        }
+
+        return graph;
     }
 };

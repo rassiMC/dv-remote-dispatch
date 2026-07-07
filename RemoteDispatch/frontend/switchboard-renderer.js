@@ -185,12 +185,14 @@ const TrackRenderer = {
             this.coordsToLatLng(maxX, maxY)
         ]);
 
-        L.rectangle(rectBounds, {
+        const rect = L.rectangle(rectBounds, {
             color: '#555',
             weight: 2,
             fillColor: '#666',
             fillOpacity: 0.7
-        }).addTo(group);
+        });
+        rect.addTo(group);
+        rect.on('mouseover', () => { console.log('Switch segment:', segment.id); });
 
         this.switchBounds.set(segment.id, { minX, maxX, minY, maxY });
 
@@ -215,6 +217,7 @@ const TrackRenderer = {
         }).addTo(group);
 
         group.addTo(this.map);
+        group.on('mouseover', () => { console.log('Switch segment:', segment.id); });
         return group;
     },
 

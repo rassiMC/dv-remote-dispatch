@@ -15,6 +15,8 @@ namespace DvMod.RemoteDispatch
 	{
 		private static GameObject? rootObject;
 		private readonly HttpListener listener = new HttpListener();
+		private static int _requestCount = 0;
+		private static int _render200Count = 0;
 
 		public async void Start()
 		{
@@ -85,79 +87,60 @@ namespace DvMod.RemoteDispatch
 				return;
 			}
 
-			switch (request.Url.Segments[1].TrimEnd('/'))
+		switch (request.Url.Segments[1].TrimEnd('/'))
+		{
+		case "car":
+			Main.DebugLog("/car endpoint hit");
+			HandleCarRequest(context);
+			break;
+		case "junction":
+			HandleJunctionRequest(context);
+			Main.DebugLog("/junction endpoint hit");
+			break;
+		case "player":
+			Main.DebugLog("/player endpoint hit");
+			if(!Main.settings.permissions.CanSeePlayerBlips(context.User.Identity.Name))
 			{
-			case "car":
-#if DEBUG
-				Main.Log("/car endpoint hit");
-#endif
-				HandleCarRequest(context);
-				break;
-			case "junction":
-				HandleJunctionRequest(context);
-#if DEBUG
-				Main.Log("/junction endpoint hit");
-#endif
-				break;
-			case "player":
-#if DEBUG
-				Main.Log("/player endpoint hit");
-#endif
-				if(!Main.settings.permissions.CanSeePlayerBlips(context.User.Identity.Name))
-				{
-					RenderEmpty(context, 200);
-					break;
-				}
-				var playerJson = PlayerData.GetPlayerDataJson();
-				if (playerJson != null)
-					Render200(context, ContentTypes.Json, playerJson);
-				else
-					RenderEmpty(context, 500);
-				break;
-			case "res":
-#if DEBUG
-				Main.Log("/res endpoint hit");
-#endif
-				RenderResource(context);
-				break;
-			case "track":
-#if DEBUG
-				Main.Log("/track endpoint hit");
-#endif
-				Render200(context, ContentTypes.Json, await RailTracks.GetTrackPointJSON().ConfigureAwait(false));
-				break;
-			case "graph":
-#if DEBUG
-				Main.Log("/graph endpoint hit");
-#endif
-				Render200(context, ContentTypes.Json, Junctions.GetTrackGraphJSON());
-				break;
-			case "updates":
-#if DEBUG
-				Main.Log("/updates endpoint hit");
-#endif
-				await HandleUpdatesRequest(context).ConfigureAwait(false);
-				break;
-			case "signals":
-#if DEBUG
-				Main.Log("/signals endpoint hit");
-#endif
-				string signalsJson = Main.settings.featureFlags.enableSignals ? JsonConvert.SerializeObject(SignalsShim.GetAllSignalsData()) : JsonConvert.SerializeObject(new JObject());
-				Render200(context, ContentTypes.Json, signalsJson);
-				break;
-			case "signal":
-#if DEBUG
-				Main.Log("/signal endpoint hit");
-#endif
-				await HandleSignalRequest(context);
-				break;
-			default:
-#if DEBUG
-				Main.Log("unknown endpoint hit");
-#endif
-				RenderEmpty(context, 404);
+				RenderEmpty(context, 200);
 				break;
 			}
+			var playerJson = PlayerData.GetPlayerDataJson();
+			if (playerJson != null)
+				Render200(context, ContentTypes.Json, playerJson);
+			else
+				RenderEmpty(context, 500);
+			break;
+		case "res":
+			Main.DebugLog("/res endpoint hit");
+			RenderResource(context);
+			break;
+		case "track":
+			Main.DebugLog("/track endpoint hit");
+			Render200(context, ContentTypes.Json, await RailTracks.GetTrackPointJSON().ConfigureAwait(false));
+			break;
+		case "graph":
+			Main.DebugLog("/graph endpoint hit");
+			Render200(context, ContentTypes.Json, Junctions.GetTrackGraphJSON());
+			break;
+		case "updates":
+			if (++_requestCount % 1000 == 0)
+				Main.DebugLog($"/updates endpoint hit x{_requestCount}");
+			await HandleUpdatesRequest(context).ConfigureAwait(false);
+			break;
+		case "signals":
+			Main.DebugLog("/signals endpoint hit");
+			string signalsJson = Main.settings.featureFlags.enableSignals ? JsonConvert.SerializeObject(SignalsShim.GetAllSignalsData()) : JsonConvert.SerializeObject(new JObject());
+			Render200(context, ContentTypes.Json, signalsJson);
+			break;
+		case "signal":
+			Main.DebugLog("/signal endpoint hit");
+			await HandleSignalRequest(context);
+			break;
+		default:
+			Main.DebugLog("unknown endpoint hit");
+			RenderEmpty(context, 404);
+			break;
+		}
 		}
 
 		private static async void HandleCarRequest(HttpListenerContext context)
@@ -462,9 +445,8 @@ namespace DvMod.RemoteDispatch
 
 		private static void Render200(HttpListenerContext context, string contentType, string s)
 		{
-#if DEBUG
-			Main.Log("Render200");
-#endif
+			if (++_render200Count % 1000 == 0)
+				Main.DebugLog($"Render200 x{_render200Count}");
 			context.Response.ContentType = contentType;
 			var bytes = Encoding.UTF8.GetBytes(s);
 			if (bytes.Length > 128 && (context.Request.Headers.GetValues("Accept-Encoding")?.Contains("gzip") ?? false))

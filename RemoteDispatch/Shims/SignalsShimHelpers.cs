@@ -22,6 +22,7 @@ namespace DvMod.RemoteDispatch
 			public string? Mode { get; set; }
 			public string? Type { get; set; }
 			public JToken[]? Position { get; set; }
+			public string? JunctionId { get; set; }
 		}
 
 		/// <summary>
@@ -159,7 +160,8 @@ namespace DvMod.RemoteDispatch
 					CurrentAspectId = currentAspect,
 					Mode = mode,
 					Position = position,
-					Type = type
+					Type = type,
+					JunctionId = signalObject["JunctionId"]?.ToString()
 				};
 			}
 		}

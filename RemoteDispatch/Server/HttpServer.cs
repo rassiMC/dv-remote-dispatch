@@ -1,6 +1,7 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -131,6 +132,16 @@ namespace DvMod.RemoteDispatch
 			Main.DebugLog("/signals endpoint hit");
 			string signalsJson = Main.settings.featureFlags.enableSignals ? JsonConvert.SerializeObject(SignalsShim.GetAllSignalsData()) : JsonConvert.SerializeObject(new JObject());
 			Render200(context, ContentTypes.Json, signalsJson);
+			break;
+		case "occupancy":
+			if (context.Request.HttpMethod == "POST")
+			{
+				await HandleOccupancyMapRequest(context).ConfigureAwait(false);
+			}
+			else
+			{
+				Render200(context, ContentTypes.Json, OccupancyData.GetOccupancyJSON());
+			}
 			break;
 		case "signal":
 			Main.DebugLog("/signal endpoint hit");
@@ -322,6 +333,50 @@ namespace DvMod.RemoteDispatch
 			var username = context.User?.Identity?.Name ?? "";
 			var sessionId = context.Request.Url.Segments[2];
 			Render200(context, ContentTypes.Json, await Sessions.GetUpdates(username, sessionId).ConfigureAwait(false));
+		}
+
+		private static async Task HandleOccupancyMapRequest(HttpListenerContext context)
+		{
+			try
+			{
+				const int maxBodySize = 65536;
+				using var stream = context.Request.InputStream;
+				using var ms = new System.IO.MemoryStream();
+				stream.CopyTo(ms);
+				if (ms.Length > maxBodySize)
+					throw new Exception("Request body too large");
+
+				string bodyText = Encoding.UTF8.GetString(ms.ToArray());
+				var parsed = JObject.Parse(bodyText);
+
+				var mapping = new Dictionary<string, List<(string junctionId, string port)>>();
+				foreach (var prop in parsed.Properties())
+				{
+					var entries = prop.Value as JArray;
+					if (entries == null) continue;
+					var list = new List<(string junctionId, string port)>();
+					foreach (var entry in entries)
+					{
+						var jid = entry["junctionId"]?.ToString();
+						var port = entry["port"]?.ToString() ?? "";
+						if (!string.IsNullOrEmpty(jid))
+							list.Add((jid, port));
+					}
+					mapping[prop.Name] = list;
+				}
+
+				await Updater.RunOnMainThread(() =>
+				{
+					OccupancyData.SetBlockMapping(mapping);
+				}).ConfigureAwait(false);
+
+				RenderEmpty(context, 204);
+			}
+			catch (Exception e)
+			{
+				Main.Warning($"Failed to parse occupancy map request: {e.Message}");
+				RenderEmpty(context, 400);
+			}
 		}
 
 		private static bool IsValidJunctionId(int junctionId)

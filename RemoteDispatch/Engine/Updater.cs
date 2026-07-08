@@ -13,6 +13,7 @@ namespace DvMod.RemoteDispatch
             StartCoroutine(CheckPlayerTransformCoro());
             StartCoroutine(CheckTrainsetsCoro());
             StartCoroutine(DeferredEventsCoro());
+            StartCoroutine(CheckOccupancyCoro());
         }
 
         private static GameObject? rootObject;
@@ -67,6 +68,18 @@ namespace DvMod.RemoteDispatch
                 while (taskQueue.TryDequeue(out var action))
                     action();
                 yield return null;
+            }
+        }
+
+        private IEnumerator CheckOccupancyCoro()
+        {
+            while (true)
+            {
+                yield return WaitFor.Seconds(0.5f);
+                if (OccupancyData.HasMapping && OccupancyData.CheckChanged())
+                {
+                    Sessions.AddTag("occupancy");
+                }
             }
         }
 

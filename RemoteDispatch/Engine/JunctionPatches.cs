@@ -11,6 +11,7 @@ namespace DvMod.RemoteDispatch
             public static void Postfix()
             {
                 Sessions.AddTag("junctions");
+                Sessions.AddTag("occupancy");
             }
         }
     }

@@ -797,6 +797,27 @@ function updateAllSignals(signalsData) {
 	});
 }
 
+function updateBlockOccupancy(occupancyData) {
+	if (typeof TrackData === 'undefined' || !TrackData.blocks) return;
+	if (typeof switchboardRenderer === 'undefined' || !switchboardRenderer) return;
+
+	let changed = false;
+	for (const [blockId, occupied] of Object.entries(occupancyData)) {
+		const block = TrackData.getBlock(blockId);
+		if (block) {
+			const newState = occupied === null ? 'unknown' : (occupied ? 'occupied' : 'clear');
+			if (block.occupancyState !== newState) {
+				block.occupancyState = newState;
+				changed = true;
+			}
+		}
+	}
+
+	if (changed) {
+		switchboardRenderer.rerenderAllSegments();
+	}
+}
+
 /////////////////////
 // following
 
@@ -1453,9 +1474,12 @@ function updateOnce() {
 					case 'player':
 						updatePlayerOverlays(data);
 						break;
-					case 'signals':
-						updateAllSignals(data);
-						break;
+				case 'signals':
+					updateAllSignals(data);
+					break;
+				case 'occupancy':
+					updateBlockOccupancy(data);
+					break;
 					default:
 						const segments = tag.split('-');
 						switch (segments[0]) {
@@ -1743,10 +1767,78 @@ async function buildSwitchMapping() {
 		console.log(`Mapping complete: ${mapping.size} pairs`);
 		SwitchboardMapper.printMapping();
 
+		sendBlockOccupancyMapping();
+
 		if (switchboardRenderer) {
 			switchboardRenderer.rerenderAllSegments();
 		}
 	} catch (e) {
 		console.error('Failed to build switch mapping:', e);
 	}
+}
+
+function sendBlockOccupancyMapping() {
+	if (!SwitchboardMapper.mapping || SwitchboardMapper.mapping.size === 0) return;
+	if (!TrackData.blocks || TrackData.blocks.size === 0) return;
+	if (!SwitchboardMapper.ingameGraph || SwitchboardMapper.ingameGraph.size === 0) return;
+
+	const blockJunctionMap = {};
+	for (const [blockId, block] of TrackData.blocks) {
+		const junctionEntries = new Map();
+
+		for (const segId of (block.segmentIds || [])) {
+			const seg = TrackData.getSegment(segId);
+			if (!seg || seg.type !== 'switch') continue;
+
+			const jIdx = SwitchboardMapper.getIngameJunctionIndex(segId);
+			if (jIdx === null) continue;
+			const jData = SwitchboardMapper.ingameGraph.get(jIdx);
+			if (!jData || !jData.junctionId) continue;
+
+			const port = getBlockPortAtSwitch(blockId, segId);
+			if (port) {
+				junctionEntries.set(jData.junctionId, port);
+			}
+		}
+
+		if (junctionEntries.size > 0) {
+			blockJunctionMap[blockId] = Array.from(junctionEntries.entries()).map(([jid, port]) => ({ junctionId: jid, port }));
+		} else {
+			blockJunctionMap[blockId] = [];
+		}
+	}
+
+	fetch(new URL('/occupancy', location), {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(blockJunctionMap)
+	}).then(() => {
+		console.log(`Sent occupancy mapping for ${Object.keys(blockJunctionMap).length} blocks`);
+	}).catch(err => {
+		console.error('Failed to send occupancy mapping:', err);
+	});
+}
+
+function getBlockPortAtSwitch(blockId, switchSegId) {
+	const sw = TrackData.getSegment(switchSegId);
+	if (!sw || sw.type !== 'switch') return null;
+
+	const block = TrackData.getBlock(blockId);
+	if (!block) return null;
+
+	const blockSegIds = new Set(block.segmentIds);
+
+	const hasTrackAtPort = (nodeId) => {
+		for (const seg of TrackData.segments.values()) {
+			if (seg.type === 'switch') continue;
+			if (!blockSegIds.has(seg.id)) continue;
+			if (seg.n1 === nodeId || seg.n2 === nodeId) return true;
+		}
+		return false;
+	};
+
+	if (hasTrackAtPort(sw.merging)) return 'common';
+	if (hasTrackAtPort(sw.nl)) return 'left';
+	if (hasTrackAtPort(sw.nr)) return 'right';
+	return null;
 }

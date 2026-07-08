@@ -121,7 +121,16 @@ const TrackRenderer = {
         }
 
         const block = TrackData.getBlockForSegment(segment.id);
-        const color = block && block.color ? block.color : '#666';
+        let color;
+        if (!block) {
+            color = '#666';
+        } else if (block.occupancyState === 'occupied') {
+            color = '#a02020';
+        } else if (block.occupancyState === 'clear') {
+            color = '#208020';
+        } else {
+            color = '#888';
+        }
 
         let layer;
         

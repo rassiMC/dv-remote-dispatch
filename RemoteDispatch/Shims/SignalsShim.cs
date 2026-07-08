@@ -20,6 +20,39 @@ namespace DvMod.RemoteDispatch
 
 		internal static bool IsInitialized { get; private set; }
 
+	/// <summary>
+	/// Returns a dictionary of JunctionId -> (CurrentAspectId, Direction) for all junction signals.
+	/// Used by OccupancyData to determine block occupancy from signal aspects.
+	/// </summary>
+	internal static Dictionary<string, (string aspectId, string direction)> GetJunctionSignalAspects()
+	{
+		var result = new Dictionary<string, (string aspectId, string direction)>();
+		if (!IsInitialized || _getAllSignalsMethod == null) return result;
+
+		try
+		{
+			var signalsData = _getAllSignalsMethod.Invoke(null, null);
+			if (signalsData is not Dictionary<string, object> data) return result;
+
+			foreach (var signal in data.Values)
+			{
+				var signalObject = JObject.FromObject(signal);
+				var junctionId = signalObject["JunctionId"]?.ToString();
+				if (string.IsNullOrEmpty(junctionId)) continue;
+
+				var aspectId = signalObject["CurrentAspectId"]?.ToString() ?? "";
+				var direction = signalObject["Direction"]?.ToString() ?? "";
+				result[junctionId] = (aspectId, direction);
+			}
+		}
+		catch (Exception ex)
+		{
+			Main.Warning($"GetJunctionSignalAspects failed: {ex.Message}");
+		}
+
+		return result;
+	}
+
 		/// <summary>
 		/// Sets up the integration with the Signals mod if it's present and enabled.
 		/// This should be called during the main mod's initialization.

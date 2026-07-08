@@ -15,6 +15,8 @@ const SwitchboardMapper = {
         403: { addNeighbors: [404], commonNeighbor: 404 },
         18: { addNeighbors: [404], commonNeighbor: 404 },
         370: { addNeighbors: [404], leftNeighbor: 404 },
+        26: { neighbors: [27], leftNeighbor: 27, rightNeighbor: 77 },
+        125: { neighbors: [121, 123], leftNeighbor: 123, rightNeighbor: 121 },
     },
 
     async fetchIngameGraph() {

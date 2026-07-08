@@ -1645,8 +1645,13 @@ function initSwitchboard() {
 }
 
 function loadSampleTrackData() {
-	// Load RD_1.0.4.json sample data
-		fetch('res/RD_1.0.4.json')
+	fetch(new URL('/modconfig', location))
+		.then(resp => resp.json())
+		.then(config => {
+			const trackFile = config.doubleTrack ? 'DoubbleTrack1.0_1.4.3.json' : 'RD_1.0.4.json';
+			console.log(`Loading track data: ${trackFile} (DoubleTrack: ${config.doubleTrack ?? false})`);
+			return fetch(`res/${trackFile}`);
+		})
 		.then(response => {
 			if (!response.ok) {
 				throw new Error('Failed to load sample data');

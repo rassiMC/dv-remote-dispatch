@@ -136,6 +136,9 @@ namespace DvMod.RemoteDispatch
 			Main.DebugLog("/signal endpoint hit");
 			await HandleSignalRequest(context);
 			break;
+		case "modconfig":
+			HandleModConfigRequest(context);
+			break;
 		default:
 			Main.DebugLog("unknown endpoint hit");
 			RenderEmpty(context, 404);
@@ -398,6 +401,14 @@ namespace DvMod.RemoteDispatch
 			var extension = Path.GetExtension(resourceName);
 			context.Response.ContentType = ContentTypes.ForExtension(extension);
 			RenderResource(context, $"frontend.{resourceName}");
+		}
+
+		private static void HandleModConfigRequest(HttpListenerContext context)
+		{
+			var config = new JObject();
+			var doubleTrackMod = UnityModManagerNet.UnityModManager.FindMod("DoubleTrack");
+			config["doubleTrack"] = doubleTrackMod != null && doubleTrackMod.Enabled;
+			Render200(context, ContentTypes.Json, config.ToString());
 		}
 
 		private static void RenderResource(HttpListenerContext context, string resourceName)

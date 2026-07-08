@@ -214,17 +214,28 @@ const TrackRenderer = {
             out2Color = inactiveColor;
         }
 
-        L.polyline([inboundPos, out1Pos], {
+        const out1Active = currentBranch === 0;
+        const out2Active = currentBranch === 1;
+
+        const out1Polyline = L.polyline([inboundPos, out1Pos], {
             color: out1Color,
             weight: 5,
             opacity: 1
-        }).addTo(group);
+        });
 
-        L.polyline([inboundPos, out2Pos], {
+        const out2Polyline = L.polyline([inboundPos, out2Pos], {
             color: out2Color,
             weight: 5,
             opacity: 1
-        }).addTo(group);
+        });
+
+        if (out1Active) {
+            out2Polyline.addTo(group);
+            out1Polyline.addTo(group);
+        } else {
+            out1Polyline.addTo(group);
+            out2Polyline.addTo(group);
+        }
 
         L.circle(inboundPos, {
             radius: 0.1,

@@ -137,9 +137,9 @@ const TrackData = {
         this.nodes = new Map(data.nodes.map(n => [n.id, n]));
         this.segments = new Map(data.segments.map(s => [s.id, s]));
         this.blocks = new Map(data.blocks.map(b => [b.id, b]));
-        this.nextNodeId = data.nextNodeId;
-        this.nextSegmentId = data.nextSegmentId;
-        this.nextBlockId = data.nextBlockId;
+        this.nextNodeId = data.nextNodeId ?? this.nextNodeId;
+        this.nextSegmentId = data.nextSegmentId ?? this.nextSegmentId;
+        this.nextBlockId = data.nextBlockId ?? this.nextBlockId;
     },
 
     save(name) {
@@ -216,6 +216,27 @@ const TrackData = {
             const block = this.createBlock(autoNames[nameIndex++] || `Block ${nameIndex}`);
             block.color = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
             this.groupIntoBlocks_floodFill(segId, null, block, visited);
+        }
+
+        for (const seg of this.segments.values()) {
+            if (seg.type !== 'switch') continue;
+
+            let targetBlock = null;
+            for (const otherSeg of this.segments.values()) {
+                if (otherSeg.type === 'switch') continue;
+                if (otherSeg.blockId && (otherSeg.n1 === seg.merging || otherSeg.n2 === seg.merging)) {
+                    targetBlock = this.getBlock(otherSeg.blockId);
+                    break;
+                }
+            }
+
+            if (!targetBlock) {
+                targetBlock = this.createBlock(autoNames[nameIndex++] || `Block ${nameIndex}`);
+                targetBlock.color = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
+            }
+
+            seg.blockId = targetBlock.id;
+            targetBlock.segmentIds.push(seg.id);
         }
 
         if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer && switchboardRenderer.rerenderAllSegments) {

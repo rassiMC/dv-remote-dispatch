@@ -199,7 +199,11 @@ const TrackRenderer = {
         const currentBranch = ingameData?.currentBranch;
 
         let rimColor = '#555';
-        if (typeof getSignalsByJunctionId === 'function' && ingameData?.junctionId) {
+        if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
+            const aspectState = SwitchboardSignals.getSwitchAspectForBlock(segment.id);
+            if (aspectState === 'occupied') rimColor = '#a02020';
+            else if (aspectState === 'clear') rimColor = '#208020';
+        } else if (typeof getSignalsByJunctionId === 'function' && ingameData?.junctionId) {
             const junctionSignals = getSignalsByJunctionId(ingameData.junctionId);
             if (junctionSignals.length > 0) {
                 const occupiedAspects = new Set(['S1', 'S1r', 'S1c']);

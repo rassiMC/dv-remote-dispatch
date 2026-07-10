@@ -21,6 +21,7 @@ namespace DvMod.RemoteDispatch
 			public string? CurrentAspectId { get; set; }
 			public string? Mode { get; set; }
 			public string? Type { get; set; }
+			public string? Direction { get; set; }
 			public JToken[]? Position { get; set; }
 			public string? JunctionId { get; set; }
 		}
@@ -115,8 +116,8 @@ namespace DvMod.RemoteDispatch
 		{
 			/// <summary>
 			/// Projects raw signal data to minimal form containing only frontend-required fields.
-			/// Strips 6 unused fields (IsOn, Direction, JunctionId, SelectedBranch, YardId, TrackId).
-			/// Keeps only 5 used fields: Id, CurrentAspectId, Mode, Position, Type.
+			/// Strips 5 unused fields (IsOn, SelectedBranch, YardId, TrackId).
+			/// Keeps 7 used fields: Id, CurrentAspectId, Mode, Position, Type, Direction, JunctionId.
 			/// </summary>
 			public static Dictionary<string, MinimalSignalData> Create(Dictionary<string, object> rawSignals)
 			{
@@ -153,6 +154,7 @@ namespace DvMod.RemoteDispatch
 				var mode = NormalizeToString(signalObject, "Mode", null)?.ToString() ?? string.Empty;
 				var position = GetLatLonArray(signalObject);
 				var type = NormalizeToString(signalObject, "Type", null)?.ToString() ?? string.Empty;
+				var direction = NormalizeToString(signalObject, "Direction", null)?.ToString() ?? string.Empty;
 
 				return new MinimalSignalData
 				{
@@ -161,6 +163,7 @@ namespace DvMod.RemoteDispatch
 					Mode = mode,
 					Position = position,
 					Type = type,
+					Direction = direction,
 					JunctionId = signalObject["JunctionId"]?.ToString()
 				};
 			}

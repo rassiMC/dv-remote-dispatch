@@ -620,7 +620,7 @@ function createSignalMarker(signalId, signalData) {
 		.bindPopup(() => buildSignalPopup(signalId, signalType), { maxWidth: 260 })
 		.addTo(map);
 
-	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, junctionId: signalData.JunctionId || null });
+	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null });
 }
 
 function getSignalsByJunctionId(junctionId) {
@@ -1690,7 +1690,7 @@ function loadSampleTrackData() {
 	fetch(new URL('/modconfig', location))
 		.then(resp => resp.json())
 		.then(config => {
-			const trackFile = config.doubleTrack ? 'DoubbleTrack1.0_1.4.3.json' : 'RD_1.0.4.json';
+			const trackFile = config.doubleTrack ? 'DoubbleTrack1.0_1.4.3.json' : 'RD_1.0.8.json';
 			console.log(`Loading track data: ${trackFile} (DoubleTrack: ${config.doubleTrack ?? false})`);
 			return fetch(`res/${trackFile}`);
 		})
@@ -1786,6 +1786,10 @@ async function buildSwitchMapping() {
 		SwitchboardMapper.printMapping();
 
 		sendBlockOccupancyMapping();
+
+		if (typeof SwitchboardSignals !== 'undefined') {
+			SwitchboardSignals.init();
+		}
 
 		if (switchboardRenderer) {
 			switchboardRenderer.rerenderAllSegments();

@@ -628,7 +628,7 @@ function getSignalsByJunctionId(junctionId) {
 	const result = [];
 	for (const [signalId, entry] of signalMarkers) {
 		if (entry.junctionId === junctionId) {
-			result.push({ signalId, aspect: entry.aspect, direction: entry.direction || null });
+			result.push(entry);
 		}
 	}
 	return result;

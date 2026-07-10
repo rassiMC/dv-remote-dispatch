@@ -198,29 +198,12 @@ const TrackRenderer = {
         const ingameData = jIdx !== null ? SwitchboardMapper.ingameGraph?.get(jIdx) : null;
         const currentBranch = ingameData?.currentBranch;
 
-        let rimColor = '#555';
-        if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
-            const aspectState = SwitchboardSignals.getSwitchAspectForBlock(segment.id);
-            if (aspectState === 'occupied') rimColor = '#a02020';
-            else if (aspectState === 'clear') rimColor = '#208020';
-        } else if (typeof getSignalsByJunctionId === 'function' && ingameData?.junctionId) {
-            const junctionSignals = getSignalsByJunctionId(ingameData.junctionId);
-            if (junctionSignals.length > 0) {
-                const occupiedAspects = new Set(['S1', 'S1r', 'S1c']);
-                const clearAspects = new Set(['S2', 'S4', 'S6']);
-                const hasOccupied = junctionSignals.some(s => occupiedAspects.has(s.aspect));
-                const hasClear = junctionSignals.some(s => clearAspects.has(s.aspect));
-
-                if (junctionSignals.length === 1) {
-                    if (hasOccupied) rimColor = '#a02020';
-                    else if (hasClear) rimColor = '#208020';
-                } else {
-                    const allOccupied = junctionSignals.every(s => occupiedAspects.has(s.aspect));
-                    if (allOccupied) rimColor = '#a02020';
-                    else if (hasClear) rimColor = '#208020';
-                }
-            }
-        }
+        const sig = SwitchboardMapper.switchboardGraph?.get(segment.id)?.signals;
+        const present = v => (v !== null && v !== undefined) ? 0xFF : 0x00;
+        const r = present(sig?.LeftIn);
+        const g = present(sig?.Out);
+        const b = present(sig?.RightIn);
+        const rimColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 
         const rect = L.rectangle(rectBounds, {
             color: rimColor,
@@ -232,7 +215,7 @@ const TrackRenderer = {
 
         this.switchBounds.set(segment.id, { minX, maxX, minY, maxY });
 
-        const activeColor = '#ffffff';
+        const activeColor = color;
         const inactiveColor = '#444';
 
         let out1Color, out2Color;

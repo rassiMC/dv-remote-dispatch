@@ -124,6 +124,7 @@ namespace DvMod.RemoteDispatch.Signals
 			var result = new Dictionary<string, object>();
 			try
 			{
+				LoggingReturn.DebugLog?.Invoke("GetAllSignals: calling ForceUpdateAllSignalAspects...");
 				ForceUpdateAllSignalAspects();
 
 				var signals = SignalsAPI.GetAllSignals();
@@ -133,7 +134,6 @@ namespace DvMod.RemoteDispatch.Signals
 					return result;
 				}
 
-				LoggingReturn.DebugLog?.Invoke($"Found {signals.Count} signals.");
 				foreach (var signal in signals)
 				{
 					var aspect = signal.CurrentAspectId ?? "OFF";
@@ -192,13 +192,29 @@ namespace DvMod.RemoteDispatch.Signals
 			{
 				if (_apiForceUpdateMethod == null)
 				{
-					_apiForceUpdateMethod = typeof(SignalsAPI).GetMethod("ForceUpdateAllSignals", BindingFlags.Public | BindingFlags.Static);
+					// Use runtime type, not compile-time reference, since the installed
+					// Signals.API.dll may be newer than the one we compiled against.
+					var runtimeType = SignalsAPI.Instance?.GetType() ?? typeof(SignalsAPI);
+					_apiForceUpdateMethod = runtimeType.GetMethod("ForceUpdateAllSignals", BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance);
+					if (_apiForceUpdateMethod == null)
+					{
+						// Search all loaded assemblies for the method
+						foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+						{
+							var t = asm.GetType("Signals.API.SignalsAPI");
+							if (t != null)
+							{
+								_apiForceUpdateMethod = t.GetMethod("ForceUpdateAllSignals", BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance);
+								if (_apiForceUpdateMethod != null) break;
+							}
+						}
+					}
 					if (_apiForceUpdateMethod == null) return false;
 					LoggingReturn.DebugLog?.Invoke("ForceUpdate: found SignalsAPI.ForceUpdateAllSignals.");
 				}
 
-				_apiForceUpdateMethod.Invoke(null, new object[] { false });
-				LoggingReturn.DebugLog?.Invoke("ForceUpdate: called SignalsAPI.ForceUpdateAllSignals(false).");
+				var obj = _apiForceUpdateMethod.IsStatic ? null : SignalsAPI.Instance;
+				_apiForceUpdateMethod.Invoke(obj, new object[] { false });
 				return true;
 			}
 			catch (Exception ex)

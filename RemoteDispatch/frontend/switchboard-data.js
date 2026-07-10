@@ -205,6 +205,10 @@ const TrackData = {
             seg.blockId = null;
         }
 
+        if (typeof invalidateBlockSwitchCache === 'function') {
+            invalidateBlockSwitchCache();
+        }
+
         const visited = new Set();
         const autoNames = ["Block A", "Block B", "Block C", "Block D", "Block E",
                            "Block F", "Block G", "Block H", "Block I", "Block J"];

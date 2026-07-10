@@ -54,6 +54,15 @@ const TrackRenderer = {
         }
     },
 
+    rerenderBlocks(blockIds) {
+        for (const seg of TrackData.segments.values()) {
+            const block = TrackData.getBlockForSegment(seg.id);
+            if (block && blockIds.has(block.id)) {
+                this.renderSegment(seg);
+            }
+        }
+    },
+
     renderNode(node, isSelected = false, forceVisible = false) {
         if (this.nodeMarkers.has(node.id)) {
             this.clearNode(node.id);
@@ -198,12 +207,12 @@ const TrackRenderer = {
         const ingameData = jIdx !== null ? SwitchboardMapper.ingameGraph?.get(jIdx) : null;
         const currentBranch = ingameData?.currentBranch;
 
-        const sig = SwitchboardMapper.switchboardGraph?.get(segment.id)?.rawSignals;
-        const present = v => (v !== null && v !== undefined) ? 0xFF : 0x00;
-        const r = present(sig?.LeftIn);
-        const g = present(sig?.Out);
-        const b = present(sig?.RightIn);
-        const rimColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+        let rimColor = '#555';
+        if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
+            const aspectState = SwitchboardSignals.getSwitchAspectForBlock(segment.id);
+            if (aspectState === 'clear') rimColor = '#208020';
+            else if (aspectState === 'occupied') rimColor = '#a02020';
+        }
 
         const rect = L.rectangle(rectBounds, {
             color: rimColor,

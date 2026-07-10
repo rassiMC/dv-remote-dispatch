@@ -815,10 +815,6 @@ function updateAllSignals(signalsData) {
 	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
 		SwitchboardSignals.updateAllVirtualSignals();
 	}
-
-	if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
-		switchboardRenderer.rerenderAllSegments();
-	}
 }
 
 function updateBlockOccupancy(occupancyData) {
@@ -826,7 +822,6 @@ function updateBlockOccupancy(occupancyData) {
 	if (typeof switchboardRenderer === 'undefined' || !switchboardRenderer) return;
 
 	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
-		computeAllBlockOccupancyFromVirtualSignals();
 		return;
 	}
 
@@ -848,36 +843,56 @@ function updateBlockOccupancy(occupancyData) {
 }
 
 function computeAllBlockOccupancyFromVirtualSignals() {
-	let changed = false;
+	if (typeof SwitchboardSignals === 'undefined' || !SwitchboardSignals.initialized) return;
+
+	const changedBlocks = new Set();
 	for (const [blockId, block] of TrackData.blocks) {
 		const newState = computeBlockOccupancyFromVirtualSignals(blockId);
 		if (block.occupancyState !== newState) {
 			block.occupancyState = newState;
-			changed = true;
+			changedBlocks.add(blockId);
 		}
 	}
-	if (changed) {
-		switchboardRenderer.rerenderAllSegments();
+	if (changedBlocks.size > 0 && typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
+		switchboardRenderer.rerenderBlocks(changedBlocks);
 	}
+}
+
+let _blockSwitchCache = null;
+function getBlockSwitchMap() {
+	if (_blockSwitchCache) return _blockSwitchCache;
+	_blockSwitchCache = new Map();
+	for (const seg of TrackData.segments.values()) {
+		if (seg.type !== 'switch') continue;
+		for (const [blockId, block] of TrackData.blocks) {
+			const port = getBlockPortAtSwitch(blockId, seg.id);
+			if (port) {
+				if (!_blockSwitchCache.has(blockId)) _blockSwitchCache.set(blockId, []);
+				_blockSwitchCache.get(blockId).push({ switchId: seg.id, port });
+			}
+		}
+	}
+	return _blockSwitchCache;
+}
+
+function invalidateBlockSwitchCache() {
+	_blockSwitchCache = null;
 }
 
 function computeBlockOccupancyFromVirtualSignals(blockId) {
 	const block = TrackData.getBlock(blockId);
 	if (!block) return 'unknown';
 
-	const blockSegIds = new Set(block.segmentIds);
+	const switchMap = getBlockSwitchMap();
+	const switchEntries = switchMap.get(blockId);
+	if (!switchEntries || switchEntries.length === 0) return block.occupancyState ?? 'unknown';
 
 	let foundClear = false;
 	let foundOccupied = false;
 	let foundAny = false;
 
-	for (const seg of TrackData.segments.values()) {
-		if (seg.type !== 'switch') continue;
-
-		const port = getBlockPortAtSwitch(blockId, seg.id);
-		if (!port) continue;
-
-		const graphEntry = SwitchboardMapper.switchboardGraph?.get(seg.id);
+	for (const { switchId, port } of switchEntries) {
+		const graphEntry = SwitchboardMapper.switchboardGraph?.get(switchId);
 		if (!graphEntry || !graphEntry.signals) continue;
 
 		let aspect = null;
@@ -896,10 +911,10 @@ function computeBlockOccupancyFromVirtualSignals(blockId) {
 		if (SwitchboardSignals.STOP_ASPECTS.has(aspect)) foundOccupied = true;
 	}
 
-	if (!foundAny) return 'unknown';
+	if (!foundAny) return block.occupancyState ?? 'unknown';
 	if (foundClear) return 'clear';
 	if (foundOccupied) return 'occupied';
-	return 'unknown';
+	return block.occupancyState ?? 'unknown';
 }
 
 /////////////////////

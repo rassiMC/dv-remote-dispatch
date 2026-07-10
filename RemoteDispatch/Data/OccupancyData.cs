@@ -152,8 +152,6 @@ namespace DvMod.RemoteDispatch
                 }
             }
 
-            Main.Log($"OccupancyData.ComputeOccupancy: {occupiedCount} occupied, {nullCount} null/unknown, {result.Count - occupiedCount - nullCount} clear, {signalAspects.Count} signals. {blocksWithEntries} blocks with entries ({totalEntries} total entries), {blocksWithoutEntries} blocks without entries. Entry stats: {noSignalCount} no-signal, {misalignedSkipCount} misaligned-skip");
-
             _currentOccupancy = result;
         }
 

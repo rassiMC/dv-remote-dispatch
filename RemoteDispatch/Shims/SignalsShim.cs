@@ -82,10 +82,6 @@ namespace DvMod.RemoteDispatch
 			}
 			list2.Add((aspectId, dir));
 		}
-
-		int inCount = result.Values.SelectMany(l => l).Count(v => v.direction == "In");
-		int outCount = result.Values.SelectMany(l => l).Count(v => v.direction == "Out");
-		Main.DebugLog($"SignalsShim: {inCount} In, {outCount} Out across {result.Count} junctions.");
 		}
 		catch (Exception ex)
 		{
@@ -262,7 +258,6 @@ namespace DvMod.RemoteDispatch
 		/// <returns></returns>
 		public static JToken? GetAllSignalsData()
 		{
-			Main.DebugLog("Getting all signals data...");
 			var signalsData = _getAllSignalsMethod?.Invoke(null, null);
 
 			if (signalsData is Dictionary<string, object> data)
@@ -297,7 +292,6 @@ namespace DvMod.RemoteDispatch
 						sig.Direction = "In";
 					suffixMatched++;
 				}
-				Main.DebugLog($"SignalsShim: suffix matching: {suffixMatched} matched, {noColon} without ':' suffix (using API Direction)");
 
 				var jMinimalData = JObject.FromObject(minimalData);
 				return jMinimalData;

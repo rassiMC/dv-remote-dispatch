@@ -19,9 +19,6 @@ const SwitchboardSignals = {
         this.initAllSwitches();
         this.initialized = true;
 
-        if (this._updateIntervalId) clearInterval(this._updateIntervalId);
-        this._updateIntervalId = setInterval(() => this.updateAllVirtualSignals(), 500);
-
         console.log('SwitchboardSignals initialized');
     },
 

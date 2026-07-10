@@ -120,6 +120,7 @@ namespace DvMod.RemoteDispatch
             Updater.Destroy();
             HttpServer.Destroy();
             SignalsShim.Teardown();
+            OccupancyData.ClearMapping();
         }
 
         public static void Log(string message)

@@ -359,6 +359,115 @@ namespace DvMod.RemoteDispatch
 		{
 			return JsonConvert.SerializeObject(BuildTrackGraph());
 		}
+
+		private static Dictionary<string, List<string>>? _inboundSignalMap;
+		private static readonly object _inboundSignalLock = new object();
+
+		/// <summary>
+		/// Builds a map of junctionIdLong -> list of signal IDs that are "In" signals (branch signals
+		/// placed on the junction's outBranch tracks). The signals mod does not populate JunctionId
+		/// for these signals, so we trace the track from each junction's outBranches to find them.
+		/// </summary>
+		public static Dictionary<string, List<string>> GetInboundSignalMap()
+		{
+			lock (_inboundSignalLock)
+			{
+				if (_inboundSignalMap != null) return _inboundSignalMap;
+				return BuildInboundSignalMap();
+			}
+		}
+
+		private static Dictionary<string, List<string>> BuildInboundSignalMap()
+		{
+			var map = new Dictionary<string, List<string>>();
+
+			if (!WorldStreamingInit.Instance || !WorldStreamingInit.IsLoaded)
+			{
+				Main.Warning("BuildInboundSignalMap: World not loaded yet.");
+				_inboundSignalMap = map;
+				return map;
+			}
+
+			var allSignals = SignalsShim.GetRawSignals();
+			if (allSignals.Count == 0)
+			{
+				Main.DebugLog("BuildInboundSignalMap: No signals data available.");
+				_inboundSignalMap = map;
+				return map;
+			}
+
+			var orphanSignals = new List<(string signalId, float x, float z)>();
+			foreach (var sig in allSignals)
+			{
+				if (!string.IsNullOrEmpty(sig.junctionId)) continue;
+				orphanSignals.Add((sig.id, sig.x, sig.z));
+			}
+
+			Main.DebugLog($"BuildInboundSignalMap: {orphanSignals.Count} orphaned signals to match.");
+
+			var junctions = RailTrackRegistry.Instance.OrderedJunctions;
+			const float MATCH_THRESHOLD = 5f;
+			const float MATCH_THRESHOLD_SQR = MATCH_THRESHOLD * MATCH_THRESHOLD;
+
+			foreach (var junction in junctions)
+			{
+				var junctionIdLong = junction.junctionData.junctionIdLong.ToString();
+				var branchTracks = new HashSet<RailTrack>();
+
+				foreach (var branch in junction.outBranches)
+				{
+					if (branch?.track?.outBranch?.track == null) continue;
+					branchTracks.Add(branch.track.outBranch.track);
+				}
+
+				foreach (var track in branchTracks)
+				{
+					var pointSet = track.GetKinkedPointSet();
+					if (pointSet?.points == null || pointSet.points.Length == 0) continue;
+
+					foreach (var (signalId, sigX, sigZ) in orphanSignals)
+					{
+						if (map.TryGetValue(junctionIdLong, out var existing) && existing.Contains(signalId))
+							continue;
+
+						bool matched = false;
+						foreach (var pt in pointSet.points)
+						{
+							float dx = (float)pt.position.x - sigX;
+							float dz = (float)pt.position.z - sigZ;
+							if (dx * dx + dz * dz < MATCH_THRESHOLD_SQR)
+							{
+								matched = true;
+								break;
+							}
+						}
+
+						if (matched)
+						{
+							if (!map.TryGetValue(junctionIdLong, out var list))
+							{
+								list = new List<string>();
+								map[junctionIdLong] = list;
+							}
+							list.Add(signalId);
+						}
+					}
+				}
+			}
+
+			int totalMatched = map.Values.Sum(l => l.Count);
+			Main.Log($"BuildInboundSignalMap: matched {totalMatched} In signals to {map.Count} junctions.");
+			_inboundSignalMap = map;
+			return map;
+		}
+
+		public static void ClearInboundSignalMap()
+		{
+			lock (_inboundSignalLock)
+			{
+				_inboundSignalMap = null;
+			}
+		}
 	}
 
 	public class JunctionGraphData

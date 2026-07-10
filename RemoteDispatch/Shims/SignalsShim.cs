@@ -3,6 +3,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 
 namespace DvMod.RemoteDispatch
@@ -21,12 +22,95 @@ namespace DvMod.RemoteDispatch
 		internal static bool IsInitialized { get; private set; }
 
 	/// <summary>
-	/// Returns a dictionary of JunctionId -> (CurrentAspectId, Direction) for all junction signals.
+	/// Returns a dictionary of JunctionId -> list of (CurrentAspectId, Direction) for all junction signals.
+	/// A junction can have up to two signals: one facing "In" and one facing "Out".
 	/// Used by OccupancyData to determine block occupancy from signal aspects.
 	/// </summary>
-	internal static Dictionary<string, (string aspectId, string direction)> GetJunctionSignalAspects()
+	internal static Dictionary<string, List<(string aspectId, string direction)>> GetJunctionSignalAspects()
 	{
-		var result = new Dictionary<string, (string aspectId, string direction)>();
+		var result = new Dictionary<string, List<(string aspectId, string direction)>>();
+		if (!IsInitialized || _getAllSignalsMethod == null) return result;
+
+		try
+		{
+			var signalsData = _getAllSignalsMethod.Invoke(null, null);
+			if (signalsData is not Dictionary<string, object> data) return result;
+
+		var orphanSignalAspects = new Dictionary<string, string>();
+
+		foreach (var signal in data.Values)
+		{
+			var signalObject = JObject.FromObject(signal);
+			var junctionId = signalObject["JunctionId"]?.ToString();
+			var aspectId = signalObject["CurrentAspectId"]?.ToString() ?? "";
+			var direction = signalObject["Direction"]?.ToString() ?? "";
+
+			if (!string.IsNullOrEmpty(junctionId))
+			{
+				if (!result.TryGetValue(junctionId, out var list))
+				{
+					list = new List<(string aspectId, string direction)>();
+					result[junctionId] = list;
+				}
+				list.Add((aspectId, direction));
+			}
+			else
+			{
+				var signalId = signalObject["Id"]?.ToString() ?? "";
+				if (!string.IsNullOrEmpty(signalId))
+					orphanSignalAspects[signalId] = aspectId;
+			}
+		}
+
+		int idMatched = 0;
+		int idUnmatched = 0;
+		foreach (var kvp in orphanSignalAspects)
+		{
+			var signalId = kvp.Key;
+			var colonIdx = signalId.LastIndexOf(':');
+			if (colonIdx <= 0)
+			{
+				idUnmatched++;
+				if (idUnmatched <= 5)
+					Main.DebugLog($"SignalsShim: orphaned signal '{signalId}' has no ':' in name");
+				continue;
+			}
+			var prefix = signalId.Substring(0, colonIdx);
+			var suffix = signalId.Substring(colonIdx + 1);
+
+			if (result.TryGetValue(prefix, out var list))
+			{
+				list.Add((kvp.Value, "In"));
+				idMatched++;
+			}
+			else
+			{
+				idUnmatched++;
+				if (idUnmatched <= 5)
+					Main.DebugLog($"SignalsShim: orphaned signal '{signalId}' prefix '{prefix}' not found in junction map (has {result.Count} junctions)");
+			}
+		}
+
+		int inCount = result.Values.SelectMany(l => l).Count(v => v.direction == "In");
+		int outCount = result.Values.SelectMany(l => l).Count(v => v.direction == "Out");
+		int otherCount = result.Values.SelectMany(l => l).Count(v => v.direction != "In" && v.direction != "Out");
+		Main.DebugLog($"SignalsShim: {inCount} In, {outCount} Out, {otherCount} other direction signals across {result.Count} junctions. ID-matched: {idMatched}, unmatched: {idUnmatched}");
+		}
+		catch (Exception ex)
+		{
+			Main.Warning($"GetJunctionSignalAspects failed: {ex.Message}");
+		}
+
+		return result;
+	}
+
+	/// <summary>
+	/// Returns raw signal data as a dictionary of signalId -> (Id, JunctionId, Position[x,z], CurrentAspectId).
+	/// Position is in raw world coordinates (not converted to lat/lng).
+	/// </summary>
+	internal static List<(string id, string? junctionId, float x, float z, string aspectId)> GetRawSignals()
+	{
+		var result = new List<(string id, string? junctionId, float x, float z, string aspectId)>();
 		if (!IsInitialized || _getAllSignalsMethod == null) return result;
 
 		try
@@ -37,24 +121,27 @@ namespace DvMod.RemoteDispatch
 			foreach (var signal in data.Values)
 			{
 				var signalObject = JObject.FromObject(signal);
+				var id = signalObject["Id"]?.ToString() ?? "";
 				var junctionId = signalObject["JunctionId"]?.ToString();
-				if (string.IsNullOrEmpty(junctionId)) continue;
-
+				if (string.IsNullOrEmpty(junctionId)) junctionId = null;
 				var aspectId = signalObject["CurrentAspectId"]?.ToString() ?? "";
-				var direction = signalObject["Direction"]?.ToString() ?? "";
-				result[junctionId] = (aspectId, direction);
+
+				var posArr = signalObject["Position"] as JArray;
+				if (posArr == null || posArr.Count < 2) continue;
+
+				result.Add((id, junctionId, posArr[0].Value<float>(), posArr[1].Value<float>(), aspectId));
 			}
 		}
 		catch (Exception ex)
 		{
-			Main.Warning($"GetJunctionSignalAspects failed: {ex.Message}");
+			Main.Warning($"GetRawSignals failed: {ex.Message}");
 		}
 
 		return result;
 	}
 
-		/// <summary>
-		/// Sets up the integration with the Signals mod if it's present and enabled.
+	/// <summary>
+	/// Sets up the integration with the Signals mod if it's present and enabled.
 		/// This should be called during the main mod's initialization.
 		/// </summary>
 		internal static void Initialize()

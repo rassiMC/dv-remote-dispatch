@@ -620,7 +620,18 @@ function createSignalMarker(signalId, signalData) {
 		.bindPopup(() => buildSignalPopup(signalId, signalType), { maxWidth: 260 })
 		.addTo(map);
 
-	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType });
+	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, junctionId: signalData.JunctionId || null });
+}
+
+function getSignalsByJunctionId(junctionId) {
+	if (!junctionId) return [];
+	const result = [];
+	for (const [signalId, entry] of signalMarkers) {
+		if (entry.junctionId === junctionId) {
+			result.push({ signalId, aspect: entry.aspect, direction: entry.direction || null });
+		}
+	}
+	return result;
 }
 
 function buildSignalPopup(signalId, signalType) {
@@ -795,6 +806,10 @@ function updateAllSignals(signalsData) {
 			if (aspectSel) aspectSel.value = aspect;
 		}
 	});
+
+	if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
+		switchboardRenderer.rerenderAllSegments();
+	}
 }
 
 function updateBlockOccupancy(occupancyData) {
@@ -1627,6 +1642,9 @@ const signalsReady = junctionsReady
 			signalsInstalled = true;
 			Object.entries(allSignalsData).forEach(([signalId, signalData]) =>
 				createSignalMarker(signalId, signalData));
+			if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
+				switchboardRenderer.rerenderAllSegments();
+			}
 		}
 	});
 
@@ -1778,67 +1796,86 @@ async function buildSwitchMapping() {
 }
 
 function sendBlockOccupancyMapping() {
-	if (!SwitchboardMapper.mapping || SwitchboardMapper.mapping.size === 0) return;
-	if (!TrackData.blocks || TrackData.blocks.size === 0) return;
-	if (!SwitchboardMapper.ingameGraph || SwitchboardMapper.ingameGraph.size === 0) return;
+    if (!SwitchboardMapper.mapping || SwitchboardMapper.mapping.size === 0) return;
+    if (!TrackData.blocks || TrackData.blocks.size === 0) return;
+    if (!SwitchboardMapper.ingameGraph || SwitchboardMapper.ingameGraph.size === 0) return;
 
-	const blockJunctionMap = {};
-	for (const [blockId, block] of TrackData.blocks) {
-		const junctionEntries = new Map();
+    const blockJunctionMap = {};
+    for (const [blockId, block] of TrackData.blocks) {
+        blockJunctionMap[blockId] = [];
+    }
 
-		for (const segId of (block.segmentIds || [])) {
-			const seg = TrackData.getSegment(segId);
-			if (!seg || seg.type !== 'switch') continue;
+    const portNodeNames = [
+        { nodeName: 'merging', portName: 'common' },
+        { nodeName: 'nl', portName: 'left' },
+        { nodeName: 'nr', portName: 'right' }
+    ];
 
-			const jIdx = SwitchboardMapper.getIngameJunctionIndex(segId);
-			if (jIdx === null) continue;
-			const jData = SwitchboardMapper.ingameGraph.get(jIdx);
-			if (!jData || !jData.junctionId) continue;
+    for (const [segId, seg] of TrackData.segments) {
+        if (seg.type !== 'switch') continue;
 
-			const port = getBlockPortAtSwitch(blockId, segId);
-			if (port) {
-				junctionEntries.set(jData.junctionId, port);
-			}
-		}
+        const jIdx = SwitchboardMapper.getIngameJunctionIndex(segId);
+        if (jIdx === null) continue;
+        const jData = SwitchboardMapper.ingameGraph.get(jIdx);
+        if (!jData || !jData.junctionId) continue;
 
-		if (junctionEntries.size > 0) {
-			blockJunctionMap[blockId] = Array.from(junctionEntries.entries()).map(([jid, port]) => ({ junctionId: jid, port }));
-		} else {
-			blockJunctionMap[blockId] = [];
-		}
-	}
+        for (const { nodeName, portName } of portNodeNames) {
+            const nodeId = seg[nodeName];
+            if (!nodeId) continue;
 
-	fetch(new URL('/occupancy', location), {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(blockJunctionMap)
-	}).then(() => {
-		console.log(`Sent occupancy mapping for ${Object.keys(blockJunctionMap).length} blocks`);
-	}).catch(err => {
-		console.error('Failed to send occupancy mapping:', err);
-	});
+            const blocksAtPort = new Set();
+            for (const otherSeg of TrackData.segments.values()) {
+                if (otherSeg.type === 'switch') continue;
+                if (otherSeg.n1 !== nodeId && otherSeg.n2 !== nodeId) continue;
+                if (!otherSeg.blockId) continue;
+                blocksAtPort.add(otherSeg.blockId);
+            }
+
+            for (const blockId of blocksAtPort) {
+                const entries = blockJunctionMap[blockId];
+                const existing = entries.find(e => e.junctionId === jData.junctionId);
+                if (existing) {
+                    if (existing.port !== portName) {
+                        console.warn(`Block ${blockId} junction ${jData.junctionId} has conflicting ports: ${existing.port} vs ${portName}`);
+                    }
+                    continue;
+                }
+                entries.push({ junctionId: jData.junctionId, port: portName, junctionIndex: jData.junctionIndex });
+            }
+        }
+    }
+
+    fetch(new URL('/occupancy', location), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(blockJunctionMap)
+    }).then(() => {
+        console.log(`Sent occupancy mapping for ${Object.keys(blockJunctionMap).length} blocks`);
+    }).catch(err => {
+        console.error('Failed to send occupancy mapping:', err);
+    });
 }
 
 function getBlockPortAtSwitch(blockId, switchSegId) {
-	const sw = TrackData.getSegment(switchSegId);
-	if (!sw || sw.type !== 'switch') return null;
+    const sw = TrackData.getSegment(switchSegId);
+    if (!sw || sw.type !== 'switch') return null;
 
-	const block = TrackData.getBlock(blockId);
-	if (!block) return null;
+    const block = TrackData.getBlock(blockId);
+    if (!block) return null;
 
-	const blockSegIds = new Set(block.segmentIds);
+    const blockSegIds = new Set(block.segmentIds);
 
-	const hasTrackAtPort = (nodeId) => {
-		for (const seg of TrackData.segments.values()) {
-			if (seg.type === 'switch') continue;
-			if (!blockSegIds.has(seg.id)) continue;
-			if (seg.n1 === nodeId || seg.n2 === nodeId) return true;
-		}
-		return false;
-	};
+    const hasTrackAtPort = (nodeId) => {
+        for (const seg of TrackData.segments.values()) {
+            if (seg.type === 'switch') continue;
+            if (!blockSegIds.has(seg.id)) continue;
+            if (seg.n1 === nodeId || seg.n2 === nodeId) return true;
+        }
+        return false;
+    };
 
-	if (hasTrackAtPort(sw.merging)) return 'common';
-	if (hasTrackAtPort(sw.nl)) return 'left';
-	if (hasTrackAtPort(sw.nr)) return 'right';
-	return null;
+    if (hasTrackAtPort(sw.merging)) return 'common';
+    if (hasTrackAtPort(sw.nl)) return 'left';
+    if (hasTrackAtPort(sw.nr)) return 'right';
+    return null;
 }

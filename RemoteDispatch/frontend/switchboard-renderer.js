@@ -194,8 +194,32 @@ const TrackRenderer = {
             this.coordsToLatLng(maxX, maxY)
         ]);
 
+        const jIdx = SwitchboardMapper.getIngameJunctionIndex(segment.id);
+        const ingameData = jIdx !== null ? SwitchboardMapper.ingameGraph?.get(jIdx) : null;
+        const currentBranch = ingameData?.currentBranch;
+
+        let rimColor = '#555';
+        if (typeof getSignalsByJunctionId === 'function' && ingameData?.junctionId) {
+            const junctionSignals = getSignalsByJunctionId(ingameData.junctionId);
+            if (junctionSignals.length > 0) {
+                const occupiedAspects = new Set(['S1', 'S1r', 'S1c']);
+                const clearAspects = new Set(['S2', 'S4', 'S6']);
+                const hasOccupied = junctionSignals.some(s => occupiedAspects.has(s.aspect));
+                const hasClear = junctionSignals.some(s => clearAspects.has(s.aspect));
+
+                if (junctionSignals.length === 1) {
+                    if (hasOccupied) rimColor = '#a02020';
+                    else if (hasClear) rimColor = '#208020';
+                } else {
+                    const allOccupied = junctionSignals.every(s => occupiedAspects.has(s.aspect));
+                    if (allOccupied) rimColor = '#a02020';
+                    else if (hasClear) rimColor = '#208020';
+                }
+            }
+        }
+
         const rect = L.rectangle(rectBounds, {
-            color: '#555',
+            color: rimColor,
             weight: 2,
             fillColor: '#102020',
             fillOpacity: 0.7
@@ -206,10 +230,6 @@ const TrackRenderer = {
 
         const activeColor = '#ffffff';
         const inactiveColor = '#444';
-
-        const jIdx = SwitchboardMapper.getIngameJunctionIndex(segment.id);
-        const ingameData = jIdx !== null ? SwitchboardMapper.ingameGraph?.get(jIdx) : null;
-        const currentBranch = ingameData?.currentBranch;
 
         let out1Color, out2Color;
         if (currentBranch === 0) {

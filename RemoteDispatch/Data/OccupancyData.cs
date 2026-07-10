@@ -9,24 +9,31 @@ namespace DvMod.RemoteDispatch
     {
         private static readonly object cacheLock = new object();
 
-        private static Dictionary<string, List<(string junctionId, string port)>>? _blockJunctionMap;
+        private static Dictionary<string, List<(string junctionId, string port, int junctionIndex)>>? _blockJunctionMap;
         private static HashSet<string>? _allBlockIds;
         private static Dictionary<string, bool?> _lastOccupancy = new Dictionary<string, bool?>();
         private static Dictionary<string, bool?> _currentOccupancy = new Dictionary<string, bool?>();
+        private static bool _mappingInitialized = false;
 
         private static readonly HashSet<string> OccupiedAspects = new HashSet<string> { "S1", "S1r", "S1c" };
         private static readonly HashSet<string> ClearAspects = new HashSet<string> { "S2", "S4", "S6" };
 
         public static bool HasMapping => _blockJunctionMap != null && _blockJunctionMap.Count > 0;
 
-        public static void SetBlockMapping(Dictionary<string, List<(string junctionId, string port)>> mapping)
+        public static void SetBlockMapping(Dictionary<string, List<(string junctionId, string port, int junctionIndex)>> mapping)
         {
             lock (cacheLock)
             {
+                if (_mappingInitialized)
+                {
+                    Main.Log($"OccupancyData: ignoring duplicate mapping update ({mapping.Count} blocks).");
+                    return;
+                }
                 _blockJunctionMap = mapping;
                 _allBlockIds = new HashSet<string>(mapping.Keys);
                 _lastOccupancy.Clear();
                 _currentOccupancy.Clear();
+                _mappingInitialized = true;
                 Main.Log($"OccupancyData: set mapping for {mapping.Count} blocks.");
             }
         }
@@ -39,6 +46,7 @@ namespace DvMod.RemoteDispatch
                 _allBlockIds = null;
                 _lastOccupancy.Clear();
                 _currentOccupancy.Clear();
+                _mappingInitialized = false;
             }
         }
 
@@ -53,9 +61,16 @@ namespace DvMod.RemoteDispatch
             }
 
             var signalAspects = SignalsShim.GetJunctionSignalAspects();
+            var junctionStates = Junctions.GetAllJunctionStates().ToArray();
 
             int occupiedCount = 0;
             int nullCount = 0;
+            int noSignalCount = 0;
+            int dirMismatchCount = 0;
+            int misalignedSkipCount = 0;
+            int totalEntries = 0;
+            int blocksWithEntries = 0;
+            int blocksWithoutEntries = 0;
 
             foreach (var blockId in _allBlockIds)
             {
@@ -63,27 +78,59 @@ namespace DvMod.RemoteDispatch
                 {
                     result[blockId] = null;
                     nullCount++;
+                    blocksWithoutEntries++;
                     continue;
                 }
+
+                blocksWithEntries++;
+                totalEntries += entries.Count;
 
                 bool foundOccupied = false;
                 bool foundClear = false;
                 bool foundAnySignal = false;
 
-                foreach (var (junctionId, port) in entries)
+                foreach (var (junctionId, port, junctionIndex) in entries)
                 {
-                    if (!signalAspects.TryGetValue(junctionId, out var entry))
+                    if (port != "common")
+                    {
+                        if (junctionIndex < 0 || junctionIndex >= junctionStates.Length)
+                        {
+                            misalignedSkipCount++;
+                            continue;
+                        }
+                        byte currentBranch = junctionStates[junctionIndex];
+                        bool isSelected = (port == "left" && currentBranch == 0) ||
+                                          (port == "right" && currentBranch == 1);
+                        if (!isSelected)
+                        {
+                            misalignedSkipCount++;
+                            continue;
+                        }
+                    }
+
+                    if (!signalAspects.TryGetValue(junctionId, out var signalList))
+                    {
+                        noSignalCount++;
                         continue;
+                    }
 
-                    if (port == "common")
-                        continue;
+                    string requiredDirection = port == "common" ? "In" : "Out";
 
-                    foundAnySignal = true;
+                    foreach (var (aspectId, direction) in signalList)
+                    {
+                        if (direction != requiredDirection)
+                        {
+                            dirMismatchCount++;
+                            continue;
+                        }
 
-                    if (OccupiedAspects.Contains(entry.aspectId))
-                        foundOccupied = true;
-                    if (ClearAspects.Contains(entry.aspectId))
-                        foundClear = true;
+                        foundAnySignal = true;
+
+                        if (OccupiedAspects.Contains(aspectId))
+                            foundOccupied = true;
+                        if (ClearAspects.Contains(aspectId))
+                            foundClear = true;
+                    }
                 }
 
                 if (foundAnySignal)
@@ -99,7 +146,7 @@ namespace DvMod.RemoteDispatch
                 }
             }
 
-            Main.Log($"OccupancyData.ComputeOccupancy: {occupiedCount} occupied, {nullCount} null/unknown, {result.Count - occupiedCount - nullCount} clear, {signalAspects.Count} signals");
+            Main.Log($"OccupancyData.ComputeOccupancy: {occupiedCount} occupied, {nullCount} null/unknown, {result.Count - occupiedCount - nullCount} clear, {signalAspects.Count} signals. {blocksWithEntries} blocks with entries ({totalEntries} total entries), {blocksWithoutEntries} blocks without entries. Entry stats: {noSignalCount} no-signal, {dirMismatchCount} dir-mismatch, {misalignedSkipCount} misaligned-skip");
 
             _currentOccupancy = result;
         }

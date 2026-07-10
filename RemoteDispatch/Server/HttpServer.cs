@@ -231,7 +231,7 @@ namespace DvMod.RemoteDispatch
 
 			try
 			{
-				const int maxBodySize = 65536;
+				const int maxBodySize = 524288;
 				using var stream = context.Request.InputStream;
 				var buffer = new byte[8192];
 				int totalRead = 0;
@@ -339,9 +339,9 @@ namespace DvMod.RemoteDispatch
 		{
 			try
 			{
-				const int maxBodySize = 65536;
-				using var stream = context.Request.InputStream;
-				using var ms = new System.IO.MemoryStream();
+			const int maxBodySize = 524288;
+			using var stream = context.Request.InputStream;
+			using var ms = new System.IO.MemoryStream();
 				stream.CopyTo(ms);
 				if (ms.Length > maxBodySize)
 					throw new Exception("Request body too large");
@@ -349,18 +349,19 @@ namespace DvMod.RemoteDispatch
 				string bodyText = Encoding.UTF8.GetString(ms.ToArray());
 				var parsed = JObject.Parse(bodyText);
 
-				var mapping = new Dictionary<string, List<(string junctionId, string port)>>();
+				var mapping = new Dictionary<string, List<(string junctionId, string port, int junctionIndex)>>();
 				foreach (var prop in parsed.Properties())
 				{
 					var entries = prop.Value as JArray;
 					if (entries == null) continue;
-					var list = new List<(string junctionId, string port)>();
+					var list = new List<(string junctionId, string port, int junctionIndex)>();
 					foreach (var entry in entries)
 					{
 						var jid = entry["junctionId"]?.ToString();
 						var port = entry["port"]?.ToString() ?? "";
+						var jIdx = entry["junctionIndex"]?.Value<int>() ?? -1;
 						if (!string.IsNullOrEmpty(jid))
-							list.Add((jid, port));
+							list.Add((jid, port, jIdx));
 					}
 					mapping[prop.Name] = list;
 				}
@@ -476,6 +477,7 @@ namespace DvMod.RemoteDispatch
 			}
 			else
 			{
+				context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
 				stream.CopyTo(context.Response.OutputStream);
 				context.Response.Close();
 			}

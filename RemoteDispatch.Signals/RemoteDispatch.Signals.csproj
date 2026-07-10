@@ -18,10 +18,9 @@
 	</ItemGroup>
 
 	<!-- Signals -->
-	<ItemGroup Condition="Exists('/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals/Signals.API.dll')">
+	<ItemGroup Condition="Exists('/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals_v1.1.4-dev/Signals.API.dll')">
 		<Reference Include="Signals.API">
-			<HintPath>/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals/Signals.API.dll</HintPath>
-			<!-- Do not copy Signals.API.dll to the output directory, we just need it for compile time reference. -->
+			<HintPath>/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals_v1.1.4-dev/Signals.API.dll</HintPath>
 			<Private>false</Private>
 			<ExcludeAssets>runtime</ExcludeAssets>
 		</Reference>

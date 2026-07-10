@@ -1,7 +1,9 @@
-using System;
-using System.Collections.Generic;
-using Signals.API;
-using Newtonsoft.Json;
+	using System;
+	using System.Collections.Generic;
+	using System.Linq;
+	using System.Reflection;
+	using Signals.API;
+	using Newtonsoft.Json;
 
 namespace DvMod.RemoteDispatch.Signals
 {
@@ -122,6 +124,8 @@ namespace DvMod.RemoteDispatch.Signals
 			var result = new Dictionary<string, object>();
 			try
 			{
+				ForceUpdateAllSignalAspects();
+
 				var signals = SignalsAPI.GetAllSignals();
 				if (signals == null)
 				{
@@ -133,7 +137,6 @@ namespace DvMod.RemoteDispatch.Signals
 				foreach (var signal in signals)
 				{
 					var aspect = signal.CurrentAspectId ?? "OFF";
-					//LoggingReturn.DebugLog?.Invoke($"Found signal: {signal.Id} at {signal.Position} with aspect {aspect} and mode {signal.Mode}");
 
 					result[signal.Id] = new
 					{
@@ -142,12 +145,11 @@ namespace DvMod.RemoteDispatch.Signals
 						signal.Mode,
 						signal.CurrentAspectId,
 						signal.IsOn,
-						signal.Direction,
+						Direction = signal.Direction.ToString(),
 						signal.JunctionId,
 						signal.SelectedBranch,
 						signal.YardId,
 						signal.TrackId,
-						// Store raw world coordinates (x, z) - conversion to lat/lng happens in Session.cs
 						Position = new[] { signal.Position.x, signal.Position.z },
 					};
 				}
@@ -159,6 +161,134 @@ namespace DvMod.RemoteDispatch.Signals
 			}
 
 			return result;
+		}
+
+		private static MethodInfo? _forceUpdateMethod;
+		private static Type? _signalManagerType;
+		private static PropertyInfo? _allSignalsProp;
+		private static PropertyInfo? _instanceProp;
+		private static bool _reflectionResolved;
+
+		/// <summary>
+		/// Forces all signals to evaluate their aspects regardless of player proximity.
+		/// Tries the new SignalsAPI.ForceUpdateAllSignals(bool) if available,
+		/// otherwise falls back to per-signal UpdateAspect via reflection.
+		/// </summary>
+		private void ForceUpdateAllSignalAspects()
+		{
+			if (TryForceUpdateViaAPI()) return;
+			ForceUpdateViaReflection();
+		}
+
+		private static MethodInfo? _apiForceUpdateMethod;
+		private static bool _apiForceUpdateChecked;
+
+		private bool TryForceUpdateViaAPI()
+		{
+			if (_apiForceUpdateChecked && _apiForceUpdateMethod == null) return false;
+			_apiForceUpdateChecked = true;
+
+			try
+			{
+				if (_apiForceUpdateMethod == null)
+				{
+					_apiForceUpdateMethod = typeof(SignalsAPI).GetMethod("ForceUpdateAllSignals", BindingFlags.Public | BindingFlags.Static);
+					if (_apiForceUpdateMethod == null) return false;
+					LoggingReturn.DebugLog?.Invoke("ForceUpdate: found SignalsAPI.ForceUpdateAllSignals.");
+				}
+
+				_apiForceUpdateMethod.Invoke(null, new object[] { false });
+				LoggingReturn.DebugLog?.Invoke("ForceUpdate: called SignalsAPI.ForceUpdateAllSignals(false).");
+				return true;
+			}
+			catch (Exception ex)
+			{
+				LoggingReturn.Warning?.Invoke($"ForceUpdate via API failed: {ex.Message}");
+				return false;
+			}
+		}
+
+		private void ForceUpdateViaReflection()
+		{
+			try
+			{
+				if (!_reflectionResolved)
+				{
+					_reflectionResolved = true;
+					var signalsGameAsm = AppDomain.CurrentDomain.GetAssemblies()
+						.FirstOrDefault(a => a.GetName().Name == "Signals.Game");
+					if (signalsGameAsm == null)
+					{
+						LoggingReturn.DebugLog?.Invoke("ForceUpdate: Signals.Game assembly not found, skipping.");
+						return;
+					}
+
+					_signalManagerType = signalsGameAsm.GetType("Signals.Game.SignalManager");
+					if (_signalManagerType == null)
+					{
+						LoggingReturn.DebugLog?.Invoke("ForceUpdate: SignalManager type not found.");
+						return;
+					}
+
+					_allSignalsProp = _signalManagerType.GetProperty("AllSignals");
+					if (_allSignalsProp == null)
+					{
+						LoggingReturn.DebugLog?.Invoke("ForceUpdate: AllSignals property not found.");
+						return;
+					}
+
+					var baseType = _signalManagerType.BaseType;
+					while (baseType != null)
+					{
+						_instanceProp = baseType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+						if (_instanceProp != null) break;
+						baseType = baseType.BaseType;
+					}
+					if (_instanceProp == null)
+					{
+						LoggingReturn.DebugLog?.Invoke("ForceUpdate: Instance property not found on any base type.");
+						return;
+					}
+
+					var controllerType = signalsGameAsm.GetType("Signals.Game.Controllers.BasicSignalController");
+					if (controllerType == null)
+					{
+						LoggingReturn.DebugLog?.Invoke("ForceUpdate: BasicSignalController type not found.");
+						return;
+					}
+
+					_forceUpdateMethod = controllerType.GetMethod("UpdateAspect", new[] { typeof(bool) });
+					if (_forceUpdateMethod == null)
+					{
+						LoggingReturn.DebugLog?.Invoke("ForceUpdate: UpdateAspect method not found.");
+						return;
+					}
+
+					LoggingReturn.DebugLog?.Invoke("ForceUpdate: reflection resolved successfully.");
+				}
+
+				if (_forceUpdateMethod == null || _signalManagerType == null) return;
+
+				var instance = _instanceProp?.GetValue(null);
+				if (instance == null) return;
+
+				var allSignals = _allSignalsProp?.GetValue(instance) as System.Collections.IList;
+				if (allSignals == null) return;
+
+				int updated = 0;
+				foreach (var signal in allSignals)
+				{
+					var exists = signal.GetType().GetProperty("Exists")?.GetValue(signal) as bool?;
+					if (exists != true) continue;
+					_forceUpdateMethod.Invoke(signal, new object[] { false });
+					updated++;
+				}
+				LoggingReturn.DebugLog?.Invoke($"ForceUpdate: evaluated {updated} signals.");
+			}
+			catch (Exception ex)
+			{
+				LoggingReturn.Warning?.Invoke($"ForceUpdate failed: {ex.Message}");
+			}
 		}
 
 		/// <summary>

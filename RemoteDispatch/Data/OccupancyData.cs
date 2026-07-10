@@ -66,7 +66,6 @@ namespace DvMod.RemoteDispatch
             int occupiedCount = 0;
             int nullCount = 0;
             int noSignalCount = 0;
-            int dirMismatchCount = 0;
             int misalignedSkipCount = 0;
             int totalEntries = 0;
             int blocksWithEntries = 0;
@@ -119,10 +118,7 @@ namespace DvMod.RemoteDispatch
                     foreach (var (aspectId, direction) in signalList)
                     {
                         if (direction != requiredDirection)
-                        {
-                            dirMismatchCount++;
                             continue;
-                        }
 
                         foundAnySignal = true;
 
@@ -135,7 +131,17 @@ namespace DvMod.RemoteDispatch
 
                 if (foundAnySignal)
                 {
-                    bool occupied = foundOccupied && !foundClear;
+                    bool occupied;
+                    if (foundClear)
+                        occupied = false;
+                    else if (foundOccupied)
+                        occupied = true;
+                    else
+                    {
+                        result[blockId] = null;
+                        nullCount++;
+                        continue;
+                    }
                     result[blockId] = occupied;
                     if (occupied) occupiedCount++;
                 }
@@ -146,7 +152,7 @@ namespace DvMod.RemoteDispatch
                 }
             }
 
-            Main.Log($"OccupancyData.ComputeOccupancy: {occupiedCount} occupied, {nullCount} null/unknown, {result.Count - occupiedCount - nullCount} clear, {signalAspects.Count} signals. {blocksWithEntries} blocks with entries ({totalEntries} total entries), {blocksWithoutEntries} blocks without entries. Entry stats: {noSignalCount} no-signal, {dirMismatchCount} dir-mismatch, {misalignedSkipCount} misaligned-skip");
+            Main.Log($"OccupancyData.ComputeOccupancy: {occupiedCount} occupied, {nullCount} null/unknown, {result.Count - occupiedCount - nullCount} clear, {signalAspects.Count} signals. {blocksWithEntries} blocks with entries ({totalEntries} total entries), {blocksWithoutEntries} blocks without entries. Entry stats: {noSignalCount} no-signal, {misalignedSkipCount} misaligned-skip");
 
             _currentOccupancy = result;
         }

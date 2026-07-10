@@ -36,65 +36,56 @@ namespace DvMod.RemoteDispatch
 			var signalsData = _getAllSignalsMethod.Invoke(null, null);
 			if (signalsData is not Dictionary<string, object> data) return result;
 
-		var orphanSignalAspects = new Dictionary<string, string>();
-
-		foreach (var signal in data.Values)
+		foreach (var signal in data)
 		{
-			var signalObject = JObject.FromObject(signal);
-			var junctionId = signalObject["JunctionId"]?.ToString();
+			var signalObject = JObject.FromObject(signal.Value);
+			var signalId = signal.Key;
 			var aspectId = signalObject["CurrentAspectId"]?.ToString() ?? "";
-			var direction = signalObject["Direction"]?.ToString() ?? "";
 
-			if (!string.IsNullOrEmpty(junctionId))
+			var colonIdx = signalId.LastIndexOf(':');
+			if (colonIdx <= 0)
 			{
+				var junctionId = signalObject["JunctionId"]?.ToString();
+				var directionRaw = signalObject["Direction"]?.ToString();
+				string direction = null;
+				if (directionRaw == "Out" || directionRaw == "1")
+					direction = "Out";
+				else if (directionRaw == "In" || directionRaw == "2")
+					direction = "In";
+				if (string.IsNullOrEmpty(junctionId) || string.IsNullOrEmpty(direction))
+					continue;
+
 				if (!result.TryGetValue(junctionId, out var list))
 				{
 					list = new List<(string aspectId, string direction)>();
 					result[junctionId] = list;
 				}
 				list.Add((aspectId, direction));
-			}
-			else
-			{
-				var signalId = signalObject["Id"]?.ToString() ?? "";
-				if (!string.IsNullOrEmpty(signalId))
-					orphanSignalAspects[signalId] = aspectId;
-			}
-		}
-
-		int idMatched = 0;
-		int idUnmatched = 0;
-		foreach (var kvp in orphanSignalAspects)
-		{
-			var signalId = kvp.Key;
-			var colonIdx = signalId.LastIndexOf(':');
-			if (colonIdx <= 0)
-			{
-				idUnmatched++;
-				if (idUnmatched <= 5)
-					Main.DebugLog($"SignalsShim: orphaned signal '{signalId}' has no ':' in name");
 				continue;
 			}
-			var prefix = signalId.Substring(0, colonIdx);
+
+			var jId = signalId.Substring(0, colonIdx);
 			var suffix = signalId.Substring(colonIdx + 1);
 
-			if (result.TryGetValue(prefix, out var list))
-			{
-				list.Add((kvp.Value, "In"));
-				idMatched++;
-			}
+			string dir;
+			if (suffix == "F" || suffix == "T")
+				dir = "Out";
+			else if (suffix.StartsWith("B"))
+				dir = "In";
 			else
+				continue;
+
+			if (!result.TryGetValue(jId, out var list2))
 			{
-				idUnmatched++;
-				if (idUnmatched <= 5)
-					Main.DebugLog($"SignalsShim: orphaned signal '{signalId}' prefix '{prefix}' not found in junction map (has {result.Count} junctions)");
+				list2 = new List<(string aspectId, string direction)>();
+				result[jId] = list2;
 			}
+			list2.Add((aspectId, dir));
 		}
 
 		int inCount = result.Values.SelectMany(l => l).Count(v => v.direction == "In");
 		int outCount = result.Values.SelectMany(l => l).Count(v => v.direction == "Out");
-		int otherCount = result.Values.SelectMany(l => l).Count(v => v.direction != "In" && v.direction != "Out");
-		Main.DebugLog($"SignalsShim: {inCount} In, {outCount} Out, {otherCount} other direction signals across {result.Count} junctions. ID-matched: {idMatched}, unmatched: {idUnmatched}");
+		Main.DebugLog($"SignalsShim: {inCount} In, {outCount} Out across {result.Count} junctions.");
 		}
 		catch (Exception ex)
 		{
@@ -282,22 +273,31 @@ namespace DvMod.RemoteDispatch
 				// Format: {junctionId}:F  -> Out signal
 				//         {junctionId}:B1 -> LeftIn signal
 				//         {junctionId}:B2 -> RightIn signal
+				// Out signals have no ':' suffix — they already have JunctionId and Direction from the API
+				int suffixMatched = 0;
+				int noColon = 0;
 				foreach (var kv in minimalData)
 				{
 					var sig = kv.Value;
 					var signalId = kv.Key;
 					var colonIdx = signalId.LastIndexOf(':');
-					if (colonIdx <= 0) continue;
+					if (colonIdx <= 0)
+					{
+						noColon++;
+						continue;
+					}
 
 					var prefix = signalId.Substring(0, colonIdx);
 					var suffix = signalId.Substring(colonIdx + 1);
 
 					sig.JunctionId = prefix;
-					if (suffix == "F")
+					if (suffix == "F" || suffix == "T")
 						sig.Direction = "Out";
 					else if (suffix.StartsWith("B"))
 						sig.Direction = "In";
+					suffixMatched++;
 				}
+				Main.DebugLog($"SignalsShim: suffix matching: {suffixMatched} matched, {noColon} without ':' suffix (using API Direction)");
 
 				var jMinimalData = JObject.FromObject(minimalData);
 				return jMinimalData;

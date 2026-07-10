@@ -56,14 +56,14 @@ const SwitchboardSignals = {
 
         const junctionSignals = getSignalsByJunctionId(ingameData.junctionId);
 
-        console.log(`[SwitchboardSignals] sbId=${sbId} jIdx=${jIdx} junctionId=${ingameData.junctionId} found ${junctionSignals.length} signals`);
+        console.log(`[SwitchboardSignals] sbId=${sbId} jIdx=${jIdx} junctionId=${ingameData.junctionId} found ${junctionSignals.length} signals`, junctionSignals.map(s => s.Id));
 
         for (const sig of junctionSignals) {
-            const signalId = sig.marker ? null : null;
-            const colonIdx = (sig.Id || '').lastIndexOf(':');
-            const suffix = colonIdx > 0 ? (sig.Id || '').substring(colonIdx + 1) : '';
+            const id = sig.Id || '';
+            const colonIdx = id.lastIndexOf(':');
+            const suffix = colonIdx > 0 ? id.substring(colonIdx + 1) : '';
 
-            if (suffix === 'F') {
+            if (suffix === 'F' || suffix === 'T' || (colonIdx <= 0 && sig.direction === 'Out')) {
                 graphEntry.signals.Out = sig;
                 graphEntry.rawSignals.Out = sig;
             } else if (suffix === 'B1') {
@@ -127,12 +127,17 @@ const SwitchboardSignals = {
 
     updateAllVirtualSignals() {
         if (!this.initialized) return;
+        let updated = 0;
         for (const [sbId, graphEntry] of SwitchboardMapper.switchboardGraph) {
             if (graphEntry.signals) {
-                if (graphEntry.signals.In) graphEntry.signals.In.update_aspect();
+                if (graphEntry.signals.In) { graphEntry.signals.In.update_aspect(); updated++; }
                 if (graphEntry.signals.LeftOut) graphEntry.signals.LeftOut.update_aspect();
                 if (graphEntry.signals.RightOut) graphEntry.signals.RightOut.update_aspect();
             }
+        }
+
+        if (typeof computeAllBlockOccupancyFromVirtualSignals === 'function') {
+            computeAllBlockOccupancyFromVirtualSignals();
         }
     },
 
@@ -150,8 +155,8 @@ const SwitchboardSignals = {
         const hasStop = aspects.some(a => this.STOP_ASPECTS.has(a));
         const hasClear = aspects.some(a => this.CLEAR_ASPECTS.has(a));
 
-        if (hasStop && !hasClear) return 'occupied';
         if (hasClear) return 'clear';
+        if (hasStop) return 'occupied';
         return null;
     }
 };
@@ -189,18 +194,23 @@ class VirtualSignal {
             const rightAspect = graphEntry.signals.RightIn?.aspect ?? null;
 
             const stopSet = SwitchboardSignals.STOP_ASPECTS;
+            const clearSet = SwitchboardSignals.CLEAR_ASPECTS;
 
             const leftStop = leftAspect !== null && stopSet.has(leftAspect);
             const rightStop = rightAspect !== null && stopSet.has(rightAspect);
+            const leftClear = leftAspect !== null && clearSet.has(leftAspect);
+            const rightClear = rightAspect !== null && clearSet.has(rightAspect);
 
             if (leftStop && rightStop) {
                 this.aspect = 'S1';
+            } else if (leftClear || rightClear) {
+                this.aspect = 'S2';
             } else if (rightAspect === null) {
                 this.aspect = leftAspect;
             } else if (leftAspect === null) {
                 this.aspect = rightAspect;
             } else {
-                this.aspect = 'S2';
+                this.aspect = leftAspect;
             }
         }
     }

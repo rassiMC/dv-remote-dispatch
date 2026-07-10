@@ -623,6 +623,7 @@ function createSignalMarker(signalId, signalData) {
 	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null });
 }
 
+
 function getSignalsByJunctionId(junctionId) {
 	if (!junctionId) return [];
 	const result = [];
@@ -807,21 +808,27 @@ function updateAllSignals(signalsData) {
 		}
 	});
 
-	if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
-		switchboardRenderer.rerenderAllSegments();
-	}
-
 	if (typeof SwitchboardSignals !== 'undefined' && !SwitchboardSignals.initialized && signalMarkers.size > 0) {
 		SwitchboardSignals.init();
-		if (SwitchboardSignals.initialized && switchboardRenderer) {
-			switchboardRenderer.rerenderAllSegments();
-		}
+	}
+
+	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
+		SwitchboardSignals.updateAllVirtualSignals();
+	}
+
+	if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
+		switchboardRenderer.rerenderAllSegments();
 	}
 }
 
 function updateBlockOccupancy(occupancyData) {
 	if (typeof TrackData === 'undefined' || !TrackData.blocks) return;
 	if (typeof switchboardRenderer === 'undefined' || !switchboardRenderer) return;
+
+	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
+		computeAllBlockOccupancyFromVirtualSignals();
+		return;
+	}
 
 	let changed = false;
 	for (const [blockId, occupied] of Object.entries(occupancyData)) {
@@ -838,6 +845,61 @@ function updateBlockOccupancy(occupancyData) {
 	if (changed) {
 		switchboardRenderer.rerenderAllSegments();
 	}
+}
+
+function computeAllBlockOccupancyFromVirtualSignals() {
+	let changed = false;
+	for (const [blockId, block] of TrackData.blocks) {
+		const newState = computeBlockOccupancyFromVirtualSignals(blockId);
+		if (block.occupancyState !== newState) {
+			block.occupancyState = newState;
+			changed = true;
+		}
+	}
+	if (changed) {
+		switchboardRenderer.rerenderAllSegments();
+	}
+}
+
+function computeBlockOccupancyFromVirtualSignals(blockId) {
+	const block = TrackData.getBlock(blockId);
+	if (!block) return 'unknown';
+
+	const blockSegIds = new Set(block.segmentIds);
+
+	let foundClear = false;
+	let foundOccupied = false;
+	let foundAny = false;
+
+	for (const seg of TrackData.segments.values()) {
+		if (seg.type !== 'switch') continue;
+
+		const port = getBlockPortAtSwitch(blockId, seg.id);
+		if (!port) continue;
+
+		const graphEntry = SwitchboardMapper.switchboardGraph?.get(seg.id);
+		if (!graphEntry || !graphEntry.signals) continue;
+
+		let aspect = null;
+		if (port === 'common') {
+			aspect = graphEntry.signals.In?.aspect;
+		} else if (port === 'left') {
+			aspect = graphEntry.signals.LeftOut?.aspect;
+		} else if (port === 'right') {
+			aspect = graphEntry.signals.RightOut?.aspect;
+		}
+
+		if (aspect === null || aspect === undefined) continue;
+		foundAny = true;
+
+		if (SwitchboardSignals.CLEAR_ASPECTS.has(aspect)) foundClear = true;
+		if (SwitchboardSignals.STOP_ASPECTS.has(aspect)) foundOccupied = true;
+	}
+
+	if (!foundAny) return 'unknown';
+	if (foundClear) return 'clear';
+	if (foundOccupied) return 'occupied';
+	return 'unknown';
 }
 
 /////////////////////

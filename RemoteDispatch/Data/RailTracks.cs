@@ -406,7 +406,7 @@ namespace DvMod.RemoteDispatch
 			Main.DebugLog($"BuildInboundSignalMap: {orphanSignals.Count} orphaned signals to match.");
 
 			var junctions = RailTrackRegistry.Instance.OrderedJunctions;
-			const float MATCH_THRESHOLD = 5f;
+			const float MATCH_THRESHOLD = 25f;
 			const float MATCH_THRESHOLD_SQR = MATCH_THRESHOLD * MATCH_THRESHOLD;
 
 			foreach (var junction in junctions)

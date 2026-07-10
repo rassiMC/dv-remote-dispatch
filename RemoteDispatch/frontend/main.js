@@ -620,7 +620,7 @@ function createSignalMarker(signalId, signalData) {
 		.bindPopup(() => buildSignalPopup(signalId, signalType), { maxWidth: 260 })
 		.addTo(map);
 
-	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null });
+	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null });
 }
 
 function getSignalsByJunctionId(junctionId) {
@@ -809,6 +809,13 @@ function updateAllSignals(signalsData) {
 
 	if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
 		switchboardRenderer.rerenderAllSegments();
+	}
+
+	if (typeof SwitchboardSignals !== 'undefined' && !SwitchboardSignals.initialized && signalMarkers.size > 0) {
+		SwitchboardSignals.init();
+		if (SwitchboardSignals.initialized && switchboardRenderer) {
+			switchboardRenderer.rerenderAllSegments();
+		}
 	}
 }
 
@@ -1789,6 +1796,12 @@ async function buildSwitchMapping() {
 
 		if (typeof SwitchboardSignals !== 'undefined') {
 			SwitchboardSignals.init();
+			if (!SwitchboardSignals.initialized) {
+				signalsReady.then(_ => {
+					SwitchboardSignals.init();
+					if (switchboardRenderer) switchboardRenderer.rerenderAllSegments();
+				});
+			}
 		}
 
 		if (switchboardRenderer) {

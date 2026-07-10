@@ -198,7 +198,7 @@ const TrackRenderer = {
         const ingameData = jIdx !== null ? SwitchboardMapper.ingameGraph?.get(jIdx) : null;
         const currentBranch = ingameData?.currentBranch;
 
-        const sig = SwitchboardMapper.switchboardGraph?.get(segment.id)?.signals;
+        const sig = SwitchboardMapper.switchboardGraph?.get(segment.id)?.rawSignals;
         const present = v => (v !== null && v !== undefined) ? 0xFF : 0x00;
         const r = present(sig?.LeftIn);
         const g = present(sig?.Out);
@@ -266,6 +266,17 @@ const TrackRenderer = {
             if (jIdx !== null) {
                 const jData = SwitchboardMapper.ingameGraph?.get(jIdx);
                 console.log(`%c[${segment.id}] -> ingame junction ${jIdx} (deg ${jData?.degree ?? '?'}, id ${jData?.junctionId ?? '?'})`, 'color: #00ff00');
+
+                const sig = SwitchboardMapper.switchboardGraph?.get(segment.id)?.signals;
+                if (sig) {
+                    const sigInfo = (label, s) => {
+                        if (!s) return `${label}: null`;
+                        if (s instanceof VirtualSignal) return `${label}: VirtualSignal(aspect=${s.aspect})`;
+                        return `${label}: ${s.Id ?? '?'} (dir=${s.direction ?? '?'}, aspect=${s.aspect ?? '?'})`;
+                    };
+                    console.log(`  ${sigInfo('LeftIn', sig.LeftIn)} | ${sigInfo('Out', sig.Out)} | ${sigInfo('RightIn', sig.RightIn)}`);
+                    console.log(`  ${sigInfo('In(virtual)', sig.In)} | ${sigInfo('LeftOut(virtual)', sig.LeftOut)} | ${sigInfo('RightOut(virtual)', sig.RightOut)}`);
+                }
                 fetch(new URL(`/junction/${jIdx}/toggle`, location), { method: 'POST' })
                     .then(resp => resp.ok ? resp.text() : Promise.reject(new Error(`${resp.status}`)))
                     .then(newBranch => console.log(`%c[${segment.id}] toggled -> branch ${newBranch}`, 'color: #00ff00'))

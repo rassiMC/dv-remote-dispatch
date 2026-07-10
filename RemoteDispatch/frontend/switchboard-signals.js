@@ -43,6 +43,11 @@ const SwitchboardSignals = {
             LeftOut: null,
             RightOut: null
         };
+        graphEntry.rawSignals = {
+            Out: null,
+            LeftIn: null,
+            RightIn: null
+        };
 
         const jIdx = SwitchboardMapper.getIngameJunctionIndex(sbId);
         if (jIdx === null) return;
@@ -51,19 +56,23 @@ const SwitchboardSignals = {
 
         const junctionSignals = getSignalsByJunctionId(ingameData.junctionId);
 
-        const inSignals = junctionSignals.filter(s => s.direction === 'In');
-        const outSignals = junctionSignals.filter(s => s.direction === 'Out');
+        console.log(`[SwitchboardSignals] sbId=${sbId} jIdx=${jIdx} junctionId=${ingameData.junctionId} found ${junctionSignals.length} signals`);
 
-        if (outSignals.length > 0) {
-            graphEntry.signals.Out = outSignals[0];
-        }
+        for (const sig of junctionSignals) {
+            const signalId = sig.marker ? null : null;
+            const colonIdx = (sig.Id || '').lastIndexOf(':');
+            const suffix = colonIdx > 0 ? (sig.Id || '').substring(colonIdx + 1) : '';
 
-        if (inSignals.length === 1) {
-            graphEntry.signals.LeftIn = inSignals[0];
-            graphEntry.signals.RightIn = inSignals[0];
-        } else if (inSignals.length >= 2) {
-            graphEntry.signals.LeftIn = inSignals[0];
-            graphEntry.signals.RightIn = inSignals[1];
+            if (suffix === 'F') {
+                graphEntry.signals.Out = sig;
+                graphEntry.rawSignals.Out = sig;
+            } else if (suffix === 'B1') {
+                graphEntry.signals.LeftIn = sig;
+                graphEntry.rawSignals.LeftIn = sig;
+            } else if (suffix === 'B2') {
+                graphEntry.signals.RightIn = sig;
+                graphEntry.rawSignals.RightIn = sig;
+            }
         }
 
         graphEntry.signals.In = new VirtualSignal(sbId, 'In');
@@ -74,13 +83,13 @@ const SwitchboardSignals = {
     forwardMissingSignals(sbId, graphEntry) {
         if (!graphEntry.signals) return;
 
-        if (!graphEntry.signals.Out) {
+        if (!graphEntry.rawSignals.Out) {
             graphEntry.signals.Out = this.forward(sbId, 'common');
         }
-        if (!graphEntry.signals.LeftIn) {
+        if (!graphEntry.rawSignals.LeftIn) {
             graphEntry.signals.LeftIn = this.forward(sbId, 'left');
         }
-        if (!graphEntry.signals.RightIn) {
+        if (!graphEntry.rawSignals.RightIn) {
             graphEntry.signals.RightIn = this.forward(sbId, 'right');
         }
     },

@@ -278,8 +278,28 @@ namespace DvMod.RemoteDispatch
 			{
 				var minimalData = SignalsShimHelpers.MinimalSignalDataProjection.Create(data);
 
+				// Assign junctionId and direction from signal ID suffix:
+				// Format: {junctionId}:F  -> Out signal
+				//         {junctionId}:B1 -> LeftIn signal
+				//         {junctionId}:B2 -> RightIn signal
+				foreach (var kv in minimalData)
+				{
+					var sig = kv.Value;
+					var signalId = kv.Key;
+					var colonIdx = signalId.LastIndexOf(':');
+					if (colonIdx <= 0) continue;
+
+					var prefix = signalId.Substring(0, colonIdx);
+					var suffix = signalId.Substring(colonIdx + 1);
+
+					sig.JunctionId = prefix;
+					if (suffix == "F")
+						sig.Direction = "Out";
+					else if (suffix.StartsWith("B"))
+						sig.Direction = "In";
+				}
+
 				var jMinimalData = JObject.FromObject(minimalData);
-				//Main.DebugLog($"SignalsShim.GetAllSignalsData returned: {JsonConvert.SerializeObject(jMinimalData).Replace('\n', ' ').Replace('\r', ' ')}");
 				return jMinimalData;
 			}
 

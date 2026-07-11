@@ -17,9 +17,10 @@ const SwitchboardSignals = {
         }
 
         this.initAllSwitches();
+        this.updateAllVirtualSignals();
         this.initialized = true;
 
-        console.log('SwitchboardSignals initialized');
+        console.log('SwitchboardSignals initialized with ' + SwitchboardMapper.switchboardGraph.size + ' switches');
     },
 
     initAllSwitches() {

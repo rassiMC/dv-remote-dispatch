@@ -359,14 +359,23 @@ const TrackRenderer = {
 
     updateSwitchStates(states) {
         if (!SwitchboardMapper.ingameGraph || !SwitchboardMapper.mapping) return;
+        const changed = [];
         for (const seg of TrackData.segments.values()) {
             if (seg.type !== 'switch') continue;
             const jIdx = SwitchboardMapper.getIngameJunctionIndex(seg.id);
             if (jIdx === null || jIdx >= states.length) continue;
             const ingameData = SwitchboardMapper.ingameGraph.get(jIdx);
             if (!ingameData) continue;
-            ingameData.currentBranch = states[jIdx];
+            if (ingameData.currentBranch !== states[jIdx]) {
+                ingameData.currentBranch = states[jIdx];
+                changed.push(seg);
+            }
+        }
+        for (const seg of changed) {
             this.renderSegment(seg);
+        }
+        if (changed.length > 0 && typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
+            SwitchboardSignals.updateAllVirtualSignals();
         }
     },
 

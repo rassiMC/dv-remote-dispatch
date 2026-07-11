@@ -169,13 +169,21 @@ namespace DvMod.RemoteDispatch.Signals
 		private static PropertyInfo? _instanceProp;
 		private static bool _reflectionResolved;
 
+		private static DateTime _lastForceUpdate = DateTime.MinValue;
+		private static readonly TimeSpan _forceUpdateInterval = TimeSpan.FromSeconds(5);
+
 		/// <summary>
 		/// Forces all signals to evaluate their aspects regardless of player proximity.
 		/// Tries the new SignalsAPI.ForceUpdateAllSignals(bool) if available,
 		/// otherwise falls back to per-signal UpdateAspect via reflection.
+		/// Throttled to avoid feedback loops.
 		/// </summary>
 		private void ForceUpdateAllSignalAspects()
 		{
+			var now = DateTime.UtcNow;
+			if (now - _lastForceUpdate < _forceUpdateInterval) return;
+			_lastForceUpdate = now;
+
 			if (TryForceUpdateViaAPI()) return;
 			ForceUpdateViaReflection();
 		}

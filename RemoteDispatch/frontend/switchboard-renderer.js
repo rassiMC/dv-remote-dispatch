@@ -49,18 +49,24 @@ const TrackRenderer = {
     },
 
     rerenderAllSegments() {
+        const _t0 = performance.now();
         for (const seg of TrackData.segments.values()) {
             this.renderSegment(seg);
         }
+        const _elapsed = performance.now() - _t0;
+        if (_elapsed > 100) console.warn(`[PERF] rerenderAllSegments took ${_elapsed.toFixed(0)}ms`);
     },
 
     rerenderBlocks(blockIds) {
+        const _t0 = performance.now();
         for (const seg of TrackData.segments.values()) {
             const block = TrackData.getBlockForSegment(seg.id);
             if (block && blockIds.has(block.id)) {
                 this.renderSegment(seg);
             }
         }
+        const _elapsed = performance.now() - _t0;
+        if (_elapsed > 100) console.warn(`[PERF] rerenderBlocks(${blockIds.size}) took ${_elapsed.toFixed(0)}ms`);
     },
 
     renderNode(node, isSelected = false, forceVisible = false) {

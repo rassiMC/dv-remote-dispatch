@@ -134,7 +134,10 @@ const SwitchboardSignals = {
         }
 
         if (typeof computeAllBlockOccupancyFromVirtualSignals === 'function') {
+            const _t0 = performance.now();
             computeAllBlockOccupancyFromVirtualSignals();
+            const _elapsed = performance.now() - _t0;
+            if (_elapsed > 100) console.warn(`[PERF] computeAllBlockOccupancyFromVirtualSignals took ${_elapsed.toFixed(0)}ms`);
         }
     },
 

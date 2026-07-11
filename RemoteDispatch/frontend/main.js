@@ -862,16 +862,39 @@ let _blockSwitchCache = null;
 function getBlockSwitchMap() {
 	if (_blockSwitchCache) return _blockSwitchCache;
 	_blockSwitchCache = new Map();
+
+	const nodeToBlocks = new Map();
+	for (const seg of TrackData.segments.values()) {
+		if (seg.type === 'switch' || !seg.blockId) continue;
+		for (const nodeId of [seg.n1, seg.n2]) {
+			if (!nodeToBlocks.has(nodeId)) nodeToBlocks.set(nodeId, new Set());
+			nodeToBlocks.get(nodeId).add(seg.blockId);
+		}
+	}
+
+	const portNodeNames = [
+		{ nodeName: 'merging', portName: 'common' },
+		{ nodeName: 'nl', portName: 'left' },
+		{ nodeName: 'nr', portName: 'right' }
+	];
+
 	for (const seg of TrackData.segments.values()) {
 		if (seg.type !== 'switch') continue;
-		for (const [blockId, block] of TrackData.blocks) {
-			const port = getBlockPortAtSwitch(blockId, seg.id);
-			if (port) {
+
+		for (const { nodeName, portName } of portNodeNames) {
+			const nodeId = seg[nodeName];
+			if (!nodeId) continue;
+
+			const blocks = nodeToBlocks.get(nodeId);
+			if (!blocks) continue;
+
+			for (const blockId of blocks) {
 				if (!_blockSwitchCache.has(blockId)) _blockSwitchCache.set(blockId, []);
-				_blockSwitchCache.get(blockId).push({ switchId: seg.id, port });
+				_blockSwitchCache.get(blockId).push({ switchId: seg.id, port: portName });
 			}
 		}
 	}
+
 	return _blockSwitchCache;
 }
 
@@ -1560,6 +1583,7 @@ function updateOnce() {
 		})
 		.then(updateData => {
 			Object.entries(updateData).forEach(([tag, data]) => {
+				const _t0 = performance.now();
 				switch (tag) {
 					case 'cars':
 						updateAllCars(data);
@@ -1585,6 +1609,10 @@ function updateOnce() {
 							case 'trainset': updateCars(data); break;
 							case 'carguid': updateCar(data.id, data); break;
 						}
+				}
+				const _elapsed = performance.now() - _t0;
+				if (_elapsed > 100) {
+					console.warn(`[PERF] ${tag} handler took ${_elapsed.toFixed(0)}ms`);
 				}
 			});
 		})

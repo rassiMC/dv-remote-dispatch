@@ -83,6 +83,7 @@ table tbody:first-child > tr:first-child td {
   max-height: 100%;
   width: 300px;
   transition: width .5s, max-height .5s;
+  z-index: 1001;
 }
 .leaflet-sidebar-pane {
   min-width: 250px;
@@ -309,7 +310,7 @@ body {
 #switchboard-view {
 	position: absolute;
 	top: 0;
-	left: 310px;
+	left: 0;
 	right: 0;
 	bottom: 0;
 	display: none;
@@ -331,17 +332,33 @@ body {
 	background: #203a5a !important;
 }
 
-#switchboard-info {
-	position: absolute;
-	bottom: 10px;
-	left: 10px;
-	z-index: 1000;
-	background: rgba(244, 244, 244, 0.75);
-	border-radius: 6px;
-	padding: 6px 12px;
-	max-width: 400px;
-}
-
 body.switchboard-active #switchboard-view {
 	display: block;
+}
+
+body.switchboard-active #map {
+	display: none;
+}
+
+.switchboard-toggle-btn {
+	display: block;
+	width: 100%;
+	padding: 8px 12px;
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+	border: 1px solid #3a7bd5;
+	border-radius: 4px;
+	background: #3a7bd5;
+	color: #fff;
+	transition: background 0.15s, border-color 0.15s;
+}
+
+.switchboard-toggle-btn:hover {
+	background: #2c6dcc;
+	border-color: #2c6dcc;
+}
+
+.switchboard-toggle-btn:active {
+	background: #255bb8;
 }

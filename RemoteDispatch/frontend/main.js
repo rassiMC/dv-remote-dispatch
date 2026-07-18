@@ -100,6 +100,7 @@ document.getElementById('playerNameCheckbox')
 // sidebar
 
 const sidebar = L.control.sidebar({ autopan: true, container: 'sidebar' }).addTo(map);
+document.body.append(document.getElementById('sidebar'));
 
 const tablesort = new Tablesort(document.getElementById('carList'));
 const carListBody = document.getElementById('carListBody');
@@ -772,6 +773,7 @@ function postSignalControl(signalId, params) {
 }
 
 function updateAllSignals(signalsData) {
+	let anyChanged = false;
 	Object.entries(signalsData).forEach(([signalId, signalData]) => {
 		if (loggingEnabled)
 			console.log(`Updating signal ${signalId} with aspect ${signalData.CurrentAspectId} and mode ${signalData.Mode}`);
@@ -784,6 +786,8 @@ function updateAllSignals(signalsData) {
 
 		const aspectChanged = existing.aspect !== aspect;
 		const modeChanged = existing.mode !== mode;
+
+		if (aspectChanged || modeChanged) anyChanged = true;
 
 		// Update state first so setIcon uses the correct aspect+mode combination
 		if (aspectChanged) existing.aspect = aspect;
@@ -814,6 +818,10 @@ function updateAllSignals(signalsData) {
 
 	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
 		SwitchboardSignals.updateAllVirtualSignals();
+	}
+
+	if (anyChanged && typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
+		switchboardRenderer.rerenderSwitches();
 	}
 }
 
@@ -855,6 +863,9 @@ function computeAllBlockOccupancyFromVirtualSignals() {
 	}
 	if (changedBlocks.size > 0 && typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
 		switchboardRenderer.rerenderBlocks(changedBlocks);
+		if (typeof switchboardRenderer.rerenderSwitches === 'function') {
+			switchboardRenderer.rerenderSwitches();
+		}
 	}
 }
 
@@ -1186,28 +1197,32 @@ sidebar.on("content", e => {
 	clearInterval(locoControlRefreshIntervalId);
 	if (e.id == "locoControlTab") {
 		locoControlRefreshIntervalId = setInterval(updateLocoDisplay, 1000 / 9);
-	} else if (e.id == "switchboardTab") {
-		document.body.classList.add("switchboard-active");
-		initSwitchboard();
-		if (switchboardMap) {
-			setTimeout(() => switchboardMap.invalidateSize(), 50);
-		}
-	} else {
-		document.body.classList.remove("switchboard-active");
-		if (typeof map !== 'undefined') {
-			setTimeout(() => map.invalidateSize(), 50);
-		}
 	}
 });
 
 sidebar.on("closing", e => {
 	clearInterval(locoControlRefreshIntervalId);
 	locoControlRefreshIntervalId = undefined;
-	document.body.classList.remove("switchboard-active");
 	if (typeof map !== 'undefined') {
 		setTimeout(() => map.invalidateSize(), 50);
 	}
 })
+
+const switchboardToggleBtn = document.getElementById('switchboardToggle');
+switchboardToggleBtn.addEventListener('click', () => {
+	const isActive = document.body.classList.toggle('switchboard-active');
+	switchboardToggleBtn.textContent = isActive ? 'Show Map' : 'Show Switchboard';
+	if (isActive) {
+		initSwitchboard();
+		if (switchboardMap) {
+			setTimeout(() => switchboardMap.invalidateSize(), 50);
+		}
+	} else {
+		if (typeof map !== 'undefined') {
+			setTimeout(() => map.invalidateSize(), 50);
+		}
+	}
+});
 
 function sendLocoCommand(command) {
 	const guid = getControlledLocoGuid();
@@ -1785,7 +1800,7 @@ function initSwitchboard() {
 
 		// Add zoom control
 		L.control.zoom({
-			position: 'topright'
+			position: 'bottomright'
 		}).addTo(switchboardMap);
 
 			// Initialize track renderer
@@ -1835,30 +1850,10 @@ function loadSampleTrackData() {
 				}
 			}
 			
-			// Update info display
-			const info = document.getElementById('switchboard-info');
-			if (info) {
-				info.innerHTML = `
-					<p><strong>Switchboard View - Sample Data Loaded</strong></p>
-					<p>Nodes: ${TrackData.nodes.size}</p>
-					<p>Segments: ${TrackData.segments.size}</p>
-					<p>Blocks: ${TrackData.blocks.size}</p>
-					<p>Click and drag to navigate. Use zoom controls to adjust view.</p>
-				`;
-			}
-
 			buildSwitchMapping();
 		})
 		.catch(error => {
 			console.error('Failed to load switchboard sample data:', error);
-			const info = document.getElementById('switchboard-info');
-			if (info) {
-				info.innerHTML = `
-					<p><strong>Switchboard View - Error</strong></p>
-					<p>Failed to load sample track data: ${error.message}</p>
-					<p>Check console for details.</p>
-				`;
-			}
 		});
 }
 

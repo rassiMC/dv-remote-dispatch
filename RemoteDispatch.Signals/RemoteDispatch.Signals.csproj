@@ -26,10 +26,11 @@
 		</Reference>
 	</ItemGroup>
 
-	<ItemGroup Condition="!Exists('/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals/Signals.API.dll')">
+	<ItemGroup Condition="Exists('/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals/Signals.API.dll')">
 		<Reference Include="Signals.API">
-			<HintPath>$(MSBuildThisFileDirectory)..\..\..\build\Signals.API.dll</HintPath>
+			<HintPath>/home/rass/.local/share/Steam/steamapps/common/Derail Valley/Mods/DVSignals/Signals.API.dll</HintPath>
 			<Private>false</Private>
+			<ExcludeAssets>runtime</ExcludeAssets>
 		</Reference>
 	</ItemGroup>
 

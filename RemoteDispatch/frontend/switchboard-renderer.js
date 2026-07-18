@@ -69,6 +69,14 @@ const TrackRenderer = {
         if (_elapsed > 100) console.warn(`[PERF] rerenderBlocks(${blockIds.size}) took ${_elapsed.toFixed(0)}ms`);
     },
 
+    rerenderSwitches() {
+        for (const seg of TrackData.segments.values()) {
+            if (seg.type === 'switch') {
+                this.renderSegment(seg);
+            }
+        }
+    },
+
     renderNode(node, isSelected = false, forceVisible = false) {
         if (this.nodeMarkers.has(node.id)) {
             this.clearNode(node.id);
@@ -213,7 +221,7 @@ const TrackRenderer = {
         const ingameData = jIdx !== null ? SwitchboardMapper.ingameGraph?.get(jIdx) : null;
         const currentBranch = ingameData?.currentBranch;
 
-        let rimColor = '#555';
+        let rimColor = color;
         if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
             const aspectState = SwitchboardSignals.getSwitchAspectForBlock(segment.id);
             if (aspectState === 'clear') rimColor = '#208020';

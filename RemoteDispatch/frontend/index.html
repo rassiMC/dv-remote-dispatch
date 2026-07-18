@@ -113,13 +113,13 @@
 					<!-- Populated by buildSignalsSidebar() after signalsReady resolves -->
 				</div>
 			</div>
-		<div class="leaflet-sidebar-pane" id="switchboardTab">
-			<h1 class="leaflet-sidebar-header">
-				Switchboard
-				<span class="leaflet-sidebar-close"><i class="fa fa-caret-left"></i></span>
-			</h1>
-			<p>Click to open full-screen switchboard view.</p>
-		</div>
+	<div class="leaflet-sidebar-pane" id="switchboardTab">
+		<h1 class="leaflet-sidebar-header">
+			Switchboard
+			<span class="leaflet-sidebar-close"><i class="fa fa-caret-left"></i></span>
+		</h1>
+		<button id="switchboardToggle" class="switchboard-toggle-btn">Show Switchboard</button>
+	</div>
 			<div class="leaflet-sidebar-pane" id="settingsTab">
 				<h1 class="leaflet-sidebar-header">
 					Settings
@@ -161,15 +161,11 @@
 	<div id="map" class="dark" style="height:100vh"></div>
 	<div id="switchboard-view">
 		<div id="switchboard-map"></div>
-		<div id="switchboard-info">
-			<p><strong>Switchboard View</strong></p>
-			<p>Track layout visualization will appear here.</p>
-		</div>
 	</div>
 	<div id="search">
 		<input id="searchInput" type="text" placeholder="Go to…" autocomplete="off">
 		<ul id="searchResults"></ul>
 	</div>
-	<script src="res/main.js?v=20260711b"></script>
+	<script src="res/main.js?v=20260711c"></script>
 </body>
 </html>

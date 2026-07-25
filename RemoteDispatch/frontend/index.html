@@ -16,6 +16,7 @@
 	<script src="res/switchboard-renderer.js"></script>
 	<script src="res/switchboard-mapper.js"></script>
 	<script src="res/switchboard-signals.js"></script>
+	<script src="res/switchboard-occupation.js"></script>
 </head>
 <body>
 	<div id="sidebar" class="leaflet-sidebar collapsed">
@@ -118,6 +119,13 @@
 			Switchboard
 			<span class="leaflet-sidebar-close"><i class="fa fa-caret-left"></i></span>
 		</h1>
+		<div style="margin-bottom: 8px;">
+			<label for="occupancyModeDropdown">Occupancy mode:</label>
+			<select id="occupancyModeDropdown" style="margin-left: 6px;">
+				<option value="direct">Direct (track sensors)</option>
+				<option value="hardcore">Hardcore (signal aspects)</option>
+			</select>
+		</div>
 		<button id="switchboardToggle" class="switchboard-toggle-btn">Show Switchboard</button>
 	</div>
 			<div class="leaflet-sidebar-pane" id="settingsTab">
@@ -166,6 +174,6 @@
 		<input id="searchInput" type="text" placeholder="Go to…" autocomplete="off">
 		<ul id="searchResults"></ul>
 	</div>
-	<script src="res/main.js?v=20260711c"></script>
+	<script src="res/main.js?v=20260726a"></script>
 </body>
 </html>

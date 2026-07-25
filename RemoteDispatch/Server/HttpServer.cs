@@ -143,6 +143,10 @@ namespace DvMod.RemoteDispatch
 				Render200(context, ContentTypes.Json, OccupancyData.GetOccupancyJSON());
 			}
 			break;
+		case "trackoccupation":
+			Main.DebugLog("/trackoccupation endpoint hit");
+			Render200(context, ContentTypes.Json, TrackOccupationData.GetTrackOccupationJSON());
+			break;
 		case "signal":
 			Main.DebugLog("/signal endpoint hit");
 			await HandleSignalRequest(context);

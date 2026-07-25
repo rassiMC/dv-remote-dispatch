@@ -14,6 +14,10 @@
 		<Reference Include="Newtonsoft.Json">
 			<HintPath>/home/rass/.local/share/Steam/steamapps/common/Derail Valley/DerailValley_Data/Managed/Newtonsoft.Json.dll</HintPath>
 		</Reference>
+		<Reference Include="DV.RailTrack">
+			<HintPath>/home/rass/.local/share/Steam/steamapps/common/Derail Valley/DerailValley_Data/Managed/DV.RailTrack.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
 		<PackageReference Include="UnityModManager" Version="0.27.2" />
 	</ItemGroup>
 

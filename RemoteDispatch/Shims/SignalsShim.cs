@@ -18,6 +18,7 @@ namespace DvMod.RemoteDispatch
 		// SignalMode is a .NET enum (Manual/Automatic), need it for API invocation
 		// Cache reflection info to avoid recompiling every call
 		private static MethodInfo? _setSignalModeMethod;
+		private static MethodInfo? _isTrackOccupiedMethod;
 
 		internal static bool IsInitialized { get; private set; }
 
@@ -194,10 +195,11 @@ namespace DvMod.RemoteDispatch
 				_getSignalAspectMethod = bootstrap.GetMethod("GetSignalAspect", BindingFlags.Public | BindingFlags.Static);
 				_setSignalAspectMethod = bootstrap.GetMethod("SetSignalAspect", BindingFlags.Public | BindingFlags.Static);
 
-				// Retrieve SetSignalMode method from Bootstrap (in RemoteDispatch.Signals DLL)
-				// This maintains the same dependency chain as SetSignalAspect:
-				// Signals.API → RemoteDispatch.Signals (bridge logic) → RemoteDispatch.Shims (reflection wrapper)
-				_setSignalModeMethod = bootstrap.GetMethod("SetSignalMode", BindingFlags.Public | BindingFlags.Static);
+			// Retrieve SetSignalMode method from Bootstrap (in RemoteDispatch.Signals DLL)
+			// This maintains the same dependency chain as SetSignalAspect:
+			// Signals.API → RemoteDispatch.Signals (bridge logic) → RemoteDispatch.Shims (reflection wrapper)
+			_setSignalModeMethod = bootstrap.GetMethod("SetSignalMode", BindingFlags.Public | BindingFlags.Static);
+			_isTrackOccupiedMethod = bootstrap.GetMethod("IsTrackOccupied", BindingFlags.Public | BindingFlags.Static);
 
 				initMethod?.Invoke(null, new object[]
 				{
@@ -312,5 +314,22 @@ namespace DvMod.RemoteDispatch
 		// Returns true on success, false on failure or 404 from API side.
 		internal static bool SetSignalMode(string signalId, string mode) =>
 			_setSignalModeMethod?.Invoke(null, new object[] { SignalsShimHelpers.StripSignalPrefix(signalId), mode }) is true;
+
+		/// <summary>
+		/// Checks whether the given RailTrack has any trains physically on it.
+		/// </summary>
+		internal static bool IsTrackOccupied(RailTrack track)
+		{
+			if (!IsInitialized || _isTrackOccupiedMethod == null) return false;
+			try
+			{
+				return _isTrackOccupiedMethod.Invoke(null, new object[] { track }) is true;
+			}
+			catch (Exception ex)
+			{
+				Main.Warning($"IsTrackOccupied failed: {ex.Message}");
+				return false;
+			}
+		}
 	}
 }

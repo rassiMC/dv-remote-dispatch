@@ -4,6 +4,7 @@
 	using System.Reflection;
 	using Signals.API;
 	using Newtonsoft.Json;
+	using UnityEngine;
 
 namespace DvMod.RemoteDispatch.Signals
 {
@@ -161,6 +162,22 @@ namespace DvMod.RemoteDispatch.Signals
 			}
 
 			return result;
+		}
+
+		/// <summary>
+		/// Checks whether the given track has any trains physically on it.
+		/// </summary>
+		internal bool IsTrackOccupied(RailTrack track)
+		{
+			try
+			{
+				return SignalsAPI.IsTrackOccupied(track);
+			}
+			catch (Exception ex)
+			{
+				LoggingReturn.Warning?.Invoke($"IsTrackOccupied failed: {ex.Message}");
+				return false;
+			}
 		}
 
 		private static MethodInfo? _forceUpdateMethod;

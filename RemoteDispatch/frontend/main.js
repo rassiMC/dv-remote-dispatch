@@ -816,6 +816,10 @@ function updateAllSignals(signalsData) {
 		SwitchboardSignals.init();
 	}
 
+	if (typeof SwitchboardOccupation !== 'undefined' && SwitchboardOccupation.isActive) {
+		return;
+	}
+
 	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
 		SwitchboardSignals.updateAllVirtualSignals();
 	}
@@ -828,6 +832,10 @@ function updateAllSignals(signalsData) {
 function updateBlockOccupancy(occupancyData) {
 	if (typeof TrackData === 'undefined' || !TrackData.blocks) return;
 	if (typeof switchboardRenderer === 'undefined' || !switchboardRenderer) return;
+
+	if (typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.isActive) {
+		return;
+	}
 
 	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
 		return;
@@ -851,6 +859,7 @@ function updateBlockOccupancy(occupancyData) {
 }
 
 function computeAllBlockOccupancyFromVirtualSignals() {
+	if (typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.isActive) return;
 	if (typeof SwitchboardSignals === 'undefined' || !SwitchboardSignals.initialized) return;
 
 	const changedBlocks = new Set();
@@ -1223,6 +1232,16 @@ switchboardToggleBtn.addEventListener('click', () => {
 		}
 	}
 });
+
+const occupancyModeDropdown = document.getElementById('occupancyModeDropdown');
+if (occupancyModeDropdown) {
+	occupancyModeDropdown.addEventListener('change', e => {
+		const mode = e.target.value;
+		if (typeof SwitchboardOccupancy !== 'undefined') {
+			SwitchboardOccupancy.setMode(mode);
+		}
+	});
+}
 
 function sendLocoCommand(command) {
 	const guid = getControlledLocoGuid();
@@ -1615,9 +1634,12 @@ function updateOnce() {
 				case 'signals':
 					updateAllSignals(data);
 					break;
-				case 'occupancy':
-					updateBlockOccupancy(data);
-					break;
+			case 'occupancy':
+				updateBlockOccupancy(data);
+				break;
+			case 'trackoccupation':
+				SwitchboardOccupancy.updateTrackData(data);
+				break;
 					default:
 						const segments = tag.split('-');
 						switch (segments[0]) {
@@ -1780,6 +1802,17 @@ signalsReady.then(_ => {
 	updateLoop();
 });
 
+const trackOccupationReady = fetch(new URL('/trackoccupation', location))
+	.then(resp => resp.ok ? resp.json() : {})
+	.then(data => {
+		if (typeof SwitchboardOccupancy !== 'undefined') {
+			SwitchboardOccupancy.updateTrackData(data);
+		}
+	})
+	.catch(err => {
+		console.error('Failed to load track occupation data:', err);
+	});
+
 // Switchboard functionality
 let switchboardMap;
 let switchboardRenderer;
@@ -1906,6 +1939,10 @@ async function buildSwitchMapping() {
 
 		if (switchboardRenderer) {
 			switchboardRenderer.rerenderAllSegments();
+		}
+
+		if (typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.isActive) {
+			SwitchboardOccupancy.updateAllBlockOccupancy();
 		}
 	} catch (e) {
 		console.error('Failed to build switch mapping:', e);

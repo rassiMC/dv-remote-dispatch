@@ -223,7 +223,7 @@ const TrackRenderer = {
         const currentBranch = ingameData?.currentBranch;
 
         let rimColor = color;
-        if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
+        if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized && typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.mode === 'hardcore') {
             const aspectState = SwitchboardSignals.getSwitchAspectForBlock(segment.id);
             if (aspectState === 'clear') rimColor = '#208020';
             else if (aspectState === 'occupied') rimColor = '#a02020';

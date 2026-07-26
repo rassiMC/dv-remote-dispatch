@@ -362,3 +362,7 @@ body.switchboard-active #map {
 .switchboard-toggle-btn:active {
 	background: #255bb8;
 }
+
+#pathingStatus {
+	min-height: 18px;
+}

@@ -151,9 +151,18 @@ const TrackRenderer = {
         } else if (block.occupancyState === 'occupied') {
             color = '#a02020';
         } else if (block.occupancyState === 'clear') {
-            color = '#208020';
+            if (typeof PathingController !== 'undefined' && PathingController.showGrayClear) {
+                color = '#888';
+            } else {
+                color = '#208020';
+            }
         } else {
             color = '#888';
+        }
+
+        if (segment.type !== 'switch' && typeof PathingController !== 'undefined' && PathingController.state !== 'off') {
+            const pathOverride = PathingController.getOverridesForSegment(segment.id);
+            if (pathOverride) color = pathOverride.color;
         }
 
         let layer;
@@ -188,6 +197,13 @@ const TrackRenderer = {
         });
 
         polyline.addTo(this.map);
+
+        polyline.on('click', () => {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled && PathingController.state !== 'off') {
+                PathingController.onSegmentClick(segment.id);
+            }
+        });
+
         return polyline;
     },
 
@@ -223,7 +239,10 @@ const TrackRenderer = {
         const currentBranch = ingameData?.currentBranch;
 
         let rimColor = color;
-        if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized && typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.mode === 'hardcore') {
+        if (typeof PathingController !== 'undefined' && PathingController.state !== 'off') {
+            const pcRim = PathingController.getSwitchRimColor(segment.id);
+            if (pcRim) rimColor = pcRim;
+        } else if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized && typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.mode === 'hardcore') {
             const aspectState = SwitchboardSignals.getSwitchAspectForBlock(segment.id);
             if (aspectState === 'clear') rimColor = '#208020';
             else if (aspectState === 'occupied') rimColor = '#a02020';
@@ -333,7 +352,31 @@ const TrackRenderer = {
         }
 
         group.addTo(this.map);
+
+        group.on('contextmenu', e => {
+            L.DomEvent.stopPropagation(e);
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.startFrom(segment.id);
+            }
+        });
+
+        group.on('mouseover', e => {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.onSwitchHover(segment.id);
+            }
+        });
+
+        group.on('mouseout', e => {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.onSwitchHoverEnd();
+            }
+        });
+
         group.on('click', () => {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled && (PathingController.state === 'selectingOrigin' || PathingController.state === 'preview')) {
+                PathingController.onSwitchClick(segment.id);
+                return;
+            }
             if (jIdx !== null) {
                 const jData = SwitchboardMapper.ingameGraph?.get(jIdx);
                 console.log(`%c[${segment.id}] -> ingame junction ${jIdx} (deg ${jData?.degree ?? '?'}, id ${jData?.junctionId ?? '?'})`, 'color: #00ff00');
@@ -429,6 +472,12 @@ const TrackRenderer = {
         }
         for (const seg of changed) {
             this.renderSegment(seg);
+            if (typeof PathingController !== 'undefined' && PathingController.state === 'locked') {
+                const jIdx = SwitchboardMapper.getIngameJunctionIndex(seg.id);
+                if (jIdx !== null && jIdx < states.length) {
+                    PathingController.checkManualAlignment(seg.id, states[jIdx]);
+                }
+            }
         }
         if (changed.length > 0 && typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
             SwitchboardSignals.updateAllVirtualSignals();

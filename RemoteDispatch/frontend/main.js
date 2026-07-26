@@ -1217,6 +1217,11 @@ switchboardToggleBtn.addEventListener('click', () => {
 			setTimeout(() => switchboardMap.invalidateSize(), 50);
 		}
 	} else {
+		if (typeof PathingController !== 'undefined') {
+			PathingController.disable();
+			const pathToggle = document.getElementById('pathingToggle');
+			if (pathToggle) pathToggle.checked = false;
+		}
 		if (typeof map !== 'undefined') {
 			setTimeout(() => map.invalidateSize(), 50);
 		}
@@ -1230,6 +1235,15 @@ if (hardcoreModeToggle) {
 		if (typeof SwitchboardOccupancy !== 'undefined') {
 			SwitchboardOccupancy.setMode(mode);
 		}
+		if (e.target.checked) {
+			const pathToggle = document.getElementById('pathingToggle');
+			if (pathToggle && pathToggle.checked) {
+				pathToggle.checked = false;
+				if (typeof PathingController !== 'undefined') {
+					PathingController.disable();
+				}
+			}
+		}
 	});
 }
 
@@ -1239,6 +1253,21 @@ if (signalAspectsToggle) {
 		if (switchboardRenderer) {
 			switchboardRenderer.showSignalAspects = e.target.checked;
 			switchboardRenderer.rerenderSwitches();
+		}
+	});
+}
+
+const pathingToggle = document.getElementById('pathingToggle');
+if (pathingToggle) {
+	pathingToggle.addEventListener('change', e => {
+		if (e.target.checked) {
+			if (hardcoreModeToggle && hardcoreModeToggle.checked) {
+				e.target.checked = false;
+				return;
+			}
+			PathingController.enable();
+		} else {
+			PathingController.disable();
 		}
 	});
 }
@@ -1815,6 +1844,10 @@ function initSwitchboard() {
 			center: [0, 0],
 			zoom: 10,
 			crs: L.CRS.Simple
+		});
+
+		switchboardMap.getContainer().addEventListener('contextmenu', e => {
+			e.preventDefault();
 		});
 
 		// Add zoom control

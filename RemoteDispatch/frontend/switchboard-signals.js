@@ -1,6 +1,7 @@
 const SwitchboardSignals = {
     STOP_ASPECTS: new Set(['S1', 'S1r', 'S1c']),
     CLEAR_ASPECTS: new Set(['S2', 'S4', 'S6']),
+    CAUTION_ASPECTS: new Set(['S6', 'S7']),
 
     initialized: false,
     _updateIntervalId: null,

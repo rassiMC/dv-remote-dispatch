@@ -812,7 +812,7 @@ function updateAllSignals(signalsData) {
 		}
 	});
 
-	if (typeof SwitchboardSignals !== 'undefined' && !SwitchboardSignals.initialized && signalMarkers.size > 0 && !SwitchboardOccupancy.isActive) {
+	if (typeof SwitchboardSignals !== 'undefined' && !SwitchboardSignals.initialized && signalMarkers.size > 0) {
 		SwitchboardSignals.init();
 	}
 
@@ -1223,12 +1223,22 @@ switchboardToggleBtn.addEventListener('click', () => {
 	}
 });
 
-const occupancyModeDropdown = document.getElementById('occupancyModeDropdown');
-if (occupancyModeDropdown) {
-	occupancyModeDropdown.addEventListener('change', e => {
-		const mode = e.target.value;
+const hardcoreModeToggle = document.getElementById('hardcoreModeToggle');
+if (hardcoreModeToggle) {
+	hardcoreModeToggle.addEventListener('change', e => {
+		const mode = e.target.checked ? 'hardcore' : 'direct';
 		if (typeof SwitchboardOccupancy !== 'undefined') {
 			SwitchboardOccupancy.setMode(mode);
+		}
+	});
+}
+
+const signalAspectsToggle = document.getElementById('signalAspectsToggle');
+if (signalAspectsToggle) {
+	signalAspectsToggle.addEventListener('change', e => {
+		if (switchboardRenderer) {
+			switchboardRenderer.showSignalAspects = e.target.checked;
+			switchboardRenderer.rerenderSwitches();
 		}
 	});
 }
@@ -1816,6 +1826,10 @@ function initSwitchboard() {
 			switchboardRenderer = Object.create(TrackRenderer);
 			switchboardRenderer.init(switchboardMap);
 
+			if (typeof SwitchboardOccupancy !== 'undefined') {
+				SwitchboardOccupancy.sendMode();
+			}
+
 			// Load sample data
 			loadSampleTrackData();
 		}
@@ -1903,11 +1917,10 @@ async function buildSwitchMapping() {
 
 		sendBlockOccupancyMapping();
 
-		if (typeof SwitchboardSignals !== 'undefined' && !SwitchboardOccupancy.isActive) {
+		if (typeof SwitchboardSignals !== 'undefined') {
 			SwitchboardSignals.init();
 			if (!SwitchboardSignals.initialized) {
 				signalsReady.then(_ => {
-					if (SwitchboardOccupancy.isActive) return;
 					SwitchboardSignals.init();
 					if (switchboardRenderer) switchboardRenderer.rerenderAllSegments();
 				});
@@ -1958,7 +1971,7 @@ function sendBlockOccupancyMapping() {
                 blocksAtPort.add(otherSeg.blockId);
             }
 
-            if (seg.blockId) {
+            if (seg.blockId && portName === 'common') {
                 blocksAtPort.add(seg.blockId);
             }
 

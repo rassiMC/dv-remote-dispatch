@@ -120,11 +120,12 @@
 			<span class="leaflet-sidebar-close"><i class="fa fa-caret-left"></i></span>
 		</h1>
 		<div style="margin-bottom: 8px;">
-			<label for="occupancyModeDropdown">Occupancy mode:</label>
-			<select id="occupancyModeDropdown" style="margin-left: 6px;">
-				<option value="direct">Direct (track sensors)</option>
-				<option value="hardcore">Hardcore (signal aspects)</option>
-			</select>
+			<label for="hardcoreModeToggle">Hardcore mode:</label>
+			<input type="checkbox" id="hardcoreModeToggle" style="margin-left: 6px;">
+		</div>
+		<div style="margin-bottom: 8px;">
+			<label for="signalAspectsToggle">Signal aspects:</label>
+			<input type="checkbox" id="signalAspectsToggle" style="margin-left: 6px;" checked>
 		</div>
 		<button id="switchboardToggle" class="switchboard-toggle-btn">Show Switchboard</button>
 	</div>

@@ -5,9 +5,11 @@ const SwitchboardOccupancy = {
         if (this.mode === mode) return;
         this.mode = mode;
         console.log(`[SwitchboardOccupancy] mode set to: ${mode}`);
+        this.sendMode();
+    },
 
-        const modeValue = mode === 'direct' ? 1 : 0;
-
+    sendMode() {
+        const modeValue = this.mode === 'direct' ? 1 : 0;
         fetch(new URL('/occupancy', location), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

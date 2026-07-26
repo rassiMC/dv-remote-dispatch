@@ -3,6 +3,7 @@ const TrackRenderer = {
     nodeMarkers: new Map(),
     segmentLayers: new Map(),
     switchBounds: new Map(),
+    showSignalAspects: true,
     blockColors: ['#4CAF50', '#2196F3', '#FF9800', '#E91E63', '#9C27B0', '#00BCD4'],
     colorIndex: 0,
 
@@ -90,7 +91,7 @@ const TrackRenderer = {
             fillColor: color,
             fillOpacity: 1,
             color: '#fff',
-            weight: 3
+            weight: 10
         });
 
         marker.nodeId = node.id;
@@ -112,7 +113,7 @@ const TrackRenderer = {
                 fillColor: '#00BFFF',
                 fillOpacity: 1,
                 color: '#fff',
-                weight: 3
+                weight: 10
             });
             marker.nodeId = node.id;
             marker.junctionMarker = true;
@@ -238,6 +239,61 @@ const TrackRenderer = {
 
         this.switchBounds.set(segment.id, { minX, maxX, minY, maxY });
 
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        const isHorizontal = (maxX - minX) >= (maxY - minY);
+
+        const graphEntry = SwitchboardMapper.switchboardGraph?.get(segment.id);
+        const rawSigs = graphEntry?.rawSignals;
+        if (this.showSignalAspects && rawSigs) {
+            const portSignalMap = [
+                { node: inbound, signal: rawSigs.Out },
+                { node: out1, signal: rawSigs.LeftIn },
+                { node: out2, signal: rawSigs.RightIn }
+            ];
+            for (const { node, signal } of portSignalMap) {
+                if (!signal) continue;
+                const aspect = signal.aspect;
+                if (aspect === null || aspect === undefined) continue;
+
+                let dotColor = '#666';
+                if (SwitchboardSignals.STOP_ASPECTS.has(aspect)) dotColor = '#ff4444';
+                else if (SwitchboardSignals.CAUTION_ASPECTS.has(aspect)) dotColor = '#eecc33';
+                else if (SwitchboardSignals.CLEAR_ASPECTS.has(aspect)) dotColor = '#44ff44';
+
+                let dotX, dotY;
+                if (isHorizontal) {
+                    const fwdDir = cx >= node.x ? 1 : -1;
+                    const sideDir = node.y >= cy ? 1 : -1;
+                    dotX = node.x + fwdDir * 0.5;
+                    dotY = node.y + sideDir * 0.25;
+
+                    L.polyline([
+                        this.coordsToLatLng(node.x, node.y + sideDir * 0.25),
+                        this.coordsToLatLng(dotX, dotY)
+                    ], { color: '#000', weight: 10 }).addTo(group);
+                } else {
+                    const fwdDir = cy >= node.y ? 1 : -1;
+                    const sideDir = node.x >= cx ? 1 : -1;
+                    dotX = node.x + sideDir * 0.25;
+                    dotY = node.y + fwdDir * 0.5;
+
+                    L.polyline([
+                        this.coordsToLatLng(node.x + sideDir * 0.25, node.y),
+                        this.coordsToLatLng(dotX, dotY)
+                    ], { color: '#000', weight: 10 }).addTo(group);
+                }
+
+                L.circle(this.coordsToLatLng(dotX, dotY), {
+                    radius: 0.15,
+                    fillColor: dotColor,
+                    fillOpacity: 1,
+                    color: '#000',
+                    weight: 1
+                }).addTo(group);
+            }
+        }
+
         const activeColor = color;
         const inactiveColor = '#444';
 
@@ -275,14 +331,6 @@ const TrackRenderer = {
             out1Polyline.addTo(group);
             out2Polyline.addTo(group);
         }
-
-        L.circle(inboundPos, {
-            radius: 0.1,
-            fillColor: activeColor,
-            fillOpacity: 1,
-            color: '#fff',
-            weight: 2
-        }).addTo(group);
 
         group.addTo(this.map);
         group.on('click', () => {

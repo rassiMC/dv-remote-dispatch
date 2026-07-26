@@ -121,6 +121,7 @@ namespace DvMod.RemoteDispatch
             HttpServer.Destroy();
             SignalsShim.Teardown();
             OccupancyData.ClearMapping();
+            PathingData.ClearPaths();
         }
 
         public static void Log(string message)

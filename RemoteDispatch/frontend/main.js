@@ -1219,8 +1219,6 @@ switchboardToggleBtn.addEventListener('click', () => {
 	} else {
 		if (typeof PathingController !== 'undefined') {
 			PathingController.disable();
-			const pathToggle = document.getElementById('pathingToggle');
-			if (pathToggle) pathToggle.checked = false;
 		}
 		if (typeof map !== 'undefined') {
 			setTimeout(() => map.invalidateSize(), 50);
@@ -1235,15 +1233,6 @@ if (hardcoreModeToggle) {
 		if (typeof SwitchboardOccupancy !== 'undefined') {
 			SwitchboardOccupancy.setMode(mode);
 		}
-		if (e.target.checked) {
-			const pathToggle = document.getElementById('pathingToggle');
-			if (pathToggle && pathToggle.checked) {
-				pathToggle.checked = false;
-				if (typeof PathingController !== 'undefined') {
-					PathingController.disable();
-				}
-			}
-		}
 	});
 }
 
@@ -1253,21 +1242,6 @@ if (signalAspectsToggle) {
 		if (switchboardRenderer) {
 			switchboardRenderer.showSignalAspects = e.target.checked;
 			switchboardRenderer.rerenderSwitches();
-		}
-	});
-}
-
-const pathingToggle = document.getElementById('pathingToggle');
-if (pathingToggle) {
-	pathingToggle.addEventListener('change', e => {
-		if (e.target.checked) {
-			if (hardcoreModeToggle && hardcoreModeToggle.checked) {
-				e.target.checked = false;
-				return;
-			}
-			PathingController.enable();
-		} else {
-			PathingController.disable();
 		}
 	});
 }
@@ -1666,6 +1640,24 @@ function updateOnce() {
 		case 'occupancy':
 			updateBlockOccupancy(data);
 			break;
+		case 'paths':
+			if (typeof PathingController !== 'undefined') {
+				PathingController.syncFromServer(data);
+			}
+			break;
+		case 'modconfig':
+			if (data && typeof data.enablePathing === 'boolean') {
+				enablePathing = data.enablePathing;
+				const statusEl = document.getElementById('pathingStatus');
+				if (data.enablePathing) {
+					PathingController.enable();
+					if (statusEl) statusEl.textContent = 'Pathing: enabled';
+				} else {
+					PathingController.disable();
+					if (statusEl) statusEl.textContent = 'Pathing: disabled';
+				}
+			}
+			break;
 				default:
 						const segments = tag.split('-');
 						switch (segments[0]) {
@@ -1832,6 +1824,8 @@ signalsReady.then(_ => {
 let switchboardMap;
 let switchboardRenderer;
 
+let enablePathing = false;
+
 function initSwitchboard() {
 	// Initialize switchboard map if not already done
 	if (!switchboardMap) {
@@ -1846,8 +1840,16 @@ function initSwitchboard() {
 			crs: L.CRS.Simple
 		});
 
-		switchboardMap.getContainer().addEventListener('contextmenu', e => {
-			e.preventDefault();
+		switchboardMap.on('contextmenu', e => {
+			if (typeof PathingController !== 'undefined' && PathingController.enabled && PathingController.state !== 'idle') {
+				if (PathingController.editingPathIndex !== null) {
+					PathingController.cancelEdit();
+				} else {
+					PathingController._resetSelection();
+					PathingController.rerender();
+					PathingController.updateStatus('Cancelled. Right-click a switch to begin.');
+				}
+			}
 		});
 
 		// Add zoom control
@@ -1873,6 +1875,7 @@ function loadSampleTrackData() {
 	fetch(new URL('/modconfig', location))
 		.then(resp => resp.json())
 		.then(config => {
+			enablePathing = config.enablePathing ?? false;
 			const trackFile = config.doubleTrack ? 'DoubbleTrack1.0_1.4.3.json' : 'RD_1.0.8.json';
 			console.log(`Loading track data: ${trackFile} (DoubleTrack: ${config.doubleTrack ?? false})`);
 			return fetch(`res/${trackFile}`);
@@ -1884,29 +1887,20 @@ function loadSampleTrackData() {
 			return response.json();
 		})
 		.then(data => {
-			// Load data into TrackData
 			TrackData.fromJSON(data);
-			
-			// Auto-assign block colors
 			TrackData.groupIntoBlocks();
-			
-			// Render all tracks on switchboard map
 			if (switchboardRenderer) {
 				switchboardRenderer.renderAll();
-				
-				// Fit map to bounds of all track elements
 				const bounds = [];
 				TrackData.nodes.forEach(node => {
 					const latlng = switchboardRenderer.coordsToLatLng(node.x, node.y);
 					bounds.push([latlng.lat, latlng.lng]);
 				});
-				
 				if (bounds.length > 0) {
 					switchboardMap.fitBounds(bounds, { padding: [20, 20] });
 				}
 			}
-			
-			buildSwitchMapping();
+			buildSwitchMapping(enablePathing);
 		})
 		.catch(error => {
 			console.error('Failed to load switchboard sample data:', error);
@@ -1918,7 +1912,7 @@ const SWITCHBOARD_ANCHOR = {
 	ingameJunctionIndex: 0
 };
 
-async function buildSwitchMapping() {
+async function buildSwitchMapping(enablePathing) {
 	try {
 		await SwitchboardMapper.fetchIngameGraph();
 		SwitchboardMapper.buildSwitchboardGraph();
@@ -1962,6 +1956,16 @@ async function buildSwitchMapping() {
 
 		if (switchboardRenderer) {
 			switchboardRenderer.rerenderAllSegments();
+		}
+
+		if (enablePathing && typeof PathingController !== 'undefined') {
+			PathingController.enable();
+			const statusEl = document.getElementById('pathingStatus');
+			if (statusEl) statusEl.textContent = 'Pathing: enabled';
+		} else if (typeof PathingController !== 'undefined') {
+			PathingController.disable();
+			const statusEl = document.getElementById('pathingStatus');
+			if (statusEl) statusEl.textContent = 'Pathing: disabled';
 		}
 	} catch (e) {
 		console.error('Failed to build switch mapping:', e);

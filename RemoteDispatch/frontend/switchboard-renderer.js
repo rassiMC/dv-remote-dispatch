@@ -160,7 +160,7 @@ const TrackRenderer = {
             color = '#888';
         }
 
-        if (segment.type !== 'switch' && typeof PathingController !== 'undefined' && PathingController.state !== 'off') {
+        if (typeof PathingController !== 'undefined' && (PathingController.state !== 'idle' || PathingController.lockedPaths.length > 0)) {
             const pathOverride = PathingController.getOverridesForSegment(segment.id);
             if (pathOverride) color = pathOverride.color;
         }
@@ -199,7 +199,7 @@ const TrackRenderer = {
         polyline.addTo(this.map);
 
         polyline.on('click', () => {
-            if (typeof PathingController !== 'undefined' && PathingController.enabled && PathingController.state !== 'off') {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled && (PathingController.state !== 'idle' || PathingController.lockedPaths.length > 0)) {
                 PathingController.onSegmentClick(segment.id);
             }
         });
@@ -239,7 +239,7 @@ const TrackRenderer = {
         const currentBranch = ingameData?.currentBranch;
 
         let rimColor = color;
-        if (typeof PathingController !== 'undefined' && PathingController.state !== 'off') {
+        if (typeof PathingController !== 'undefined' && (PathingController.state !== 'idle' || PathingController.lockedPaths.length > 0)) {
             const pcRim = PathingController.getSwitchRimColor(segment.id);
             if (pcRim) rimColor = pcRim;
         } else if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized && typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.mode === 'hardcore') {
@@ -356,7 +356,7 @@ const TrackRenderer = {
         group.on('contextmenu', e => {
             L.DomEvent.stopPropagation(e);
             if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-                PathingController.startFrom(segment.id);
+                PathingController.onContextMenuSwitch(segment.id);
             }
         });
 
@@ -373,10 +373,6 @@ const TrackRenderer = {
         });
 
         group.on('click', () => {
-            if (typeof PathingController !== 'undefined' && PathingController.enabled && (PathingController.state === 'selectingOrigin' || PathingController.state === 'preview')) {
-                PathingController.onSwitchClick(segment.id);
-                return;
-            }
             if (jIdx !== null) {
                 const jData = SwitchboardMapper.ingameGraph?.get(jIdx);
                 console.log(`%c[${segment.id}] -> ingame junction ${jIdx} (deg ${jData?.degree ?? '?'}, id ${jData?.junctionId ?? '?'})`, 'color: #00ff00');
@@ -472,7 +468,7 @@ const TrackRenderer = {
         }
         for (const seg of changed) {
             this.renderSegment(seg);
-            if (typeof PathingController !== 'undefined' && PathingController.state === 'locked') {
+            if (typeof PathingController !== 'undefined' && PathingController.lockedPaths.length > 0) {
                 const jIdx = SwitchboardMapper.getIngameJunctionIndex(seg.id);
                 if (jIdx !== null && jIdx < states.length) {
                     PathingController.checkManualAlignment(seg.id, states[jIdx]);

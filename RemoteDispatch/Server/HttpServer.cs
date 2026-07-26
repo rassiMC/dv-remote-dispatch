@@ -143,6 +143,10 @@ namespace DvMod.RemoteDispatch
 				Render200(context, ContentTypes.Json, OccupancyData.GetOccupancyJSON());
 			}
 			break;
+		case "path":
+			Main.DebugLog("/path endpoint hit");
+			HandlePathRequest(context);
+			break;
 		case "signal":
 			Main.DebugLog("/signal endpoint hit");
 			await HandleSignalRequest(context);
@@ -471,11 +475,87 @@ namespace DvMod.RemoteDispatch
 			RenderResource(context, $"frontend.{resourceName}");
 		}
 
+		private static void HandlePathRequest(HttpListenerContext context)
+		{
+			var username = context.User?.Identity?.Name ?? "";
+			var segments = context.Request.Url.Segments;
+			var method = context.Request.HttpMethod;
+
+			if (!Main.settings.featureFlags.enablePathing)
+			{
+				if (method == "GET")
+				{
+					Render200(context, ContentTypes.Json, new JArray().ToString());
+					return;
+				}
+				RenderEmpty(context, 403);
+				return;
+			}
+
+			if (method == "GET" && segments.Length <= 3)
+			{
+				Render200(context, ContentTypes.Json, PathingData.GetPathsJson().ToString());
+				return;
+			}
+
+			if (!Main.settings.permissions.HasPathingPermission(username))
+			{
+				RenderEmpty(context, 403);
+				return;
+			}
+
+			if (method == "POST" && segments.Length <= 3)
+			{
+				try
+				{
+					const int maxBodySize = 524288;
+					using var stream = context.Request.InputStream;
+					using var ms = new System.IO.MemoryStream();
+					stream.CopyTo(ms);
+					if (ms.Length > maxBodySize)
+						throw new Exception("Request body too large");
+					string bodyText = Encoding.UTF8.GetString(ms.ToArray());
+					var pathEntry = JObject.Parse(bodyText);
+					var id = PathingData.AddPath(pathEntry);
+					Render200(context, ContentTypes.Json, new JObject { ["id"] = id }.ToString());
+				}
+				catch (Exception e)
+				{
+					Main.Warning($"Failed to parse path request: {e.Message}");
+					RenderEmpty(context, 400);
+				}
+				return;
+			}
+
+			if (method == "DELETE")
+			{
+				if (segments.Length == 2)
+				{
+					PathingData.ClearPaths();
+					RenderEmpty(context, 204);
+				}
+				else if (segments.Length >= 3)
+				{
+					var pathId = segments[2].TrimEnd('/');
+					PathingData.RemovePath(pathId);
+					RenderEmpty(context, 204);
+				}
+				else
+				{
+					RenderEmpty(context, 404);
+				}
+				return;
+			}
+
+			RenderEmpty(context, 404);
+		}
+
 		private static void HandleModConfigRequest(HttpListenerContext context)
 		{
 			var config = new JObject();
 			var doubleTrackMod = UnityModManagerNet.UnityModManager.FindMod("DoubleTrack");
 			config["doubleTrack"] = doubleTrackMod != null && doubleTrackMod.Enabled;
+			config["enablePathing"] = Main.settings.featureFlags.enablePathing;
 			Render200(context, ContentTypes.Json, config.ToString());
 		}
 

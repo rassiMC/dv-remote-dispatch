@@ -118,11 +118,17 @@ namespace DvMod.RemoteDispatch
 			return permissions.Find(p => p.name == username)?.canControlLocomotives ?? false;
 		}
 
-		public bool HasSignalControlPermission(string username)
-		{
-			return permissions.Find(p => p.name == username)?.canControlSignals ?? false;
-		}
-		public bool CanSeePlayerBlips(string username)
+        public bool HasSignalControlPermission(string username)
+        {
+            return permissions.Find(p => p.name == username)?.canControlSignals ?? false;
+        }
+
+        public bool HasPathingPermission(string username)
+        {
+            return HasJunctionPermission(username) && HasSignalControlPermission(username);
+        }
+
+        public bool CanSeePlayerBlips(string username)
         {
             return permissions.Find(p => p.name == username)?.canSeePlayerBlips ?? false;
         }
@@ -205,15 +211,33 @@ namespace DvMod.RemoteDispatch
     public class FeatureFlags
     {
         public bool enableSignals = false;
+        public bool enablePathing = false;
+        private bool _prevSignals;
+        private bool _prevPathing;
+        private bool _initialized;
 
         public void Draw()
         {
+            if (!_initialized)
+            {
+                _prevSignals = enableSignals;
+                _prevPathing = enablePathing;
+                _initialized = true;
+            }
             GUILayout.Label("Feature Flags:");
             GUILayout.BeginHorizontal("box", GUILayout.ExpandWidth(false));
             GUILayout.BeginVertical();
             enableSignals = GUILayout.Toggle(enableSignals, "Enable signals");
+            enablePathing = GUILayout.Toggle(enablePathing, "Enable pathing");
             GUILayout.EndVertical();
             GUILayout.EndHorizontal();
+
+            if (enablePathing != _prevPathing || enableSignals != _prevSignals)
+            {
+                _prevSignals = enableSignals;
+                _prevPathing = enablePathing;
+                Sessions.AddTag("modconfig");
+            }
         }
     }
 }

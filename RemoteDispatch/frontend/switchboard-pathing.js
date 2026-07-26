@@ -1,19 +1,22 @@
 const PathingController = {
     enabled: false,
-    state: 'off',
+    state: 'idle',
+    lockedPaths: [],
     originSwitchId: null,
     destinationSwitchId: null,
     waypoints: new Set(),
     currentPath: [],
     pathSegments: [],
-    overlayGroup: null,
-    waypointsGroup: null,
     waypointMarkers: new Map(),
     recentlyAligned: new Map(),
     _clickLocking: false,
     _onKeyDown: null,
+    _lastSegments: new Set(),
+    _lastSwitches: new Set(),
+    editingPathIndex: null,
 
-    MODE_YELLOW: '#ccbb33',
+    MODE_YELLOW: '#ffdd44',
+    MODE_BLUE: '#4488ff',
     MODE_GREEN: '#208020',
     MODE_RED: '#a02020',
 
@@ -21,46 +24,119 @@ const PathingController = {
         return this.enabled;
     },
 
-    _resetState() {
-        this.state = 'off';
+    _resetSelection() {
+        this.state = 'idle';
         this._clickLocking = false;
         this.originSwitchId = null;
         this.destinationSwitchId = null;
         this.waypoints.clear();
         this.currentPath = [];
         this.pathSegments = [];
-        this.clearOverlay();
         this.clearWaypoints();
+    },
+
+    syncFromServer(serverPaths) {
+        if (!this.enabled) return;
+        if (this.editingPathIndex !== null) return;
+        const oldSegs = this._currentSegments();
+        const oldSwitches = this._currentSwitches();
+
+        const paths = Array.isArray(serverPaths) ? serverPaths : [];
+
+        const alignedSwitches = new Set();
+        for (const p of paths) {
+            if (p.switches) {
+                for (const swId of p.switches) {
+                    if (this.recentlyAligned.has(swId)) {
+                        alignedSwitches.add(swId);
+                    }
+                }
+            }
+        }
         this.recentlyAligned.clear();
+        for (const swId of alignedSwitches) {
+            this.recentlyAligned.set(swId, Date.now());
+        }
+
+        this.lockedPaths = paths;
+        this._rerenderDiff(oldSegs, oldSwitches);
+        this._rerenderChanged();
     },
 
     clearAll() {
-        this._resetState();
-        this.updateStatus('');
+        if (this.lockedPaths.length === 0) {
+            this._resetSelection();
+            this.editingPathIndex = null;
+            this.recentlyAligned.clear();
+            this._lastSegments.clear();
+            this._lastSwitches.clear();
+            this.rerender();
+            this.updateStatus('');
+            return;
+        }
+        if (!confirm('Clear all paths? This cannot be undone.')) return;
+        fetch(new URL('/path', location), { method: 'DELETE' })
+            .then(resp => {
+                if (resp.ok) {
+                    this.lockedPaths = [];
+                    this.recentlyAligned.clear();
+                    this.editingPathIndex = null;
+                    this._resetSelection();
+                    this._lastSegments.clear();
+                    this._lastSwitches.clear();
+                    this.rerender();
+                    this.updateStatus('All paths cleared. Right-click a switch to begin.');
+                } else if (resp.status === 403) {
+                    this.updateStatus('Permission denied: junction & signal control required.');
+                }
+            });
     },
 
     enable() {
         if (this.enabled) return;
         this.enabled = true;
         this._attachKeyHandler();
-        this.updateStatus('Right-click a switch to begin pathing');
-        this.rerender();
+        this.updateStatus('Loading paths...');
+        fetch(new URL('/path', location))
+            .then(resp => resp.json())
+            .then(data => {
+                this.lockedPaths = Array.isArray(data) ? data : [];
+                this.rerender();
+                this.updateStatus('Right-click a switch to begin pathing');
+            })
+            .catch(() => {
+                this.rerender();
+                this.updateStatus('Right-click a switch to begin pathing');
+            });
     },
 
     disable() {
         if (!this.enabled) return;
         this.enabled = false;
         this._detachKeyHandler();
-        this._resetState();
+        this.editingPathIndex = null;
+        this._resetSelection();
+        this._lastSegments.clear();
+        this._lastSwitches.clear();
         this.rerender();
+        this.updateStatus('');
     },
 
     _attachKeyHandler() {
         if (this._onKeyDown) return;
         this._onKeyDown = e => {
-            if (e.key === 'Escape' && this.state !== 'off') {
-                this.clearAll();
-                this.updateStatus('Path cancelled. Right-click a switch to begin.');
+            if (e.key === 'Escape') {
+                if (this.state !== 'idle') {
+                    if (this.editingPathIndex !== null) {
+                        this._editBackup = null;
+                        this.editingPathIndex = null;
+                    }
+                    this._resetSelection();
+                    this.rerender();
+                    this.updateStatus('Cancelled. Right-click a switch to begin.');
+                } else if (this.lockedPaths.length > 0) {
+                    this.clearAll();
+                }
                 e.preventDefault();
             }
         };
@@ -74,40 +150,75 @@ const PathingController = {
         }
     },
 
+    onContextMenuSwitch(switchId) {
+        if (!this.enabled) return;
+
+        if (this.state === 'selectingOrigin' || this.state === 'preview') {
+            if (switchId !== this.originSwitchId) {
+                this.onSwitchClick(switchId);
+                return;
+            }
+        }
+
+        const existingPath = this._switchInPaths(switchId);
+        if (existingPath) {
+            if (switchId === existingPath.originSwitchId) {
+                this.deletePath(existingPath);
+                return;
+            }
+            if (switchId === existingPath.destinationSwitchId) {
+                this.startEdit(existingPath);
+                return;
+            }
+        }
+
+        this.startFrom(switchId);
+    },
+
     startFrom(switchId) {
         if (!this.enabled) return;
-        this._resetState();
+        const oldSegs = this._currentSegments();
+        const oldSwitches = this._currentSwitches();
+        this._resetSelection();
+        this.editingPathIndex = null;
         this.state = 'selectingOrigin';
         this.originSwitchId = switchId;
-        this.renderOriginOverlay();
+        this._rerenderDiff(oldSegs, oldSwitches);
+        this._rerenderChanged();
         this.updateStatus('Origin set. Hover a switch to preview path, click to lock. Click tracks for waypoints.');
     },
 
     onSwitchHover(switchId) {
         if (this.state !== 'selectingOrigin' && this.state !== 'preview') return;
         if (switchId === this.originSwitchId) return;
+        const oldSegs = this._currentSegments();
+        const oldSwitches = this._currentSwitches();
         const result = this.computePath(this.originSwitchId, switchId);
         if (result && result.switches.length > 0) {
             this.state = 'preview';
             this.destinationSwitchId = switchId;
             this.currentPath = result.switches;
             this.pathSegments = result.segments;
-            this.renderOverlay('preview');
+            this._rerenderDiff(oldSegs, oldSwitches);
+            this._rerenderChanged();
             this.updateStatus('Preview: click to lock this path, or hover another switch');
         } else {
-            this.renderOriginOverlay();
+            this._rerenderDiff(oldSegs, oldSwitches);
+            this._rerenderChanged();
             this.updateStatus('No path to that switch');
         }
     },
 
     onSwitchHoverEnd() {
         if (this.state !== 'preview') return;
-        if (this._clickLocking) return;
+        const oldSegs = this._currentSegments();
+        const oldSwitches = this._currentSwitches();
         this.state = 'selectingOrigin';
         this.destinationSwitchId = null;
         this.currentPath = [];
         this.pathSegments = [];
-        this.renderOriginOverlay();
+        this._rerenderDiff(oldSegs, oldSwitches);
+        this._rerenderChanged();
         this.updateStatus('Origin set. Hover a switch to preview path, click to lock.');
     },
 
@@ -115,18 +226,64 @@ const PathingController = {
         if (this.state !== 'selectingOrigin' && this.state !== 'preview') return;
         if (switchId === this.originSwitchId) return;
 
-        this._clickLocking = true;
-        setTimeout(() => { this._clickLocking = false; }, 100);
-
+        const oldSegs = this._currentSegments();
+        const oldSwitches = this._currentSwitches();
         const result = this.computePath(this.originSwitchId, switchId);
         if (result && result.switches.length > 0) {
-            this.state = 'locked';
-            this.destinationSwitchId = switchId;
-            this.currentPath = result.switches;
-            this.pathSegments = result.segments;
-            this.renderOverlay('locked');
-            this.autoAlign();
-            this.updateStatus(`Path locked (${result.switches.length} switches, ${result.segments.length} segments). Esc to cancel.`);
+            const pathEntry = {
+                originSwitchId: this.originSwitchId,
+                destinationSwitchId: switchId,
+                switches: result.switches,
+                segments: result.segments,
+                connections: result.connections
+            };
+
+            if (this.editingPathIndex !== null) {
+                const oldPathId = this._editOldPathId;
+                this.editingPathIndex = null;
+                this._editOldPathId = null;
+                this._resetSelection();
+                this._rerenderDiff(oldSegs, oldSwitches);
+                this._rerenderChanged();
+                const removePromise = oldPathId
+                    ? fetch(new URL(`/path/${oldPathId}`, location), { method: 'DELETE' })
+                    : Promise.resolve();
+                removePromise
+                    .then(() => fetch(new URL('/path', location), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(pathEntry)
+                    }))
+                    .then(resp => resp.ok ? resp.json() : null)
+                    .then(data => {
+                        if (data && data.id) {
+                            pathEntry.id = data.id;
+                            this.lockedPaths.push(pathEntry);
+                            this.autoAlign(pathEntry);
+                            this.updateStatus(`Path edited (${result.switches.length} switches). ${this.lockedPaths.length} path(s) active.`);
+                        }
+                    })
+                    .catch(() => this.updateStatus('Failed to save edited path.'));
+            } else {
+                fetch(new URL('/path', location), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(pathEntry)
+                })
+                .then(resp => resp.ok ? resp.json() : null)
+                .then(data => {
+                    if (data && data.id) {
+                        pathEntry.id = data.id;
+                        this.lockedPaths.push(pathEntry);
+                        this._resetSelection();
+                        this._rerenderDiff(oldSegs, oldSwitches);
+                        this._rerenderChanged();
+                        this.autoAlign(pathEntry);
+                        this.updateStatus(`Path locked (${result.switches.length} switches). ${this.lockedPaths.length} path(s) active. Right-click to add another.`);
+                    }
+                })
+                .catch(() => this.updateStatus('Failed to create path. Check permissions.'));
+            }
         }
     },
 
@@ -142,11 +299,14 @@ const PathingController = {
             this.addWaypointMarker(segmentId);
         }
         if (this.state === 'preview' && this.destinationSwitchId) {
+            const oldSegs = this._currentSegments();
+            const oldSwitches = this._currentSwitches();
             const result = this.computePath(this.originSwitchId, this.destinationSwitchId);
             if (result) {
                 this.currentPath = result.switches;
                 this.pathSegments = result.segments;
-                this.renderOverlay('preview');
+                this._rerenderDiff(oldSegs, oldSwitches);
+                this._rerenderChanged();
             }
         }
         this.updateStatus(`Waypoints: ${this.waypoints.size} (Esc to cancel)`);
@@ -179,18 +339,27 @@ const PathingController = {
 
         let allPathSwitches = [];
         let allPathSegments = [];
+        let allConnections = [];
         let prevEntryPort = null;
         for (let i = 0; i < allWaypoints.length - 1; i++) {
             const result = this._aStar(allWaypoints[i], allWaypoints[i + 1], prevEntryPort);
             if (!result) return null;
 
-            const lastSw = result.switches[result.switches.length - 1];
-            const prevSw = result.switches.length >= 2 ? result.switches[result.switches.length - 2] : null;
-            prevEntryPort = prevSw ? this._entryPortOf(prevSw, lastSw) : null;
+            if (i > 0) {
+                result.switches.shift();
+                result.connections.shift();
+            }
 
-            if (i > 0) result.switches.shift();
+            const lastConn = result.connections[result.connections.length - 1];
+            if (lastConn) {
+                prevEntryPort = this._entryPortOfConn(lastConn.fromSwId, lastConn.toSwId, lastConn.fromNeighbor);
+            } else {
+                prevEntryPort = null;
+            }
+
             allPathSwitches.push(...result.switches);
             allPathSegments.push(...result.segments);
+            allConnections.push(...result.connections);
         }
         const uniqueSwitches = [];
         for (const sw of allPathSwitches) {
@@ -200,7 +369,7 @@ const PathingController = {
         for (const seg of allPathSegments) {
             if (!uniqueSegments.includes(seg)) uniqueSegments.push(seg);
         }
-        return { switches: uniqueSwitches, segments: uniqueSegments };
+        return { switches: uniqueSwitches, segments: uniqueSegments, connections: allConnections };
     },
 
     _getCentroid(swId) {
@@ -232,11 +401,7 @@ const PathingController = {
         return null;
     },
 
-    _edgeCost(swId, neighborSwId) {
-        const entry = SwitchboardMapper.switchboardGraph.get(swId);
-        if (!entry) return 1;
-        const neighbor = entry.neighbors.find(n => n.switchId === neighborSwId);
-        if (!neighbor) return 1;
+    _edgeCostNeighbor(swId, neighbor) {
         const segs = this._traceSegments(neighbor.fromNodeId, neighbor.viaNodeId);
         if (!segs) return 1;
         for (const segId of segs) {
@@ -246,14 +411,10 @@ const PathingController = {
         return 1;
     },
 
-    _traceFullPath(switches) {
+    _traceFullPathConns(connections) {
         const allSegments = [];
-        for (let i = 0; i < switches.length - 1; i++) {
-            const entry = SwitchboardMapper.switchboardGraph.get(switches[i]);
-            if (!entry) continue;
-            const neighbor = entry.neighbors.find(n => n.switchId === switches[i + 1]);
-            if (!neighbor) continue;
-            const segs = this._traceSegments(neighbor.fromNodeId, neighbor.viaNodeId);
+        for (const conn of connections) {
+            const segs = this._traceSegments(conn.fromNeighbor.fromNodeId, conn.fromNeighbor.viaNodeId);
             if (segs) allSegments.push(...segs);
         }
         return allSegments;
@@ -272,6 +433,16 @@ const PathingController = {
         return backLink ? backLink.port : null;
     },
 
+    _entryPortOfConn(fromSwId, neighborSwId, fromNeighbor) {
+        const entry = SwitchboardMapper.switchboardGraph.get(neighborSwId);
+        if (!entry) return null;
+        const backLink = entry.neighbors.find(n =>
+            n.switchId === fromSwId &&
+            n.fromNodeId === fromNeighbor.viaNodeId
+        );
+        return backLink ? backLink.port : null;
+    },
+
     _aStar(fromId, toId, fromEntryPort) {
         const graph = SwitchboardMapper.switchboardGraph;
         if (!graph.has(fromId) || !graph.has(toId)) return null;
@@ -286,6 +457,7 @@ const PathingController = {
 
         const openSet = new Set([fromId]);
         const cameFrom = new Map();
+        const cameFromNeighbor = new Map();
         const entryPorts = new Map();
         if (fromEntryPort) entryPorts.set(fromId, fromEntryPort);
         const gScore = new Map(); gScore.set(fromId, 0);
@@ -299,10 +471,24 @@ const PathingController = {
             }
             if (current === toId) {
                 const pathSwitches = [];
+                const connections = [];
                 let node = current;
-                while (node) { pathSwitches.unshift(node); node = cameFrom.get(node); }
-                const pathSegments = pathSwitches.length > 1 ? this._traceFullPath(pathSwitches) : [];
-                return { switches: pathSwitches, segments: pathSegments };
+                let nbr = cameFromNeighbor.get(current);
+                while (node) {
+                    pathSwitches.unshift(node);
+                    const prev = cameFrom.get(node);
+                    if (prev !== undefined && nbr) {
+                        connections.unshift({
+                            fromSwId: prev,
+                            toSwId: node,
+                            fromNeighbor: nbr
+                        });
+                    }
+                    node = prev;
+                    if (node !== undefined) nbr = cameFromNeighbor.get(node);
+                }
+                const pathSegments = pathSwitches.length > 1 ? this._traceFullPathConns(connections) : [];
+                return { switches: pathSwitches, segments: pathSegments, connections };
             }
             openSet.delete(current);
             const entry = graph.get(current);
@@ -316,11 +502,12 @@ const PathingController = {
                 const validExits = this._validExits(entryPort);
                 if (!validExits.includes(exitPort)) continue;
 
-                const cost = this._edgeCost(current, nbrId);
+                const cost = this._edgeCostNeighbor(current, nbr);
                 const tentativeG = (gScore.get(current) ?? Infinity) + cost;
                 if (tentativeG < (gScore.get(nbrId) ?? Infinity)) {
                     cameFrom.set(nbrId, current);
-                    entryPorts.set(nbrId, this._entryPortOf(current, nbrId));
+                    cameFromNeighbor.set(nbrId, nbr);
+                    entryPorts.set(nbrId, this._entryPortOfConn(current, nbrId, nbr));
                     gScore.set(nbrId, tentativeG);
                     const nbrC = this._getCentroid(nbrId);
                     if (nbrC) fScore.set(nbrId, tentativeG + _h(nbrC, toC));
@@ -331,37 +518,29 @@ const PathingController = {
         return null;
     },
 
-    getOccupiedSegments() {
-        const occupied = new Set();
-        for (const segId of this.pathSegments) {
-            const block = TrackData.getBlockForSegment(segId);
-            if (block && block.occupancyState === 'occupied') occupied.add(segId);
-        }
-        return occupied;
-    },
-
-    autoAlign() {
-        if (this.state !== 'locked') return;
+    autoAlign(pathEntry) {
         const toToggle = [];
-        for (const swId of this.currentPath) {
-            if (swId === this.originSwitchId || swId === this.destinationSwitchId) continue;
+        const conns = pathEntry.connections || [];
+        console.log('[Pathing] autoAlign connections:', conns.length, conns);
+        for (let ci = 0; ci < conns.length - 1; ci++) {
+            const inConn = conns[ci];
+            const outConn = conns[ci + 1];
+            const swId = inConn.toSwId;
+            if (swId !== outConn.fromSwId) continue;
+            if (swId === pathEntry.originSwitchId || swId === pathEntry.destinationSwitchId) continue;
+
             const jIdx = SwitchboardMapper.getIngameJunctionIndex(swId);
             if (jIdx === null) continue;
             const ingameData = SwitchboardMapper.ingameGraph?.get(jIdx);
             if (!ingameData) continue;
 
-            const pIdx = this.currentPath.indexOf(swId);
-            const prevSwId = this.currentPath[pIdx - 1];
-            const nextSwId = this.currentPath[pIdx + 1];
-            if (!prevSwId || !nextSwId) continue;
+            const inPort = this._entryPortOfConn(inConn.fromSwId, swId, inConn.fromNeighbor);
+            const outPort = outConn.fromNeighbor.port;
 
-            const entry = SwitchboardMapper.switchboardGraph.get(swId);
-            if (!entry) continue;
-            const prevNbr = entry.neighbors.find(n => n.switchId === prevSwId);
-            const nextNbr = entry.neighbors.find(n => n.switchId === nextSwId);
-            if (!prevNbr || !nextNbr) continue;
+            console.log(`[Pathing] autoAlign sw=${swId} inPort=${inPort} outPort=${outPort} inConn=`, inConn, 'outConn=', outConn);
 
-            const neededBranch = this._neededBranch(prevNbr.port, nextNbr.port);
+            const neededBranch = this._neededBranch(inPort, outPort);
+            console.log(`[Pathing] autoAlign sw=${swId} neededBranch=${neededBranch} current=${ingameData.currentBranch}`);
             if (neededBranch === null) continue;
 
             if (ingameData.currentBranch === neededBranch) {
@@ -382,12 +561,10 @@ const PathingController = {
                     }
                 })
         )).then(() => {
-            this.rerender();
-            this.renderOverlay('locked');
+            this._rerenderChanged();
         });
 
-        this.rerender();
-        this.renderOverlay('locked');
+        this._rerenderChanged();
     },
 
     _neededBranch(inPort, outPort) {
@@ -401,80 +578,180 @@ const PathingController = {
     },
 
     checkManualAlignment(swId, newBranch) {
-        if (this.state !== 'locked') return;
-        if (!this.currentPath.includes(swId)) return;
-        const pIdx = this.currentPath.indexOf(swId);
-        const prevSwId = this.currentPath[pIdx - 1];
-        const nextSwId = this.currentPath[pIdx + 1];
-        if (!prevSwId || !nextSwId) return;
-        const entry = SwitchboardMapper.switchboardGraph.get(swId);
-        if (!entry) return;
-        const prevNbr = entry.neighbors.find(n => n.switchId === prevSwId);
-        const nextNbr = entry.neighbors.find(n => n.switchId === nextSwId);
-        if (!prevNbr || !nextNbr) return;
-        const neededBranch = this._neededBranch(prevNbr.port, nextNbr.port);
+        const pathEntry = this.lockedPaths.find(p => p.switches && p.switches.includes(swId));
+        if (!pathEntry) return;
+
+        const conns = pathEntry.connections || [];
+        let inConn = null, outConn = null;
+        for (let ci = 0; ci < conns.length - 1; ci++) {
+            if (conns[ci].toSwId === swId && conns[ci + 1].fromSwId === swId) {
+                inConn = conns[ci];
+                outConn = conns[ci + 1];
+                break;
+            }
+        }
+        if (!inConn || !outConn) return;
+
+        const inPort = this._entryPortOfConn(inConn.fromSwId, swId, inConn.fromNeighbor);
+        const outPort = outConn.fromNeighbor.port;
+        const neededBranch = this._neededBranch(inPort, outPort);
         if (neededBranch === null) return;
         if (newBranch === neededBranch) {
             this.recentlyAligned.set(swId, Date.now());
-            this.rerender();
-            this.renderOverlay('locked');
+            this._rerenderChanged();
         }
     },
 
-    getOverridesForSegment(segId) {
-        if (this.state === 'off') return null;
-        if (!this.pathSegments.includes(segId)) return null;
-        const block = TrackData.getBlockForSegment(segId);
-        if (block && block.occupancyState === 'occupied') return { color: this.MODE_RED };
-        if (this.state === 'locked') return { color: this.MODE_GREEN };
-        return { color: this.MODE_YELLOW };
-    },
-
-    getSwitchRimColor(swId) {
-        if (this.state === 'selectingOrigin' && swId === this.originSwitchId) return this.MODE_YELLOW;
-        if (this.state === 'preview' && this.currentPath.includes(swId)) return this.MODE_YELLOW;
-        if (this.state === 'locked' && this.currentPath.includes(swId)) {
-            if (swId === this.originSwitchId || swId === this.destinationSwitchId) return null;
-            if (this.recentlyAligned.has(swId)) return this.MODE_GREEN;
-            const status = this._alignmentStatus(swId);
-            if (status === 'aligned') return this.MODE_GREEN;
-            if (status === 'misaligned') return this.MODE_RED;
+    _switchInPaths(swId) {
+        for (const p of this.lockedPaths) {
+            if (p.switches && p.switches.includes(swId)) return p;
         }
         return null;
     },
 
-    _alignmentStatus(swId) {
+    _pathIndex(pathEntry) {
+        return this.lockedPaths.indexOf(pathEntry);
+    },
+
+    deletePath(pathEntry) {
+        const idx = this._pathIndex(pathEntry);
+        if (idx === -1) return;
+        if (!pathEntry.id) {
+            for (const swId of pathEntry.switches) {
+                this.recentlyAligned.delete(swId);
+            }
+            this.lockedPaths.splice(idx, 1);
+            this._resetSelection();
+            this.editingPathIndex = null;
+            this.rerender();
+            this.updateStatus(`Path deleted. ${this.lockedPaths.length} path(s) active.`);
+            return;
+        }
+        fetch(new URL(`/path/${pathEntry.id}`, location), { method: 'DELETE' })
+            .then(resp => {
+                if (resp.ok) {
+                    for (const swId of pathEntry.switches) {
+                        this.recentlyAligned.delete(swId);
+                    }
+                    this.lockedPaths.splice(idx, 1);
+                    this._resetSelection();
+                    this.editingPathIndex = null;
+                    this.rerender();
+                    this.updateStatus(`Path deleted. ${this.lockedPaths.length} path(s) active.`);
+                } else if (resp.status === 403) {
+                    this.updateStatus('Permission denied: junction & signal control required.');
+                }
+            });
+    },
+
+    startEdit(pathEntry) {
+        const idx = this._pathIndex(pathEntry);
+        if (idx === -1) return;
+        const oldSegs = this._currentSegments();
+        const oldSwitches = this._currentSwitches();
+
+        this._editOldPathId = pathEntry.id || null;
+        this._editBackup = {
+            pathEntry: {
+                ...pathEntry,
+                switches: [...pathEntry.switches],
+                segments: [...pathEntry.segments],
+                connections: pathEntry.connections ? pathEntry.connections.map(c => ({ ...c, fromNeighbor: { ...c.fromNeighbor } })) : []
+            },
+            index: idx
+        };
+        this.lockedPaths.splice(idx, 1);
+        this.editingPathIndex = idx;
+
+        this._resetSelection();
+        this.state = 'selectingOrigin';
+        this.originSwitchId = pathEntry.originSwitchId;
+
+        this._rerenderDiff(oldSegs, oldSwitches);
+        this._rerenderChanged();
+        this.updateStatus('Editing path. Hover a switch to preview, click to lock. Right-click void to cancel.');
+    },
+
+    cancelEdit() {
+        if (this.editingPathIndex === null) return;
+        if (this._editBackup) {
+            this.lockedPaths.splice(this._editBackup.index, 0, this._editBackup.pathEntry);
+            this._editBackup = null;
+        }
+        this._editOldPathId = null;
+        this._resetSelection();
+        this.editingPathIndex = null;
+        this.rerender();
+        this.updateStatus('Edit cancelled.');
+    },
+
+    _isEndpoint(swId, pathEntry) {
+        return swId === pathEntry.originSwitchId || swId === pathEntry.destinationSwitchId;
+    },
+
+    getOverridesForSegment(segId) {
+        const seg = TrackData.getSegment(segId);
+        const isSwitch = seg && seg.type === 'switch';
+        if (this.lockedPaths.length > 0) {
+            for (const p of this.lockedPaths) {
+                const inPath = isSwitch ? (p.switches && p.switches.includes(segId)) : (p.segments && p.segments.includes(segId));
+                if (inPath) {
+                    const block = TrackData.getBlockForSegment(segId);
+                    if (block && block.occupancyState === 'occupied') return { color: this.MODE_RED };
+                    return { color: this.MODE_GREEN };
+                }
+            }
+        }
+        if (this.state !== 'idle') {
+            const inSelection = isSwitch ? this.currentPath.includes(segId) : this.pathSegments.includes(segId);
+            if (inSelection) {
+                const block = TrackData.getBlockForSegment(segId);
+                if (block && block.occupancyState === 'occupied') return { color: this.MODE_RED };
+                return { color: this.MODE_YELLOW };
+            }
+        }
+        return null;
+    },
+
+    getSwitchRimColor(swId) {
+        if (this.state === 'selectingOrigin' && swId === this.originSwitchId) return this.MODE_YELLOW;
+        if (this.state === 'preview' && this.currentPath.includes(swId) && swId !== this.originSwitchId) return this.MODE_YELLOW;
+        if (this.lockedPaths.length > 0) {
+            const pathEntry = this._switchInPaths(swId);
+            if (pathEntry && !this._isEndpoint(swId, pathEntry)) {
+                if (this.recentlyAligned.has(swId)) return this.MODE_GREEN;
+                const status = this._alignmentStatus(swId, pathEntry);
+                if (status === 'aligned') return this.MODE_GREEN;
+                if (status === 'misaligned') return this.MODE_RED;
+            }
+            if (pathEntry && swId === pathEntry.originSwitchId) return this.MODE_BLUE;
+            if (pathEntry && swId === pathEntry.destinationSwitchId) return this.MODE_YELLOW;
+        }
+        return null;
+    },
+
+    _alignmentStatus(swId, pathEntry) {
         const jIdx = SwitchboardMapper.getIngameJunctionIndex(swId);
         if (jIdx === null) return null;
         const ingameData = SwitchboardMapper.ingameGraph?.get(jIdx);
         if (!ingameData) return null;
-        const pIdx = this.currentPath.indexOf(swId);
-        const prevSwId = this.currentPath[pIdx - 1];
-        const nextSwId = this.currentPath[pIdx + 1];
-        if (!prevSwId || !nextSwId) return null;
-        const entry = SwitchboardMapper.switchboardGraph.get(swId);
-        if (!entry) return null;
-        const prevNbr = entry.neighbors.find(n => n.switchId === prevSwId);
-        const nextNbr = entry.neighbors.find(n => n.switchId === nextSwId);
-        if (!prevNbr || !nextNbr) return null;
-        const needed = this._neededBranch(prevNbr.port, nextNbr.port);
+
+        const conns = pathEntry.connections || [];
+        let inConn = null, outConn = null;
+        for (let ci = 0; ci < conns.length - 1; ci++) {
+            if (conns[ci].toSwId === swId && conns[ci + 1].fromSwId === swId) {
+                inConn = conns[ci];
+                outConn = conns[ci + 1];
+                break;
+            }
+        }
+        if (!inConn || !outConn) return null;
+
+        const inPort = this._entryPortOfConn(inConn.fromSwId, swId, inConn.fromNeighbor);
+        const outPort = outConn.fromNeighbor.port;
+        const needed = this._neededBranch(inPort, outPort);
         if (needed === null) return null;
         return ingameData.currentBranch === needed ? 'aligned' : 'misaligned';
-    },
-
-    // Overlay rendering
-    getOverlayGroup() {
-        if (!this.overlayGroup) {
-            this.overlayGroup = L.featureGroup().addTo(switchboardRenderer.map);
-        }
-        return this.overlayGroup;
-    },
-
-    clearOverlay() {
-        if (this.overlayGroup) {
-            switchboardRenderer.map.removeLayer(this.overlayGroup);
-            this.overlayGroup = null;
-        }
     },
 
     clearWaypoints() {
@@ -482,76 +759,6 @@ const PathingController = {
             switchboardRenderer.map.removeLayer(m);
         }
         this.waypointMarkers.clear();
-    },
-
-    renderOriginOverlay() {
-        this.clearOverlay();
-        if (!this.originSwitchId) return;
-        this._addSwitchRimToOverlay(this.originSwitchId, this.MODE_YELLOW);
-    },
-
-    renderOverlay(mode) {
-        this.clearOverlay();
-        if (!this.originSwitchId || this.currentPath.length === 0) return;
-
-        const group = this.getOverlayGroup();
-        const occupiedSegs = this.getOccupiedSegments();
-
-        for (const segId of this.pathSegments) {
-            const seg = TrackData.getSegment(segId);
-            if (!seg) continue;
-            let n1, n2;
-            if (seg.type === 'switch') {
-                n1 = TrackData.getNode(seg.merging);
-                n2 = seg.state === 0 ? TrackData.getNode(seg.nl) : TrackData.getNode(seg.nr);
-            } else {
-                n1 = TrackData.getNode(seg.n1);
-                n2 = TrackData.getNode(seg.n2);
-            }
-            if (!n1 || !n2) continue;
-
-            let color;
-            if (occupiedSegs.has(segId)) color = this.MODE_RED;
-            else if (mode === 'locked') color = this.MODE_GREEN;
-            else color = this.MODE_YELLOW;
-
-            L.polyline([
-                switchboardRenderer.coordsToLatLng(n1.x, n1.y),
-                switchboardRenderer.coordsToLatLng(n2.x, n2.y)
-            ], {
-                color, weight: 6, opacity: mode === 'locked' ? 0.9 : 0.7, interactive: false
-            }).addTo(group);
-        }
-
-        this._addSwitchRimToOverlay(this.originSwitchId, this.MODE_YELLOW);
-
-        for (const swId of this.currentPath) {
-            if (swId === this.originSwitchId) continue;
-            if (mode === 'preview') {
-                this._addSwitchRimToOverlay(swId, this.MODE_YELLOW);
-            } else if (mode === 'locked') {
-                if (swId === this.destinationSwitchId) continue;
-                if (this.recentlyAligned.has(swId)) {
-                    this._addSwitchRimToOverlay(swId, this.MODE_GREEN);
-                } else {
-                    const status = this._alignmentStatus(swId);
-                    if (status === 'aligned') this._addSwitchRimToOverlay(swId, this.MODE_GREEN);
-                    else if (status === 'misaligned') this._addSwitchRimToOverlay(swId, this.MODE_RED);
-                }
-            }
-        }
-    },
-
-    _addSwitchRimToOverlay(swId, color) {
-        const bounds = switchboardRenderer.switchBounds.get(swId);
-        if (!bounds) return;
-        const latlngBounds = L.latLngBounds([
-            switchboardRenderer.coordsToLatLng(bounds.minX, bounds.minY),
-            switchboardRenderer.coordsToLatLng(bounds.maxX, bounds.maxY)
-        ]);
-        L.rectangle(latlngBounds, {
-            color, weight: 3, fillColor: '#102020', fillOpacity: 0.7, interactive: false
-        }).addTo(this.getOverlayGroup());
     },
 
     addWaypointMarker(segmentId) {
@@ -583,8 +790,56 @@ const PathingController = {
         }
     },
 
-    rerender() {
-        if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
+    _rerenderDiff(newSegments, newSwitches) {
+        if (typeof switchboardRenderer === 'undefined' || !switchboardRenderer) return;
+        const segsToRender = new Set([...this._lastSegments, ...newSegments]);
+        const switchesToRender = new Set([...this._lastSwitches, ...newSwitches]);
+        for (const segId of segsToRender) {
+            const seg = TrackData.getSegment(segId);
+            if (seg && seg.type !== 'switch') switchboardRenderer.renderSegment(seg);
+        }
+        for (const swId of switchesToRender) {
+            const seg = TrackData.getSegment(swId);
+            if (seg && seg.type === 'switch') switchboardRenderer.renderSegment(seg);
+        }
+        this._lastSegments = new Set(newSegments);
+        this._lastSwitches = new Set(newSwitches);
+    },
+
+    _currentSegments() {
+        const segs = new Set(this.pathSegments);
+        for (const p of this.lockedPaths) if (p.segments) for (const s of p.segments) segs.add(s);
+        return segs;
+    },
+
+    _currentSwitches() {
+        const sws = new Set(this.currentPath);
+        for (const p of this.lockedPaths) if (p.switches) for (const s of p.switches) sws.add(s);
+        if (this.originSwitchId) sws.add(this.originSwitchId);
+        if (this.destinationSwitchId) sws.add(this.destinationSwitchId);
+        return sws;
+    },
+
+    _rerenderChanged() {
+        this._rerenderDiff(this._currentSegments(), this._currentSwitches());
+    },
+
+    rerender(segments, switches) {
+        if (typeof switchboardRenderer === 'undefined' || !switchboardRenderer) return;
+        if (segments || switches) {
+            if (segments) {
+                for (const segId of segments) {
+                    const seg = TrackData.getSegment(segId);
+                    if (seg && seg.type !== 'switch') switchboardRenderer.renderSegment(seg);
+                }
+            }
+            if (switches) {
+                for (const swId of switches) {
+                    const seg = TrackData.getSegment(swId);
+                    if (seg && seg.type === 'switch') switchboardRenderer.renderSegment(seg);
+                }
+            }
+        } else {
             switchboardRenderer.rerenderAllSegments();
             switchboardRenderer.rerenderSwitches();
         }

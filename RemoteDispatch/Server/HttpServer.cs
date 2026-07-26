@@ -147,6 +147,10 @@ namespace DvMod.RemoteDispatch
 			Main.DebugLog("/path endpoint hit");
 			HandlePathRequest(context);
 			break;
+		case "pathing":
+			Main.DebugLog("/pathing endpoint hit");
+			await HandlePathingActivateRequest(context);
+			break;
 		case "signal":
 			Main.DebugLog("/signal endpoint hit");
 			await HandleSignalRequest(context);
@@ -517,6 +521,14 @@ namespace DvMod.RemoteDispatch
 					string bodyText = Encoding.UTF8.GetString(ms.ToArray());
 					var pathEntry = JObject.Parse(bodyText);
 					var id = PathingData.AddPath(pathEntry);
+
+					var signalIds = pathEntry["signalIds"] as JArray;
+					if (signalIds != null)
+					{
+						var ids = signalIds.ToObject<List<string>>() ?? new List<string>();
+						PathingActivation.ClearRouteSignals(ids);
+					}
+
 					Render200(context, ContentTypes.Json, new JObject { ["id"] = id }.ToString());
 				}
 				catch (Exception e)
@@ -531,13 +543,17 @@ namespace DvMod.RemoteDispatch
 			{
 				if (segments.Length == 2)
 				{
+					var storedIds = PathingData.GetAllSignalIds();
 					PathingData.ClearPaths();
+					PathingActivation.RevertRouteSignals(storedIds);
 					RenderEmpty(context, 204);
 				}
 				else if (segments.Length >= 3)
 				{
 					var pathId = segments[2].TrimEnd('/');
+					var storedIds = PathingData.GetSignalIdsForPath(pathId);
 					PathingData.RemovePath(pathId);
+					PathingActivation.RevertRouteSignals(storedIds);
 					RenderEmpty(context, 204);
 				}
 				else
@@ -548,6 +564,36 @@ namespace DvMod.RemoteDispatch
 			}
 
 			RenderEmpty(context, 404);
+		}
+
+		private static async Task HandlePathingActivateRequest(HttpListenerContext context)
+		{
+			if (context.Request.HttpMethod != "POST")
+			{
+				RenderEmpty(context, 404);
+				return;
+			}
+
+			if (!Main.settings.featureFlags.enablePathing)
+			{
+				RenderEmpty(context, 403);
+				return;
+			}
+
+			var username = context.User?.Identity?.Name ?? "";
+			if (!Main.settings.permissions.HasPathingPermission(username))
+			{
+				RenderEmpty(context, 403);
+				return;
+			}
+
+			await Updater.RunOnMainThread(() =>
+			{
+				PathingActivation.ActivatePathingMode();
+			}).ConfigureAwait(false);
+
+			Sessions.AddTag("signals");
+			RenderEmpty(context, 204);
 		}
 
 		private static void HandleModConfigRequest(HttpListenerContext context)

@@ -17,6 +17,50 @@ namespace DvMod.RemoteDispatch
             }
         }
 
+        public static List<JObject> GetPaths()
+        {
+            lock (paths)
+            {
+                return paths.ToList();
+            }
+        }
+
+        public static List<string> GetAllSignalIds()
+        {
+            lock (paths)
+            {
+                var result = new List<string>();
+                foreach (var p in paths)
+                {
+                    var arr = p["signalIds"] as JArray;
+                    if (arr != null)
+                        result.AddRange(arr.ToObject<List<string>>());
+                }
+                return result;
+            }
+        }
+
+        public static List<string> GetSignalIdsForPath(string id)
+        {
+            lock (paths)
+            {
+                var p = paths.FirstOrDefault(x => x.Value<string>("id") == id);
+                if (p == null) return new List<string>();
+                var arr = p["signalIds"] as JArray;
+                return arr?.ToObject<List<string>>() ?? new List<string>();
+            }
+        }
+
+        public static bool HasSignalIds(string id)
+        {
+            lock (paths)
+            {
+                var p = paths.FirstOrDefault(x => x.Value<string>("id") == id);
+                if (p == null) return false;
+                return p["signalIds"] != null;
+            }
+        }
+
         public static string AddPath(JObject pathEntry)
         {
             var id = $"p{nextId++}";

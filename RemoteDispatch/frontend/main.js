@@ -1942,7 +1942,7 @@ async function buildSwitchMapping(enablePathing) {
 		console.log(`Mapping complete: ${mapping.size} pairs`);
 		SwitchboardMapper.printMapping();
 
-		sendBlockOccupancyMapping();
+		await sendBlockOccupancyMapping();
 
 		if (typeof SwitchboardSignals !== 'undefined') {
 			SwitchboardSignals.init();
@@ -2027,7 +2027,7 @@ function sendBlockOccupancyMapping() {
         }
     }
 
-    fetch(new URL('/occupancy', location), {
+    return fetch(new URL('/occupancy', location), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(Object.assign(

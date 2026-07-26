@@ -108,6 +108,23 @@ const PathingController = {
                 this.rerender();
                 this.updateStatus('Right-click a switch to begin pathing');
             });
+        this._activateWithRetry();
+    },
+
+    _activateWithRetry(attempts) {
+        if (attempts === undefined) attempts = 0;
+        if (attempts > 20) {
+            console.warn('[Pathing] Activation failed after retries');
+            return;
+        }
+        fetch(new URL('/pathing/activate', location), { method: 'POST' })
+            .then(resp => {
+                if (resp.ok) console.log('[Pathing] Activation sent');
+                else if (resp.status === 403) console.warn('[Pathing] No permission for activation');
+            })
+            .catch(() => {
+                setTimeout(() => this._activateWithRetry(attempts + 1), 1000);
+            });
     },
 
     disable() {
@@ -230,12 +247,14 @@ const PathingController = {
         const oldSwitches = this._currentSwitches();
         const result = this.computePath(this.originSwitchId, switchId);
         if (result && result.switches.length > 0) {
+            const signalIds = this._pathSignalIds(result.switches.slice(0, -1));
             const pathEntry = {
                 originSwitchId: this.originSwitchId,
                 destinationSwitchId: switchId,
                 switches: result.switches,
                 segments: result.segments,
-                connections: result.connections
+                connections: result.connections,
+                signalIds: signalIds
             };
 
             if (this.editingPathIndex !== null) {
@@ -370,6 +389,18 @@ const PathingController = {
             if (!uniqueSegments.includes(seg)) uniqueSegments.push(seg);
         }
         return { switches: uniqueSwitches, segments: uniqueSegments, connections: allConnections };
+    },
+
+    _pathSignalIds(switches) {
+        const ids = [];
+        const graph = SwitchboardMapper.switchboardGraph;
+        for (const swId of switches) {
+            const entry = graph.get(swId);
+            if (!entry || !entry.rawSignals) continue;
+            const out = entry.rawSignals.Out;
+            if (out && out.Id) ids.push(out.Id);
+        }
+        return ids;
     },
 
     _getCentroid(swId) {

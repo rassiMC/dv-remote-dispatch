@@ -61,6 +61,26 @@ namespace DvMod.RemoteDispatch
             }
         }
 
+        public static HashSet<string> GetDetectedJunctionIds()
+        {
+            lock (cacheLock)
+            {
+                if (_blockJunctionMap == null)
+                    return new HashSet<string>();
+
+                var junctionIds = new HashSet<string>();
+                foreach (var entries in _blockJunctionMap.Values)
+                {
+                    foreach (var (junctionId, _, _, _) in entries)
+                    {
+                        if (!string.IsNullOrEmpty(junctionId))
+                            junctionIds.Add(junctionId);
+                    }
+                }
+                return junctionIds;
+            }
+        }
+
         public static void ClearMapping()
         {
             lock (cacheLock)

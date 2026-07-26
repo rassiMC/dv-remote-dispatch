@@ -7,31 +7,42 @@ const PathingController = {
     currentPath: [],
     pathSegments: [],
     overlayGroup: null,
-    waypointMarkers: [],
+    waypointsGroup: null,
+    waypointMarkers: new Map(),
     recentlyAligned: new Map(),
-    _fadeTimer: null,
+    _clickLocking: false,
+    _onKeyDown: null,
 
     MODE_YELLOW: '#ccbb33',
     MODE_GREEN: '#208020',
     MODE_RED: '#a02020',
 
-    clearAll() {
+    get showGrayClear() {
+        return this.enabled;
+    },
+
+    _resetState() {
         this.state = 'off';
+        this._clickLocking = false;
         this.originSwitchId = null;
         this.destinationSwitchId = null;
         this.waypoints.clear();
         this.currentPath = [];
         this.pathSegments = [];
         this.clearOverlay();
-        if (this._fadeTimer) { clearTimeout(this._fadeTimer); this._fadeTimer = null; }
+        this.clearWaypoints();
         this.recentlyAligned.clear();
-        this.rerender();
+    },
+
+    clearAll() {
+        this._resetState();
         this.updateStatus('');
     },
 
     enable() {
         if (this.enabled) return;
         this.enabled = true;
+        this._attachKeyHandler();
         this.updateStatus('Right-click a switch to begin pathing');
         this.rerender();
     },
@@ -39,13 +50,33 @@ const PathingController = {
     disable() {
         if (!this.enabled) return;
         this.enabled = false;
-        this.clearAll();
+        this._detachKeyHandler();
+        this._resetState();
         this.rerender();
+    },
+
+    _attachKeyHandler() {
+        if (this._onKeyDown) return;
+        this._onKeyDown = e => {
+            if (e.key === 'Escape' && this.state !== 'off') {
+                this.clearAll();
+                this.updateStatus('Path cancelled. Right-click a switch to begin.');
+                e.preventDefault();
+            }
+        };
+        document.addEventListener('keydown', this._onKeyDown);
+    },
+
+    _detachKeyHandler() {
+        if (this._onKeyDown) {
+            document.removeEventListener('keydown', this._onKeyDown);
+            this._onKeyDown = null;
+        }
     },
 
     startFrom(switchId) {
         if (!this.enabled) return;
-        this.clearAll();
+        this._resetState();
         this.state = 'selectingOrigin';
         this.originSwitchId = switchId;
         this.renderOriginOverlay();
@@ -53,7 +84,7 @@ const PathingController = {
     },
 
     onSwitchHover(switchId) {
-        if (this.state !== 'selectingOrigin') return;
+        if (this.state !== 'selectingOrigin' && this.state !== 'preview') return;
         if (switchId === this.originSwitchId) return;
         const result = this.computePath(this.originSwitchId, switchId);
         if (result && result.switches.length > 0) {
@@ -71,6 +102,7 @@ const PathingController = {
 
     onSwitchHoverEnd() {
         if (this.state !== 'preview') return;
+        if (this._clickLocking) return;
         this.state = 'selectingOrigin';
         this.destinationSwitchId = null;
         this.currentPath = [];
@@ -80,9 +112,12 @@ const PathingController = {
     },
 
     onSwitchClick(switchId) {
-        if (this.state === 'selectingOrigin' && switchId === this.originSwitchId) return;
         if (this.state !== 'selectingOrigin' && this.state !== 'preview') return;
         if (switchId === this.originSwitchId) return;
+
+        this._clickLocking = true;
+        setTimeout(() => { this._clickLocking = false; }, 100);
+
         const result = this.computePath(this.originSwitchId, switchId);
         if (result && result.switches.length > 0) {
             this.state = 'locked';
@@ -91,7 +126,7 @@ const PathingController = {
             this.pathSegments = result.segments;
             this.renderOverlay('locked');
             this.autoAlign();
-            this.updateStatus(`Path locked (${result.switches.length} switches, ${result.segments.length} segments)`);
+            this.updateStatus(`Path locked (${result.switches.length} switches, ${result.segments.length} segments). Esc to cancel.`);
         }
     },
 
@@ -114,7 +149,7 @@ const PathingController = {
                 this.renderOverlay('preview');
             }
         }
-        this.updateStatus(`Waypoints: ${this.waypoints.size}`);
+        this.updateStatus(`Waypoints: ${this.waypoints.size} (Esc to cancel)`);
     },
 
     segmentsToSwitches(segmentIds) {
@@ -144,9 +179,15 @@ const PathingController = {
 
         let allPathSwitches = [];
         let allPathSegments = [];
+        let prevEntryPort = null;
         for (let i = 0; i < allWaypoints.length - 1; i++) {
-            const result = this._aStar(allWaypoints[i], allWaypoints[i + 1]);
+            const result = this._aStar(allWaypoints[i], allWaypoints[i + 1], prevEntryPort);
             if (!result) return null;
+
+            const lastSw = result.switches[result.switches.length - 1];
+            const prevSw = result.switches.length >= 2 ? result.switches[result.switches.length - 2] : null;
+            prevEntryPort = prevSw ? this._entryPortOf(prevSw, lastSw) : null;
+
             if (i > 0) result.switches.shift();
             allPathSwitches.push(...result.switches);
             allPathSegments.push(...result.segments);
@@ -218,7 +259,20 @@ const PathingController = {
         return allSegments;
     },
 
-    _aStar(fromId, toId) {
+    _validExits(entryPort) {
+        if (!entryPort) return ['left', 'right', 'common'];
+        if (entryPort === 'common') return ['left', 'right'];
+        return ['common'];
+    },
+
+    _entryPortOf(currentSwId, neighborSwId) {
+        const entry = SwitchboardMapper.switchboardGraph.get(neighborSwId);
+        if (!entry) return null;
+        const backLink = entry.neighbors.find(n => n.switchId === currentSwId);
+        return backLink ? backLink.port : null;
+    },
+
+    _aStar(fromId, toId, fromEntryPort) {
         const graph = SwitchboardMapper.switchboardGraph;
         if (!graph.has(fromId) || !graph.has(toId)) return null;
         const fromC = this._getCentroid(fromId);
@@ -232,6 +286,8 @@ const PathingController = {
 
         const openSet = new Set([fromId]);
         const cameFrom = new Map();
+        const entryPorts = new Map();
+        if (fromEntryPort) entryPorts.set(fromId, fromEntryPort);
         const gScore = new Map(); gScore.set(fromId, 0);
         const fScore = new Map(); fScore.set(fromId, _h(fromC, toC));
 
@@ -251,12 +307,20 @@ const PathingController = {
             openSet.delete(current);
             const entry = graph.get(current);
             if (!entry) continue;
+
+            const entryPort = entryPorts.get(current);
+
             for (const nbr of entry.neighbors) {
                 const nbrId = nbr.switchId;
+                const exitPort = nbr.port;
+                const validExits = this._validExits(entryPort);
+                if (!validExits.includes(exitPort)) continue;
+
                 const cost = this._edgeCost(current, nbrId);
                 const tentativeG = (gScore.get(current) ?? Infinity) + cost;
                 if (tentativeG < (gScore.get(nbrId) ?? Infinity)) {
                     cameFrom.set(nbrId, current);
+                    entryPorts.set(nbrId, this._entryPortOf(current, nbrId));
                     gScore.set(nbrId, tentativeG);
                     const nbrC = this._getCentroid(nbrId);
                     if (nbrC) fScore.set(nbrId, tentativeG + _h(nbrC, toC));
@@ -278,8 +342,6 @@ const PathingController = {
 
     autoAlign() {
         if (this.state !== 'locked') return;
-        if (this._fadeTimer) { clearTimeout(this._fadeTimer); this._fadeTimer = null; }
-
         const toToggle = [];
         for (const swId of this.currentPath) {
             if (swId === this.originSwitchId || swId === this.destinationSwitchId) continue;
@@ -306,15 +368,10 @@ const PathingController = {
                 this.recentlyAligned.set(swId, Date.now());
                 continue;
             }
-
-            if (!this._allSurroundingClear(swId)) {
-                this.recentlyAligned.delete(swId);
-                continue;
-            }
             toToggle.push({ swId, jIdx, neededBranch });
         }
 
-        for (const { swId, jIdx, neededBranch } of toToggle) {
+        Promise.allSettled(toToggle.map(({ swId, jIdx, neededBranch }) =>
             fetch(new URL(`/junction/${jIdx}/toggle`, location), { method: 'POST' })
                 .then(resp => resp.ok ? resp.text() : null)
                 .then(newBranch => {
@@ -322,60 +379,25 @@ const PathingController = {
                         this.recentlyAligned.set(swId, Date.now());
                         const ingameData = SwitchboardMapper.ingameGraph?.get(jIdx);
                         if (ingameData) ingameData.currentBranch = parseInt(newBranch);
-                        this.rerender();
-                        this.renderOverlay('locked');
                     }
-                });
-        }
+                })
+        )).then(() => {
+            this.rerender();
+            this.renderOverlay('locked');
+        });
 
-        this._scheduleFade();
         this.rerender();
         this.renderOverlay('locked');
     },
 
     _neededBranch(inPort, outPort) {
-        if (inPort === 'common') {
-            if (outPort === 'left') return 0;
-            if (outPort === 'right') return 1;
-        } else if (outPort === 'common') {
-            if (inPort === 'left') return 0;
-            if (inPort === 'right') return 1;
-        }
+        if (inPort === 'common' && outPort === 'left') return 0;
+        if (inPort === 'common' && outPort === 'right') return 1;
+        if (outPort === 'common' && inPort === 'left') return 0;
+        if (outPort === 'common' && inPort === 'right') return 1;
+        if (inPort === 'left' && outPort === 'right') return 1;
+        if (inPort === 'right' && outPort === 'left') return 0;
         return null;
-    },
-
-    _allSurroundingClear(swId) {
-        const seg = TrackData.getSegment(swId);
-        if (!seg || seg.type !== 'switch') return false;
-        const nodes = [seg.merging, seg.nl, seg.nr];
-        const seen = new Set();
-        for (const nodeId of nodes) {
-            for (const s of TrackData.getSegmentsForNode(nodeId)) {
-                if (s.type === 'switch') continue;
-                if (!s.blockId || seen.has(s.blockId)) continue;
-                seen.add(s.blockId);
-                const block = TrackData.getBlock(s.blockId);
-                if (block && block.occupancyState === 'occupied') return false;
-            }
-        }
-        if (seg.blockId) {
-            const ownBlock = TrackData.getBlock(seg.blockId);
-            if (ownBlock && ownBlock.occupancyState === 'occupied') return false;
-        }
-        return true;
-    },
-
-    _scheduleFade() {
-        if (this._fadeTimer) clearTimeout(this._fadeTimer);
-        this._fadeTimer = setTimeout(() => {
-            const cutoff = Date.now() - 20000;
-            let changed = false;
-            for (const [swId, ts] of this.recentlyAligned) {
-                if (ts < cutoff) { this.recentlyAligned.delete(swId); changed = true; }
-            }
-            this._fadeTimer = null;
-            if (changed) { this.rerender(); this.renderOverlay('locked'); }
-        }, 20000);
     },
 
     checkManualAlignment(swId, newBranch) {
@@ -394,7 +416,6 @@ const PathingController = {
         if (neededBranch === null) return;
         if (newBranch === neededBranch) {
             this.recentlyAligned.set(swId, Date.now());
-            this._scheduleFade();
             this.rerender();
             this.renderOverlay('locked');
         }
@@ -454,10 +475,13 @@ const PathingController = {
             switchboardRenderer.map.removeLayer(this.overlayGroup);
             this.overlayGroup = null;
         }
-        for (const m of this.waypointMarkers) {
+    },
+
+    clearWaypoints() {
+        for (const m of this.waypointMarkers.values()) {
             switchboardRenderer.map.removeLayer(m);
         }
-        this.waypointMarkers = [];
+        this.waypointMarkers.clear();
     },
 
     renderOriginOverlay() {
@@ -531,6 +555,7 @@ const PathingController = {
     },
 
     addWaypointMarker(segmentId) {
+        if (this.waypointMarkers.has(segmentId)) return;
         const seg = TrackData.getSegment(segmentId);
         if (!seg) return;
         const n1Id = seg.n1 || seg.merging;
@@ -547,10 +572,15 @@ const PathingController = {
             weight: 2,
             interactive: false
         }).addTo(switchboardRenderer.map);
-        this.waypointMarkers.push(marker);
+        this.waypointMarkers.set(segmentId, marker);
     },
 
     removeWaypointMarker(segmentId) {
+        const marker = this.waypointMarkers.get(segmentId);
+        if (marker) {
+            switchboardRenderer.map.removeLayer(marker);
+            this.waypointMarkers.delete(segmentId);
+        }
     },
 
     rerender() {

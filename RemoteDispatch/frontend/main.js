@@ -812,7 +812,7 @@ function updateAllSignals(signalsData) {
 		}
 	});
 
-	if (typeof SwitchboardSignals !== 'undefined' && !SwitchboardSignals.initialized && signalMarkers.size > 0) {
+	if (typeof SwitchboardSignals !== 'undefined' && !SwitchboardSignals.initialized && signalMarkers.size > 0 && !SwitchboardOccupancy.isActive) {
 		SwitchboardSignals.init();
 	}
 
@@ -1903,10 +1903,11 @@ async function buildSwitchMapping() {
 
 		sendBlockOccupancyMapping();
 
-		if (typeof SwitchboardSignals !== 'undefined') {
+		if (typeof SwitchboardSignals !== 'undefined' && !SwitchboardOccupancy.isActive) {
 			SwitchboardSignals.init();
 			if (!SwitchboardSignals.initialized) {
 				signalsReady.then(_ => {
+					if (SwitchboardOccupancy.isActive) return;
 					SwitchboardSignals.init();
 					if (switchboardRenderer) switchboardRenderer.rerenderAllSegments();
 				});
@@ -1957,6 +1958,10 @@ function sendBlockOccupancyMapping() {
                 blocksAtPort.add(otherSeg.blockId);
             }
 
+            if (seg.blockId) {
+                blocksAtPort.add(seg.blockId);
+            }
+
             for (const blockId of blocksAtPort) {
                 const entries = blockJunctionMap[blockId];
                 const existing = entries.find(e => e.junctionId === jData.junctionId);
@@ -1966,7 +1971,8 @@ function sendBlockOccupancyMapping() {
                     }
                     continue;
                 }
-                entries.push({ junctionId: jData.junctionId, port: portName, junctionIndex: jData.junctionIndex });
+                const isOwnSwitch = blockId === seg.blockId;
+                entries.push({ junctionId: jData.junctionId, port: portName, junctionIndex: jData.junctionIndex, isOwnSwitch });
             }
         }
     }

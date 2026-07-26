@@ -225,19 +225,8 @@ const TrackData = {
         for (const seg of this.segments.values()) {
             if (seg.type !== 'switch') continue;
 
-            let targetBlock = null;
-            for (const otherSeg of this.segments.values()) {
-                if (otherSeg.type === 'switch') continue;
-                if (otherSeg.blockId && (otherSeg.n1 === seg.merging || otherSeg.n2 === seg.merging)) {
-                    targetBlock = this.getBlock(otherSeg.blockId);
-                    break;
-                }
-            }
-
-            if (!targetBlock) {
-                targetBlock = this.createBlock(autoNames[nameIndex++] || `Block ${nameIndex}`);
-                targetBlock.color = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
-            }
+            const targetBlock = this.createBlock(autoNames[nameIndex++] || `Block ${nameIndex}`);
+            targetBlock.color = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
 
             seg.blockId = targetBlock.id;
             targetBlock.segmentIds.push(seg.id);

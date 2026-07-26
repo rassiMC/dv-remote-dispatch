@@ -9,7 +9,7 @@ namespace DvMod.RemoteDispatch
     {
         private static readonly object cacheLock = new object();
 
-        private static Dictionary<string, List<(string junctionId, string port, int junctionIndex)>>? _blockJunctionMap;
+        private static Dictionary<string, List<(string junctionId, string port, int junctionIndex, bool isOwnSwitch)>>? _blockJunctionMap;
         private static HashSet<string>? _allBlockIds;
         private static Dictionary<string, bool?> _lastOccupancy = new Dictionary<string, bool?>();
         private static Dictionary<string, bool?> _currentOccupancy = new Dictionary<string, bool?>();
@@ -43,7 +43,7 @@ namespace DvMod.RemoteDispatch
             return _mode;
         }
 
-        public static void SetBlockMapping(Dictionary<string, List<(string junctionId, string port, int junctionIndex)>> mapping)
+        public static void SetBlockMapping(Dictionary<string, List<(string junctionId, string port, int junctionIndex, bool isOwnSwitch)>> mapping)
         {
             lock (cacheLock)
             {
@@ -123,7 +123,7 @@ namespace DvMod.RemoteDispatch
                 bool foundClear = false;
                 bool foundAnySignal = false;
 
-                foreach (var (junctionId, port, junctionIndex) in entries)
+                foreach (var (junctionId, port, junctionIndex, _) in entries)
                 {
                     if (port != "common")
                     {
@@ -260,13 +260,13 @@ namespace DvMod.RemoteDispatch
         }
 
         private static HashSet<string> CollectTracksForBlock(
-            List<(string junctionId, string port, int junctionIndex)> entries,
+            List<(string junctionId, string port, int junctionIndex, bool isOwnSwitch)> entries,
             byte[] junctionStates)
         {
             var trackIds = new HashSet<string>();
-            var seedTracks = new List<(string trackId, bool walkFromStart)>();
+            var walkSeeds = new List<(string trackId, bool walkFromStart)>();
 
-            foreach (var (junctionId, port, junctionIndex) in entries)
+            foreach (var (junctionId, port, junctionIndex, _) in entries)
             {
                 if (junctionIndex < 0 || junctionIndex >= junctionStates.Length)
                     continue;
@@ -281,7 +281,7 @@ namespace DvMod.RemoteDispatch
                         try { tid = junction.inBranch.track.LogicTrack().ID.ToString(); }
                         catch { continue; }
                         trackIds.Add(tid);
-                        seedTracks.Add((tid, !junction.inBranch.first));
+                        walkSeeds.Add((tid, !junction.inBranch.first));
                     }
                 }
                 else
@@ -296,13 +296,13 @@ namespace DvMod.RemoteDispatch
                             try { tid = b.track.LogicTrack().ID.ToString(); }
                             catch { continue; }
                             trackIds.Add(tid);
-                            seedTracks.Add((tid, !b.first));
+                            walkSeeds.Add((tid, !b.first));
                         }
                     }
                 }
             }
 
-            foreach (var (seedTrackId, walkFromStart) in seedTracks)
+            foreach (var (seedTrackId, walkFromStart) in walkSeeds)
             {
                 WalkTracksFromSeed(seedTrackId, walkFromStart, trackIds);
             }
@@ -340,8 +340,6 @@ namespace DvMod.RemoteDispatch
                     if (ctId == prevTrackId) continue;
                     if (!visited.Add(ctId)) continue;
 
-                    collectedTrackIds.Add(ctId);
-
                     if (_trackEndpointJunctionsCache.TryGetValue(ctId, out var epJunctions))
                     {
                         bool found = false;
@@ -355,6 +353,8 @@ namespace DvMod.RemoteDispatch
                         }
                         if (found) continue;
                     }
+
+                    collectedTrackIds.Add(ctId);
 
                     if (_trackByIdCache.TryGetValue(ctId, out var ct))
                     {

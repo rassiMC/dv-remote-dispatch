@@ -349,20 +349,21 @@ namespace DvMod.RemoteDispatch
 				string bodyText = Encoding.UTF8.GetString(ms.ToArray());
 				var parsed = JObject.Parse(bodyText);
 
-				var mapping = new Dictionary<string, List<(string junctionId, string port, int junctionIndex)>>();
+				var mapping = new Dictionary<string, List<(string junctionId, string port, int junctionIndex, bool isOwnSwitch)>>();
 				foreach (var prop in parsed.Properties())
 				{
 					if (prop.Name == "mode") continue;
 					var entries = prop.Value as JArray;
 					if (entries == null) continue;
-					var list = new List<(string junctionId, string port, int junctionIndex)>();
+					var list = new List<(string junctionId, string port, int junctionIndex, bool isOwnSwitch)>();
 					foreach (var entry in entries)
 					{
 						var jid = entry["junctionId"]?.ToString();
 						var port = entry["port"]?.ToString() ?? "";
 						var jIdx = entry["junctionIndex"]?.Value<int>() ?? -1;
+						var isOwn = entry["isOwnSwitch"]?.Value<bool>() ?? false;
 						if (!string.IsNullOrEmpty(jid))
-							list.Add((jid, port, jIdx));
+							list.Add((jid, port, jIdx, isOwn));
 					}
 					mapping[prop.Name] = list;
 				}

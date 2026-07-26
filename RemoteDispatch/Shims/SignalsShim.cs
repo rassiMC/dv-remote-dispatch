@@ -22,6 +22,30 @@ namespace DvMod.RemoteDispatch
 
 		internal static bool IsInitialized { get; private set; }
 
+		private static Type? _signalsApiType;
+		private static PropertyInfo? _isLoadedProperty;
+
+		/// <summary>
+		/// Checks whether the Signals API has finished loading and is ready to serve requests.
+		/// This is distinct from IsInitialized, which just means our shim has been set up.
+		/// </summary>
+		internal static bool IsAPILoaded
+		{
+			get
+			{
+				if (!IsInitialized || _isLoadedProperty == null)
+					return false;
+				try
+				{
+					return _isLoadedProperty.GetValue(null) is true;
+				}
+				catch
+				{
+					return false;
+				}
+			}
+		}
+
 	/// <summary>
 	/// Returns a dictionary of JunctionId -> list of (CurrentAspectId, Direction) for all junction signals.
 	/// A junction can have up to two signals: one facing "In" and one facing "Out".
@@ -169,6 +193,9 @@ namespace DvMod.RemoteDispatch
 					Main.Warning("Signals mod is enabled but Signals.API assembly not loaded.");
 					return;
 				}
+
+				_signalsApiType = signalsAssembly.GetType("Signals.API.SignalsAPI");
+				_isLoadedProperty = _signalsApiType?.GetProperty("IsLoaded", BindingFlags.Public | BindingFlags.Static);
 
 				var path = Path.Combine(Main.mod!.Path, "RemoteDispatch.Signals.dll");
 

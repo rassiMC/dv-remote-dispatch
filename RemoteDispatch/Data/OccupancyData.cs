@@ -18,7 +18,30 @@ namespace DvMod.RemoteDispatch
         private static readonly HashSet<string> OccupiedAspects = new HashSet<string> { "S1", "S1r", "S1c" };
         private static readonly HashSet<string> ClearAspects = new HashSet<string> { "S2", "S4", "S6" };
 
+        public enum OccupancyMode
+        {
+            Hardcore = 0,
+            Direct = 1
+        }
+
+        private static OccupancyMode _mode = OccupancyMode.Direct;
+        private static bool _modeChanged = false;
+
         public static bool HasMapping => _blockJunctionMap != null && _blockJunctionMap.Count > 0;
+
+        public static void SetMode(int mode)
+        {
+            var newMode = (OccupancyMode)mode;
+            if (_mode == newMode) return;
+            _mode = newMode;
+            _modeChanged = true;
+            Main.Log($"OccupancyData: mode set to {_mode}");
+        }
+
+        public static OccupancyMode GetMode()
+        {
+            return _mode;
+        }
 
         public static void SetBlockMapping(Dictionary<string, List<(string junctionId, string port, int junctionIndex)>> mapping)
         {
@@ -51,6 +74,18 @@ namespace DvMod.RemoteDispatch
         }
 
         private static void ComputeOccupancy()
+        {
+            if (_mode == OccupancyMode.Direct && SignalsShim.IsAPILoaded)
+            {
+                ComputeOccupancyDirect();
+            }
+            else
+            {
+                ComputeOccupancyHardcore();
+            }
+        }
+
+        private static void ComputeOccupancyHardcore()
         {
             var result = new Dictionary<string, bool?>();
 
@@ -155,6 +190,237 @@ namespace DvMod.RemoteDispatch
             _currentOccupancy = result;
         }
 
+        private static Dictionary<string, RailTrack>? _trackByIdCache;
+        private static Dictionary<string, List<(string trackId, bool atStart)>>? _endpointAdjCache;
+        private static Dictionary<string, List<(int junctionIdx, bool atStart)>>? _trackEndpointJunctionsCache;
+
+        private static void EnsureTrackCache()
+        {
+            var allTracks = UnityEngine.Object.FindObjectsOfType<RailTrack>();
+            _trackByIdCache = new Dictionary<string, RailTrack>();
+            _endpointAdjCache = new Dictionary<string, List<(string trackId, bool atStart)>>();
+            _trackEndpointJunctionsCache = new Dictionary<string, List<(int junctionIdx, bool atStart)>>();
+
+            Main.DebugLog($"OccupancyData.Direct: caching {allTracks.Length} RailTracks.");
+
+            foreach (var track in allTracks)
+            {
+                string trackId;
+                try
+                {
+                    trackId = track.LogicTrack().ID.ToString();
+                }
+                catch
+                {
+                    continue;
+                }
+                if (string.IsNullOrEmpty(trackId)) continue;
+                _trackByIdCache[trackId] = track;
+
+                var pointSet = track.GetKinkedPointSet();
+                if (pointSet == null || pointSet.points.Length < 1) continue;
+
+                var start = pointSet.points[0].position;
+                var end = pointSet.points[pointSet.points.Length - 1].position;
+                string startKey = $"{start.x:F1},{start.z:F1}";
+                string endKey = $"{end.x:F1},{end.z:F1}";
+
+                if (!_endpointAdjCache.ContainsKey(startKey))
+                    _endpointAdjCache[startKey] = new List<(string, bool)>();
+                _endpointAdjCache[startKey].Add((trackId, true));
+                if (!_endpointAdjCache.ContainsKey(endKey))
+                    _endpointAdjCache[endKey] = new List<(string, bool)>();
+                _endpointAdjCache[endKey].Add((trackId, false));
+            }
+
+            var junctions = RailTrackRegistry.Instance.OrderedJunctions;
+            for (int i = 0; i < junctions.Length; i++)
+            {
+                var j = junctions[i];
+                foreach (var b in j.outBranches)
+                {
+                    if (b?.track == null) continue;
+                    string tid;
+                    try { tid = b.track.LogicTrack().ID.ToString(); }
+                    catch { continue; }
+                    if (!_trackEndpointJunctionsCache.ContainsKey(tid))
+                        _trackEndpointJunctionsCache[tid] = new List<(int, bool)>();
+                    _trackEndpointJunctionsCache[tid].Add((i, b.first));
+                }
+                if (j.inBranch?.track != null)
+                {
+                    string tid;
+                    try { tid = j.inBranch.track.LogicTrack().ID.ToString(); }
+                    catch { continue; }
+                    if (!_trackEndpointJunctionsCache.ContainsKey(tid))
+                        _trackEndpointJunctionsCache[tid] = new List<(int, bool)>();
+                    _trackEndpointJunctionsCache[tid].Add((i, j.inBranch.first));
+                }
+            }
+        }
+
+        private static HashSet<string> CollectTracksForBlock(
+            List<(string junctionId, string port, int junctionIndex)> entries,
+            byte[] junctionStates)
+        {
+            var trackIds = new HashSet<string>();
+            var seedTracks = new List<(string trackId, bool walkFromStart)>();
+
+            foreach (var (junctionId, port, junctionIndex) in entries)
+            {
+                if (junctionIndex < 0 || junctionIndex >= junctionStates.Length)
+                    continue;
+
+                var junction = RailTrackRegistry.Instance.OrderedJunctions[junctionIndex];
+
+                if (port == "common")
+                {
+                    if (junction.inBranch?.track != null)
+                    {
+                        string tid;
+                        try { tid = junction.inBranch.track.LogicTrack().ID.ToString(); }
+                        catch { continue; }
+                        trackIds.Add(tid);
+                        seedTracks.Add((tid, !junction.inBranch.first));
+                    }
+                }
+                else
+                {
+                    int branchIdx = port == "left" ? 0 : 1;
+                    if (branchIdx < junction.outBranches.Count)
+                    {
+                        var b = junction.outBranches[branchIdx];
+                        if (b?.track != null)
+                        {
+                            string tid;
+                            try { tid = b.track.LogicTrack().ID.ToString(); }
+                            catch { continue; }
+                            trackIds.Add(tid);
+                            seedTracks.Add((tid, !b.first));
+                        }
+                    }
+                }
+            }
+
+            foreach (var (seedTrackId, walkFromStart) in seedTracks)
+            {
+                WalkTracksFromSeed(seedTrackId, walkFromStart, trackIds);
+            }
+
+            return trackIds;
+        }
+
+        private static void WalkTracksFromSeed(string seedTrackId, bool walkFromStart, HashSet<string> collectedTrackIds)
+        {
+            if (_trackByIdCache == null || _endpointAdjCache == null || _trackEndpointJunctionsCache == null)
+                return;
+
+            if (!_trackByIdCache.TryGetValue(seedTrackId, out var seedTrack))
+                return;
+
+            var ps = seedTrack.GetKinkedPointSet();
+            if (ps == null || ps.points.Length < 1)
+                return;
+
+            var startPos = walkFromStart ? ps.points[0].position : ps.points[ps.points.Length - 1].position;
+            string startKey = $"{startPos.x:F1},{startPos.z:F1}";
+
+            var visited = new HashSet<string> { seedTrackId };
+            var queue = new Queue<(string key, string prevTrackId)>();
+            queue.Enqueue((startKey, seedTrackId));
+
+            while (queue.Count > 0)
+            {
+                var (key, prevTrackId) = queue.Dequeue();
+                if (!_endpointAdjCache.TryGetValue(key, out var connected))
+                    continue;
+
+                foreach (var (ctId, ctAtStart) in connected)
+                {
+                    if (ctId == prevTrackId) continue;
+                    if (!visited.Add(ctId)) continue;
+
+                    collectedTrackIds.Add(ctId);
+
+                    if (_trackEndpointJunctionsCache.TryGetValue(ctId, out var epJunctions))
+                    {
+                        bool found = false;
+                        foreach (var (jIdx, jAtStart) in epJunctions)
+                        {
+                            if (ctAtStart == jAtStart)
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found) continue;
+                    }
+
+                    if (_trackByIdCache.TryGetValue(ctId, out var ct))
+                    {
+                        var ctPs = ct.GetKinkedPointSet();
+                        if (ctPs != null && ctPs.points.Length >= 1)
+                        {
+                            var otherFarPos = ctAtStart
+                                ? ctPs.points[ctPs.points.Length - 1].position
+                                : ctPs.points[0].position;
+                            string otherFarKey = $"{otherFarPos.x:F1},{otherFarPos.z:F1}";
+                            queue.Enqueue((otherFarKey, ctId));
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void ComputeOccupancyDirect()
+        {
+            var result = new Dictionary<string, bool?>();
+
+            if (_allBlockIds == null)
+            {
+                _currentOccupancy = result;
+                return;
+            }
+
+            EnsureTrackCache();
+
+            var junctionStates = Junctions.GetAllJunctionStates().ToArray();
+
+            foreach (var blockId in _allBlockIds)
+            {
+                if (_blockJunctionMap == null || !_blockJunctionMap.TryGetValue(blockId, out var entries) || entries.Count == 0)
+                {
+                    result[blockId] = null;
+                    continue;
+                }
+
+                var trackIds = CollectTracksForBlock(entries, junctionStates);
+
+                if (trackIds.Count == 0)
+                {
+                    result[blockId] = null;
+                    continue;
+                }
+
+                bool foundOccupied = false;
+                foreach (var trackId in trackIds)
+                {
+                    if (_trackByIdCache != null && _trackByIdCache.TryGetValue(trackId, out var track))
+                    {
+                        if (SignalsShim.IsTrackOccupied(track))
+                        {
+                            foundOccupied = true;
+                            break;
+                        }
+                    }
+                }
+
+                result[blockId] = foundOccupied;
+            }
+
+            _currentOccupancy = result;
+        }
+
         public static Dictionary<string, bool?> GetOccupancyData()
         {
             lock (cacheLock)
@@ -169,7 +435,8 @@ namespace DvMod.RemoteDispatch
 
             lock (cacheLock)
             {
-                bool changed = false;
+                bool changed = _modeChanged;
+                _modeChanged = false;
 
                 foreach (var kvp in _currentOccupancy)
                 {

@@ -14,7 +14,6 @@ namespace DvMod.RemoteDispatch
 			StartCoroutine(CheckTrainsetsCoro());
 			StartCoroutine(DeferredEventsCoro());
 			StartCoroutine(CheckOccupancyCoro());
-			StartCoroutine(CheckTrackOccupancyCoro());
 		}
 
         private static GameObject? rootObject;
@@ -80,18 +79,6 @@ namespace DvMod.RemoteDispatch
 				if (OccupancyData.HasMapping && OccupancyData.CheckChanged())
 				{
 					Sessions.AddTag("occupancy");
-				}
-			}
-		}
-
-		private IEnumerator CheckTrackOccupancyCoro()
-		{
-			while (true)
-			{
-				yield return WaitFor.Seconds(0.5f);
-				if (SignalsShim.IsInitialized && TrackOccupationData.CheckChanged())
-				{
-					Sessions.AddTag("trackoccupation");
 				}
 			}
 		}

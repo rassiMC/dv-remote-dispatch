@@ -143,10 +143,6 @@ namespace DvMod.RemoteDispatch
 				Render200(context, ContentTypes.Json, OccupancyData.GetOccupancyJSON());
 			}
 			break;
-		case "trackoccupation":
-			Main.DebugLog("/trackoccupation endpoint hit");
-			Render200(context, ContentTypes.Json, TrackOccupationData.GetTrackOccupationJSON());
-			break;
 		case "signal":
 			Main.DebugLog("/signal endpoint hit");
 			await HandleSignalRequest(context);
@@ -356,6 +352,7 @@ namespace DvMod.RemoteDispatch
 				var mapping = new Dictionary<string, List<(string junctionId, string port, int junctionIndex)>>();
 				foreach (var prop in parsed.Properties())
 				{
+					if (prop.Name == "mode") continue;
 					var entries = prop.Value as JArray;
 					if (entries == null) continue;
 					var list = new List<(string junctionId, string port, int junctionIndex)>();
@@ -370,9 +367,19 @@ namespace DvMod.RemoteDispatch
 					mapping[prop.Name] = list;
 				}
 
+				if (parsed.TryGetValue("mode", out var modeToken))
+				{
+					var modeVal = modeToken.Value<int>();
+					await Updater.RunOnMainThread(() =>
+					{
+						OccupancyData.SetMode(modeVal);
+					}).ConfigureAwait(false);
+				}
+
 				await Updater.RunOnMainThread(() =>
 				{
-					OccupancyData.SetBlockMapping(mapping);
+					if (mapping.Count > 0)
+						OccupancyData.SetBlockMapping(mapping);
 				}).ConfigureAwait(false);
 
 				RenderEmpty(context, 204);

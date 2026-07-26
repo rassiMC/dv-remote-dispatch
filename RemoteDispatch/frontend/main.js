@@ -816,11 +816,7 @@ function updateAllSignals(signalsData) {
 		SwitchboardSignals.init();
 	}
 
-	if (typeof SwitchboardOccupation !== 'undefined' && SwitchboardOccupation.isActive) {
-		return;
-	}
-
-	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
+	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized && !SwitchboardOccupancy.isActive) {
 		SwitchboardSignals.updateAllVirtualSignals();
 	}
 
@@ -833,11 +829,7 @@ function updateBlockOccupancy(occupancyData) {
 	if (typeof TrackData === 'undefined' || !TrackData.blocks) return;
 	if (typeof switchboardRenderer === 'undefined' || !switchboardRenderer) return;
 
-	if (typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.isActive) {
-		return;
-	}
-
-	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
+	if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized && !SwitchboardOccupancy.isActive) {
 		return;
 	}
 
@@ -860,9 +852,7 @@ function updateBlockOccupancy(occupancyData) {
 
 function computeAllBlockOccupancyFromVirtualSignals() {
 	if (typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.isActive) return;
-	if (typeof SwitchboardSignals === 'undefined' || !SwitchboardSignals.initialized) return;
-
-	const changedBlocks = new Set();
+	if (typeof SwitchboardSignals === 'undefined' || !SwitchboardSignals.initialized) return;	const changedBlocks = new Set();
 	for (const [blockId, block] of TrackData.blocks) {
 		const newState = computeBlockOccupancyFromVirtualSignals(blockId);
 		if (block.occupancyState !== newState) {
@@ -1634,13 +1624,10 @@ function updateOnce() {
 				case 'signals':
 					updateAllSignals(data);
 					break;
-			case 'occupancy':
-				updateBlockOccupancy(data);
-				break;
-			case 'trackoccupation':
-				SwitchboardOccupancy.updateTrackData(data);
-				break;
-					default:
+		case 'occupancy':
+			updateBlockOccupancy(data);
+			break;
+				default:
 						const segments = tag.split('-');
 						switch (segments[0]) {
 							case 'trainset': updateCars(data); break;
@@ -1802,17 +1789,6 @@ signalsReady.then(_ => {
 	updateLoop();
 });
 
-const trackOccupationReady = fetch(new URL('/trackoccupation', location))
-	.then(resp => resp.ok ? resp.json() : {})
-	.then(data => {
-		if (typeof SwitchboardOccupancy !== 'undefined') {
-			SwitchboardOccupancy.updateTrackData(data);
-		}
-	})
-	.catch(err => {
-		console.error('Failed to load track occupation data:', err);
-	});
-
 // Switchboard functionality
 let switchboardMap;
 let switchboardRenderer;
@@ -1940,10 +1916,6 @@ async function buildSwitchMapping() {
 		if (switchboardRenderer) {
 			switchboardRenderer.rerenderAllSegments();
 		}
-
-		if (typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.isActive) {
-			SwitchboardOccupancy.updateAllBlockOccupancy();
-		}
 	} catch (e) {
 		console.error('Failed to build switch mapping:', e);
 	}
@@ -2002,7 +1974,10 @@ function sendBlockOccupancyMapping() {
     fetch(new URL('/occupancy', location), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(blockJunctionMap)
+        body: JSON.stringify(Object.assign(
+            { mode: typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.isActive ? 1 : 0 },
+            blockJunctionMap
+        ))
     }).then(() => {
         console.log(`Sent occupancy mapping for ${Object.keys(blockJunctionMap).length} blocks`);
     }).catch(err => {

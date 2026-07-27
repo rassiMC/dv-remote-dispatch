@@ -47,17 +47,16 @@ namespace DvMod.RemoteDispatch
         {
             lock (cacheLock)
             {
-                if (_mappingInitialized)
-                {
-                    Main.Log($"OccupancyData: ignoring duplicate mapping update ({mapping.Count} blocks).");
-                    return;
-                }
                 _blockJunctionMap = mapping;
                 _allBlockIds = new HashSet<string>(mapping.Keys);
                 _lastOccupancy.Clear();
                 _currentOccupancy.Clear();
                 _mappingInitialized = true;
                 Main.Log($"OccupancyData: set mapping for {mapping.Count} blocks.");
+            }
+            if (CheckChanged())
+            {
+                Sessions.AddTag("occupancy");
             }
         }
 

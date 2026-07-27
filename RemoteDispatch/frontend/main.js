@@ -823,6 +823,10 @@ function updateAllSignals(signalsData) {
 	if (anyChanged && typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
 		switchboardRenderer.rerenderSwitches();
 	}
+
+	if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+		PathingController._processAllSwitchQueues();
+	}
 }
 
 function updateBlockOccupancy(occupancyData) {
@@ -848,11 +852,16 @@ function updateBlockOccupancy(occupancyData) {
 	if (changed) {
 		switchboardRenderer.rerenderAllSegments();
 	}
+
+	if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+		PathingController._processAllSwitchQueues();
+	}
 }
 
 function computeAllBlockOccupancyFromVirtualSignals() {
 	if (typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.isActive) return;
-	if (typeof SwitchboardSignals === 'undefined' || !SwitchboardSignals.initialized) return;	const changedBlocks = new Set();
+	if (typeof SwitchboardSignals === 'undefined' || !SwitchboardSignals.initialized) return;
+	const changedBlocks = new Set();
 	for (const [blockId, block] of TrackData.blocks) {
 		const newState = computeBlockOccupancyFromVirtualSignals(blockId);
 		if (block.occupancyState !== newState) {
@@ -865,6 +874,9 @@ function computeAllBlockOccupancyFromVirtualSignals() {
 		if (typeof switchboardRenderer.rerenderSwitches === 'function') {
 			switchboardRenderer.rerenderSwitches();
 		}
+	}
+	if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+		PathingController._processAllSwitchQueues();
 	}
 }
 
@@ -1229,6 +1241,11 @@ switchboardToggleBtn.addEventListener('click', () => {
 const hardcoreModeToggle = document.getElementById('hardcoreModeToggle');
 if (hardcoreModeToggle) {
 	hardcoreModeToggle.addEventListener('change', e => {
+		if (e.target.checked && typeof PathingController !== 'undefined' && PathingController.enabled) {
+			e.target.checked = false;
+			alert('Cannot enable hardcore mode while pathing is active. Disable pathing first.');
+			return;
+		}
 		const mode = e.target.checked ? 'hardcore' : 'direct';
 		if (typeof SwitchboardOccupancy !== 'undefined') {
 			SwitchboardOccupancy.setMode(mode);
@@ -1648,13 +1665,10 @@ function updateOnce() {
 		case 'modconfig':
 			if (data && typeof data.enablePathing === 'boolean') {
 				enablePathing = data.enablePathing;
-				const statusEl = document.getElementById('pathingStatus');
 				if (data.enablePathing) {
-					PathingController.enable();
-					if (statusEl) statusEl.textContent = 'Pathing: enabled';
+					if (typeof PathingController !== 'undefined') PathingController.enable();
 				} else {
-					PathingController.disable();
-					if (statusEl) statusEl.textContent = 'Pathing: disabled';
+					if (typeof PathingController !== 'undefined') PathingController.disable();
 				}
 			}
 			break;
@@ -1960,12 +1974,8 @@ async function buildSwitchMapping(enablePathing) {
 
 		if (enablePathing && typeof PathingController !== 'undefined') {
 			PathingController.enable();
-			const statusEl = document.getElementById('pathingStatus');
-			if (statusEl) statusEl.textContent = 'Pathing: enabled';
 		} else if (typeof PathingController !== 'undefined') {
 			PathingController.disable();
-			const statusEl = document.getElementById('pathingStatus');
-			if (statusEl) statusEl.textContent = 'Pathing: disabled';
 		}
 	} catch (e) {
 		console.error('Failed to build switch mapping:', e);

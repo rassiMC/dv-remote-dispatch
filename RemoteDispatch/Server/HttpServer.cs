@@ -539,6 +539,30 @@ namespace DvMod.RemoteDispatch
 				return;
 			}
 
+			if (method == "PATCH" && segments.Length >= 3)
+			{
+				try
+				{
+					const int maxBodySize = 524288;
+					using var stream = context.Request.InputStream;
+					using var ms = new System.IO.MemoryStream();
+					stream.CopyTo(ms);
+					if (ms.Length > maxBodySize)
+						throw new Exception("Request body too large");
+					string bodyText = Encoding.UTF8.GetString(ms.ToArray());
+					var pathEntry = JObject.Parse(bodyText);
+					pathEntry["id"] = segments[2].TrimEnd('/');
+					PathingData.UpdatePath(pathEntry);
+					RenderEmpty(context, 204);
+				}
+				catch (Exception e)
+				{
+					Main.Warning($"Failed to parse path patch request: {e.Message}");
+					RenderEmpty(context, 400);
+				}
+				return;
+			}
+
 			if (method == "DELETE")
 			{
 				if (segments.Length == 2)

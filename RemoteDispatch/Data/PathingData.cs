@@ -86,6 +86,20 @@ namespace DvMod.RemoteDispatch
             return removed;
         }
 
+        public static void UpdatePath(JObject pathEntry)
+        {
+            var id = pathEntry.Value<string>("id");
+            lock (paths)
+            {
+                var existing = paths.FirstOrDefault(p => p.Value<string>("id") == id);
+                if (existing != null)
+                {
+                    paths[paths.IndexOf(existing)] = (JObject)pathEntry.DeepClone();
+                }
+            }
+            Sessions.AddTag("paths");
+        }
+
         public static void ClearPaths()
         {
             lock (paths)

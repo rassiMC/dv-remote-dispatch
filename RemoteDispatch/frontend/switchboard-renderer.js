@@ -204,6 +204,18 @@ const TrackRenderer = {
             }
         });
 
+        polyline.on('mouseover', () => {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.onSegmentHover(segment.id);
+            }
+        });
+
+        polyline.on('mouseout', () => {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.onSegmentHoverEnd();
+            }
+        });
+
         return polyline;
     },
 
@@ -354,39 +366,11 @@ const TrackRenderer = {
         group.addTo(this.map);
 
         group.on('click', () => {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.onSegmentClick(segment.id);
+                return;
+            }
             if (jIdx !== null) {
-                const jData = SwitchboardMapper.ingameGraph?.get(jIdx);
-                console.log(`%c[${segment.id}] -> ingame junction ${jIdx} (deg ${jData?.degree ?? '?'}, id ${jData?.junctionId ?? '?'})`, 'color: #00ff00');
-
-                const sig = SwitchboardMapper.switchboardGraph?.get(segment.id)?.signals;
-                if (sig) {
-                    const sigInfo = (label, s) => {
-                        if (!s) return `${label}: null`;
-                        if (s instanceof VirtualSignal) return `${label}: VirtualSignal(aspect=${s.aspect})`;
-                        return `${label}: ${s.Id ?? '?'} (dir=${s.direction ?? '?'}, aspect=${s.aspect ?? '?'})`;
-                    };
-                    console.log(`  ${sigInfo('LeftIn', sig.LeftIn)} | ${sigInfo('Out', sig.Out)} | ${sigInfo('RightIn', sig.RightIn)}`);
-                    console.log(`  ${sigInfo('In(virtual)', sig.In)} | ${sigInfo('LeftOut(virtual)', sig.LeftOut)} | ${sigInfo('RightOut(virtual)', sig.RightOut)}`);
-                }
-
-                if (typeof TrackData !== 'undefined' && typeof getBlockPortAtSwitch === 'function') {
-                    for (const [blockId, block] of TrackData.blocks) {
-                        const port = getBlockPortAtSwitch(blockId, segment.id);
-                        if (!port) continue;
-
-                        let aspect = null;
-                        let sigLabel = '';
-                        const ge = SwitchboardMapper.switchboardGraph?.get(segment.id);
-                        if (ge?.signals) {
-                            if (port === 'common') { aspect = ge.signals.In?.aspect; sigLabel = 'In'; }
-                            else if (port === 'left') { aspect = ge.signals.LeftOut?.aspect; sigLabel = 'LeftOut'; }
-                            else if (port === 'right') { aspect = ge.signals.RightOut?.aspect; sigLabel = 'RightOut'; }
-                        }
-                        const state = block.occupancyState ?? 'unknown';
-                        console.log(`  [Occupancy] block ${blockId} at ${port} -> ${sigLabel}=${aspect} | block state=${state}`);
-                    }
-                }
-
                 fetch(new URL(`/junction/${jIdx}/toggle`, location), { method: 'POST' })
                     .then(resp => resp.ok ? resp.text() : Promise.reject(new Error(`${resp.status}`)))
                     .then(newBranch => console.log(`%c[${segment.id}] toggled -> branch ${newBranch}`, 'color: #00ff00'))
@@ -395,6 +379,19 @@ const TrackRenderer = {
                 console.log(`%c[${segment.id}] -> NO MAPPING (unmapped switch)`, 'color: #ff0000');
             }
         });
+
+        group.on('mouseover', () => {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.onSegmentHover(segment.id);
+            }
+        });
+
+        group.on('mouseout', () => {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.onSegmentHoverEnd();
+            }
+        });
+
         return group;
     },
 
@@ -453,6 +450,20 @@ const TrackRenderer = {
         if (changed.length > 0 && typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
             SwitchboardSignals.updateAllVirtualSignals();
         }
+    },
+
+    setSegmentColor(segment, color) {
+        if (!segment) return;
+        if (segment.type === 'switch') {
+            this.renderSegment(segment);
+            return;
+        }
+        const layer = this.segmentLayers.get(segment.id);
+        if (!layer) {
+            this.renderSegment(segment);
+            return;
+        }
+        layer.setStyle({ color: color });
     },
 
     clearAll() {

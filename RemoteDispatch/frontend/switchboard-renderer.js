@@ -199,7 +199,7 @@ const TrackRenderer = {
         polyline.addTo(this.map);
 
         polyline.on('click', () => {
-            if (typeof PathingController !== 'undefined' && PathingController.enabled && (PathingController.state !== 'idle' || PathingController.lockedPaths.length > 0)) {
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
                 PathingController.onSegmentClick(segment.id);
             }
         });
@@ -353,25 +353,6 @@ const TrackRenderer = {
 
         group.addTo(this.map);
 
-        group.on('contextmenu', e => {
-            L.DomEvent.stopPropagation(e);
-            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-                PathingController.onContextMenuSwitch(segment.id);
-            }
-        });
-
-        group.on('mouseover', e => {
-            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-                PathingController.onSwitchHover(segment.id);
-            }
-        });
-
-        group.on('mouseout', e => {
-            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-                PathingController.onSwitchHoverEnd();
-            }
-        });
-
         group.on('click', () => {
             if (jIdx !== null) {
                 const jData = SwitchboardMapper.ingameGraph?.get(jIdx);
@@ -468,12 +449,6 @@ const TrackRenderer = {
         }
         for (const seg of changed) {
             this.renderSegment(seg);
-            if (typeof PathingController !== 'undefined' && PathingController.lockedPaths.length > 0) {
-                const jIdx = SwitchboardMapper.getIngameJunctionIndex(seg.id);
-                if (jIdx !== null && jIdx < states.length) {
-                    PathingController.checkManualAlignment(seg.id, states[jIdx]);
-                }
-            }
         }
         if (changed.length > 0 && typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized) {
             SwitchboardSignals.updateAllVirtualSignals();

@@ -614,6 +614,7 @@ namespace DvMod.RemoteDispatch
 			await Updater.RunOnMainThread(() =>
 			{
 				PathingActivation.ActivatePathingMode();
+				BlockPathing.RebuildFromPaths(PathingData.GetPaths());
 			}).ConfigureAwait(false);
 
 			Sessions.AddTag("signals");

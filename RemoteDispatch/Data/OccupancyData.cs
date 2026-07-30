@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -479,6 +480,86 @@ namespace DvMod.RemoteDispatch
         public static string GetOccupancyJSON()
         {
             return JsonConvert.SerializeObject(GetOccupancyData());
+        }
+
+        public static bool TryGetOwnSwitchIndex(string blockId, out int junctionIndex)
+        {
+            lock (cacheLock)
+            {
+                if (_blockJunctionMap != null && _blockJunctionMap.TryGetValue(blockId, out var entries))
+                {
+                    foreach (var (_, _, jIdx, isOwnSwitch) in entries)
+                    {
+                        if (isOwnSwitch)
+                        {
+                            junctionIndex = jIdx;
+                            return true;
+                        }
+                    }
+                }
+            }
+            junctionIndex = -1;
+            return false;
+        }
+
+        public static Dictionary<string, List<(int junctionIndex, byte neededBranch)>> GetSwitchBlocksForPath(JObject path)
+        {
+            var result = new Dictionary<string, List<(int junctionIndex, byte neededBranch)>>();
+            var switchAssignments = path["switchAssignments"] as JObject;
+            if (switchAssignments == null) return result;
+
+            lock (cacheLock)
+            {
+                if (_blockJunctionMap == null) return result;
+
+                foreach (var assignment in switchAssignments.Properties())
+                {
+                    var blockId = assignment.Name;
+                    var neededBranch = (byte)(assignment.Value<int>());
+                    if (!_blockJunctionMap.TryGetValue(blockId, out var entries)) continue;
+
+                    var list = new List<(int junctionIndex, byte neededBranch)>();
+                    foreach (var (_, _, junctionIndex, isOwnSwitch) in entries)
+                    {
+                        if (isOwnSwitch)
+                            list.Add((junctionIndex, neededBranch));
+                    }
+                    if (list.Count > 0)
+                        result[blockId] = list;
+                }
+            }
+            return result;
+        }
+
+        public static List<string> GetOwnSwitchSignalIdsForBlock(string blockId)
+        {
+            var result = new List<string>();
+            lock (cacheLock)
+            {
+                if (_blockJunctionMap == null || !_blockJunctionMap.TryGetValue(blockId, out var entries))
+                    return result;
+
+                var ownJunctionIds = new HashSet<string>();
+                foreach (var (junctionId, _, _, isOwnSwitch) in entries)
+                {
+                    if (isOwnSwitch && !string.IsNullOrEmpty(junctionId))
+                        ownJunctionIds.Add(junctionId);
+                }
+                if (ownJunctionIds.Count == 0) return result;
+
+                var allSignals = SignalsShim.GetAllSignalsData() as JObject;
+                if (allSignals == null) return result;
+
+                foreach (var prop in allSignals.Properties())
+                {
+                    var signalData = prop.Value as JObject;
+                    if (signalData == null) continue;
+                    var junctionId = signalData["JunctionId"]?.ToString() ?? "";
+                    if (ownJunctionIds.Contains(junctionId))
+                        result.Add(prop.Name);
+                }
+            }
+            return result;
         }
     }
 }

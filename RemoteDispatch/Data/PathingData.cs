@@ -69,6 +69,9 @@ namespace DvMod.RemoteDispatch
             {
                 paths.Add((JObject)pathEntry.DeepClone());
             }
+            var blocks = pathEntry["blocks"] as JArray;
+            if (blocks != null)
+                BlockPathing.AddPathToQueues(id, blocks);
             Sessions.AddTag("paths");
             return id;
         }
@@ -76,28 +79,44 @@ namespace DvMod.RemoteDispatch
         public static bool RemovePath(string id)
         {
             bool removed;
+            JObject? removedPath = null;
             lock (paths)
             {
+                removedPath = paths.FirstOrDefault(p => p.Value<string>("id") == id);
                 var count = paths.RemoveAll(p => p.Value<string>("id") == id);
                 removed = count > 0;
             }
-            if (removed)
+            if (removed && removedPath != null)
+            {
+                BlockPathing.RemovePathFromQueues(id);
                 Sessions.AddTag("paths");
+            }
             return removed;
         }
 
         public static void UpdatePath(JObject pathEntry)
         {
             var id = pathEntry.Value<string>("id");
+            JObject? oldPath = null;
             lock (paths)
             {
                 var existing = paths.FirstOrDefault(p => p.Value<string>("id") == id);
                 if (existing != null)
                 {
+                    oldPath = (JObject)existing.DeepClone();
                     paths[paths.IndexOf(existing)] = (JObject)pathEntry.DeepClone();
                 }
             }
-            Sessions.AddTag("paths");
+            if (oldPath != null)
+            {
+                var oldBlocks = oldPath["blocks"] as JArray;
+                if (oldBlocks != null)
+                    BlockPathing.RemovePathFromQueuesAllBlocks(id, oldBlocks);
+                var newBlocks = pathEntry["blocks"] as JArray;
+                if (newBlocks != null)
+                    BlockPathing.AddPathToQueues(id, newBlocks);
+                Sessions.AddTag("paths");
+            }
         }
 
         public static void ClearPaths()

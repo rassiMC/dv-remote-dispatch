@@ -824,9 +824,6 @@ function updateAllSignals(signalsData) {
 		switchboardRenderer.rerenderSwitches();
 	}
 
-	if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-		PathingController._processAllSwitchQueues();
-	}
 }
 
 function updateBlockOccupancy(occupancyData) {
@@ -853,9 +850,6 @@ function updateBlockOccupancy(occupancyData) {
 		switchboardRenderer.rerenderAllSegments();
 	}
 
-	if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-		PathingController._processAllSwitchQueues();
-	}
 }
 
 function computeAllBlockOccupancyFromVirtualSignals() {
@@ -874,9 +868,6 @@ function computeAllBlockOccupancyFromVirtualSignals() {
 		if (typeof switchboardRenderer.rerenderSwitches === 'function') {
 			switchboardRenderer.rerenderSwitches();
 		}
-	}
-	if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-		PathingController._processAllSwitchQueues();
 	}
 }
 
@@ -1856,13 +1847,9 @@ function initSwitchboard() {
 
 		switchboardMap.on('contextmenu', e => {
 			if (typeof PathingController !== 'undefined' && PathingController.enabled && PathingController.state !== 'idle') {
-				if (PathingController.editingPathIndex !== null) {
-					PathingController.cancelEdit();
-				} else {
-					PathingController._resetSelection();
-					PathingController.rerender();
-					PathingController.updateStatus('Cancelled. Right-click a switch to begin.');
-				}
+				PathingController._resetSelection();
+				PathingController.rerender();
+				PathingController.updateStatus('Cancelled. Click an occupied block to begin.');
 			}
 		});
 

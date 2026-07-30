@@ -14,6 +14,7 @@ namespace DvMod.RemoteDispatch
 			StartCoroutine(CheckTrainsetsCoro());
 			StartCoroutine(DeferredEventsCoro());
 			StartCoroutine(CheckOccupancyCoro());
+			StartCoroutine(CheckBlockPathingCoro());
 		}
 
         private static GameObject? rootObject;
@@ -79,6 +80,18 @@ namespace DvMod.RemoteDispatch
 				if (OccupancyData.HasMapping && OccupancyData.CheckChanged())
 				{
 					Sessions.AddTag("occupancy");
+				}
+			}
+		}
+
+		private IEnumerator CheckBlockPathingCoro()
+		{
+			while (true)
+			{
+				yield return WaitFor.Seconds(0.5f);
+				if (OccupancyData.HasMapping && Main.settings.featureFlags.enablePathing)
+				{
+					BlockPathing.CheckAndProcess();
 				}
 			}
 		}

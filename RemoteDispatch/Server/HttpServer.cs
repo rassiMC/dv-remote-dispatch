@@ -147,6 +147,10 @@ namespace DvMod.RemoteDispatch
 			Main.DebugLog("/path endpoint hit");
 			HandlePathRequest(context);
 			break;
+		case "staging":
+			Main.DebugLog("/staging endpoint hit");
+			Render200(context, ContentTypes.Json, StagingData.GetStagingStateJson());
+			break;
 		case "pathing":
 			Main.DebugLog("/pathing endpoint hit");
 			await HandlePathingActivateRequest(context);
@@ -522,24 +526,6 @@ namespace DvMod.RemoteDispatch
 					var pathEntry = JObject.Parse(bodyText);
 					var id = PathingData.AddPath(pathEntry);
 
-					var blockSignals = pathEntry["blockSignals"] as JObject;
-					if (blockSignals != null)
-					{
-						var ids = blockSignals.Properties().Select(p => p.Value.ToString()).ToList();
-						PathingActivation.ClearRouteSignals(ids);
-					}
-					else
-					{
-						var signalIds = pathEntry["signalIds"] as JArray;
-						if (signalIds != null)
-						{
-							var ids = signalIds.ToObject<List<string>>() ?? new List<string>();
-							PathingActivation.ClearRouteSignals(ids);
-						}
-					}
-
-					Render200(context, ContentTypes.Json, new JObject { ["id"] = id }.ToString());
-
 					Render200(context, ContentTypes.Json, new JObject { ["id"] = id }.ToString());
 				}
 				catch (Exception e)
@@ -625,7 +611,7 @@ namespace DvMod.RemoteDispatch
 			await Updater.RunOnMainThread(() =>
 			{
 				PathingActivation.ActivatePathingMode();
-				BlockPathing.RebuildFromPaths(PathingData.GetPaths());
+				StagingData.InitializeFromPaths(PathingData.GetPaths());
 			}).ConfigureAwait(false);
 
 			Sessions.AddTag("signals");

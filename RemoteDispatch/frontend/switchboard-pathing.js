@@ -232,6 +232,11 @@ const PathingController = {
             this._hoverTimer = null;
         }
         if (this.state === 'idle') {
+            const block = TrackData.getBlock(blockId);
+            if (!block || block.occupancyState !== 'occupied') {
+                this.updateStatus('Start block must be occupied by a train.');
+                return;
+            }
             this.startBlockId = blockId;
             this.state = 'selectingDest';
             this.updateStatus(`Start block: ${blockId}. Click a destination block.`);
@@ -350,10 +355,12 @@ const PathingController = {
         .then(resp => resp.ok ? resp.json() : null)
         .then(data => {
             if (data && data.id) {
-                pathEntry.id = data.id;
-                this.lockedPaths.push(pathEntry);
-                this._updateSegmentColors(pathBlocks);
-                this.updateStatus(`Path locked (${pathBlocks.length} blocks). ${this.lockedPaths.length} path(s) active.`);
+                fetch(new URL('/path', location))
+                    .then(resp => resp.json())
+                    .then(serverData => {
+                        this.syncFromServer(serverData);
+                        this.updateStatus(`Path locked (${pathBlocks.length} blocks). ${this.lockedPaths.length} path(s) active.`);
+                    });
             }
         })
         .catch(() => this.updateStatus('Failed to create path.'));
@@ -385,9 +392,12 @@ const PathingController = {
         if (this.lockedPaths.length > 0) {
             for (const p of this.lockedPaths) {
                 if (p.blocks && p.blocks.includes(blockId)) {
-                    const block = TrackData.getBlock(blockId);
-                    if (block && block.occupancyState === 'occupied') return { color: this.MODE_RED };
-                    return { color: this.MODE_GREEN };
+                    if (p.blockStates && p.blockStates[blockId]) {
+                        const state = p.blockStates[blockId];
+                        if (state === 'claimed') return { color: this.MODE_GREEN };
+                        if (state === 'unclaimed' || state === 'waiting') return { color: this.MODE_YELLOW };
+                        return null;
+                    }
                 }
             }
         }
@@ -411,9 +421,12 @@ const PathingController = {
         if (this.lockedPaths.length > 0) {
             for (const p of this.lockedPaths) {
                 if (p.blocks && p.blocks.includes(blockId)) {
-                    const block = TrackData.getBlock(blockId);
-                    if (block && block.occupancyState === 'occupied') return this.MODE_RED;
-                    return this.MODE_GREEN;
+                    if (p.blockStates && p.blockStates[blockId]) {
+                        const state = p.blockStates[blockId];
+                        if (state === 'claimed') return this.MODE_GREEN;
+                        if (state === 'unclaimed' || state === 'waiting') return this.MODE_YELLOW;
+                        return null;
+                    }
                 }
             }
         }

@@ -13,7 +13,26 @@ namespace DvMod.RemoteDispatch
         {
             lock (paths)
             {
-                return new JArray(paths.Select(p => (JToken)p.DeepClone()));
+                var stagingData = StagingData.GetStagingData();
+                var enriched = new JArray();
+                foreach (var p in paths)
+                {
+                    var clone = (JObject)p.DeepClone();
+                    var pathId = clone.Value<string>("id");
+                    var blocks = clone["blocks"] as JArray;
+                    if (pathId != null && blocks != null && stagingData.TryGetValue(pathId, out var pathBlocks))
+                    {
+                        var states = new JObject();
+                        for (int i = 0; i < blocks.Count && i < pathBlocks.Count; i++)
+                        {
+                            var blockId = blocks[i].ToString();
+                            states[blockId] = pathBlocks[i];
+                        }
+                        clone["blockStates"] = states;
+                    }
+                    enriched.Add(clone);
+                }
+                return enriched;
             }
         }
 
@@ -104,7 +123,7 @@ namespace DvMod.RemoteDispatch
             }
             var blocks = pathEntry["blocks"] as JArray;
             if (blocks != null)
-                BlockPathing.AddPathToQueues(id, blocks);
+                StagingData.AddPath(id, blocks, pathEntry.Value<int?>("lookAhead") ?? 2);
             Sessions.AddTag("paths");
             return id;
         }
@@ -121,7 +140,7 @@ namespace DvMod.RemoteDispatch
             }
             if (removed && removedPath != null)
             {
-                BlockPathing.RemovePathFromQueues(id);
+                StagingData.RemovePath(id);
                 Sessions.AddTag("paths");
             }
             return removed;
@@ -142,12 +161,9 @@ namespace DvMod.RemoteDispatch
             }
             if (oldPath != null)
             {
-                var oldBlocks = oldPath["blocks"] as JArray;
-                if (oldBlocks != null)
-                    BlockPathing.RemovePathFromQueuesAllBlocks(id, oldBlocks);
                 var newBlocks = pathEntry["blocks"] as JArray;
                 if (newBlocks != null)
-                    BlockPathing.AddPathToQueues(id, newBlocks);
+                    StagingData.UpdatePath(id, newBlocks);
                 Sessions.AddTag("paths");
             }
         }
@@ -158,6 +174,7 @@ namespace DvMod.RemoteDispatch
             {
                 paths.Clear();
             }
+            StagingData.ClearAll();
             Sessions.AddTag("paths");
         }
     }

@@ -31,41 +31,61 @@ const PathingController = {
         }
 
         this._blockSwitchPorts = new Map();
+        this._switchSwitchPorts = new Map();
 
+        const nodeToBlocks = new Map();
         for (const [segId, seg] of TrackData.segments) {
-            if (seg.type !== 'switch') continue;
             if (!seg.blockId) continue;
-            const swBlockId = seg.blockId;
-            const portNodeNames = [
-                { nodeName: 'merging', portName: 'common' },
-                { nodeName: 'nl', portName: 'left' },
-                { nodeName: 'nr', portName: 'right' }
-            ];
-            for (const { nodeName, portName } of portNodeNames) {
-                const nodeId = seg[nodeName];
-                if (!nodeId) continue;
-                for (const otherSeg of TrackData.segments.values()) {
-                    if (otherSeg.n1 !== nodeId && otherSeg.n2 !== nodeId) continue;
-                    if (!otherSeg.blockId) continue;
-                    if (otherSeg.blockId === swBlockId) continue;
+            for (const nodeName of ['n1', 'n2', 'merging', 'nl', 'nr']) {
+                const nid = seg[nodeName];
+                if (!nid) continue;
+                if (!nodeToBlocks.has(nid)) nodeToBlocks.set(nid, []);
+                if (!nodeToBlocks.get(nid).find(e => e.blockId === seg.blockId && e.segId === segId))
+                    nodeToBlocks.get(nid).push({ blockId: seg.blockId, segId, type: seg.type });
+            }
+        }
 
-                    const swEntry = graph.get(swBlockId);
-                    if (swEntry && !swEntry.neighbors.find(n => n.blockId === otherSeg.blockId))
-                        swEntry.neighbors.push({ blockId: otherSeg.blockId, port: portName });
-
-                    const otherEntry = graph.get(otherSeg.blockId);
-                    if (otherEntry && !otherEntry.neighbors.find(n => n.blockId === swBlockId))
-                        otherEntry.neighbors.push({ blockId: swBlockId, port: portName, nodeId: nodeId });
-
-                    const key = `${otherSeg.blockId}@${swBlockId}`;
-                    if (!this._blockSwitchPorts.has(key))
-                        this._blockSwitchPorts.set(key, portName);
+        for (const [nodeId, entries] of nodeToBlocks) {
+            if (entries.length < 2) continue;
+            for (let i = 0; i < entries.length; i++) {
+                for (let j = i + 1; j < entries.length; j++) {
+                    const a = entries[i], b = entries[j];
+                    if (a.blockId === b.blockId) continue;
+                    this._addEdge(graph, a, b, nodeId);
+                    this._addEdge(graph, b, a, nodeId);
                 }
             }
         }
 
         this._blockGraph = graph;
         return graph;
+    },
+
+    _addEdge(graph, from, to, nodeId) {
+        const entry = graph.get(from.blockId);
+        if (!entry || entry.neighbors.find(n => n.blockId === to.blockId)) return;
+
+        const fromSeg = TrackData.getSegment(from.segId);
+        const toSeg = TrackData.getSegment(to.segId);
+
+        let port = null;
+        if (fromSeg.type === 'switch') {
+            for (const { nodeName, portName } of [
+                { nodeName: 'merging', portName: 'common' },
+                { nodeName: 'nl', portName: 'left' },
+                { nodeName: 'nr', portName: 'right' }
+            ]) {
+                if (fromSeg[nodeName] === nodeId) { port = portName; break; }
+            }
+        }
+
+        entry.neighbors.push({ blockId: to.blockId, port: port });
+
+        if (fromSeg.type === 'switch' || toSeg.type === 'switch') {
+            const key = `${to.blockId}@${from.blockId}`;
+            if (!this._blockSwitchPorts.has(key))
+                this._blockSwitchPorts.set(key, port);
+        }
     },
 
     _getPortForBlockAtSwitch(blockId, switchBlockId) {
@@ -108,8 +128,9 @@ const PathingController = {
                     const prevBlock = path[i - 1];
                     const nextBlock = path[i + 1];
 
-                    const isSwitch = this._blockSwitchPorts.has(`${prevBlock}@${blockId}`) ||
-                        this._blockSwitchPorts.has(`${nextBlock}@${blockId}`);
+                    const isSwitch = Array.from(TrackData.segments.values()).some(
+                        s => s.type === 'switch' && s.blockId === blockId
+                    );
                     if (!isSwitch) continue;
 
                     const inPort = this._getPortForBlockAtSwitch(prevBlock, blockId);

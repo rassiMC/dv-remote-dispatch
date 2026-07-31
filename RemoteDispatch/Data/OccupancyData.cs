@@ -143,8 +143,11 @@ namespace DvMod.RemoteDispatch
                 bool foundClear = false;
                 bool foundAnySignal = false;
 
-                foreach (var (junctionId, port, junctionIndex, _) in entries)
+                foreach (var (junctionId, port, junctionIndex, isOwnSwitch) in entries)
                 {
+                    if (isOwnSwitch)
+                        continue;
+
                     if (port != "common")
                     {
                         if (junctionIndex < 0 || junctionIndex >= junctionStates.Length)
@@ -286,8 +289,11 @@ namespace DvMod.RemoteDispatch
             var trackIds = new HashSet<string>();
             var walkSeeds = new List<(string trackId, bool walkFromStart)>();
 
-            foreach (var (junctionId, port, junctionIndex, _) in entries)
+            foreach (var (junctionId, port, junctionIndex, isOwnSwitch) in entries)
             {
+                if (isOwnSwitch)
+                    continue;
+
                 if (junctionIndex < 0 || junctionIndex >= junctionStates.Length)
                     continue;
 

@@ -63,7 +63,8 @@ namespace DvMod.RemoteDispatch
             foreach (var signalId in signalIds)
             {
                 Main.DebugLog($"PathingActivation: Clearing signal {signalId}");
-                SignalsShim.SetSignalMode(signalId, "Automatic");
+                SignalsShim.SetSignalMode(signalId, "Manual");
+                SignalsShim.SetSignalAspect(signalId, "S2");
                 count++;
             }
             Main.Log($"PathingActivation: Cleared {count} signals along route");

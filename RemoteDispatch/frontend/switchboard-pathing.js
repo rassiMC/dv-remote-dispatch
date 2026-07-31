@@ -171,6 +171,31 @@ const PathingController = {
         return ids;
     },
 
+    _getBlockSignalIds(path) {
+        const blockSignals = {};
+        for (let i = 1; i < path.length - 1; i++) {
+            const blockId = path[i];
+            const prevBlock = path[i - 1];
+            const entryPort = this._getPortForBlockAtSwitch(prevBlock, blockId);
+            if (!entryPort) continue;
+            for (const [segId, seg] of TrackData.segments) {
+                if (seg.type !== 'switch') continue;
+                if (seg.blockId !== blockId) continue;
+                const rawSigs = SwitchboardMapper.switchboardGraph?.get(segId)?.rawSignals;
+                if (!rawSigs) continue;
+                let sigId = null;
+                if (entryPort === 'common' && rawSigs.Out && rawSigs.Out.Id)
+                    sigId = rawSigs.Out.Id;
+                else if (entryPort === 'left' && rawSigs.LeftIn && rawSigs.LeftIn.Id)
+                    sigId = rawSigs.LeftIn.Id;
+                else if (entryPort === 'right' && rawSigs.RightIn && rawSigs.RightIn.Id)
+                    sigId = rawSigs.RightIn.Id;
+                if (sigId) blockSignals[blockId] = sigId;
+            }
+        }
+        return blockSignals;
+    },
+
     _resetSelection() {
         this.state = 'idle';
         this.startBlockId = null;
@@ -282,6 +307,7 @@ const PathingController = {
         if (!blocks || blocks.length === 0) return;
 
         const signalIds = this._getSignalIdsForPath(blocks);
+        const blockSignals = this._getBlockSignalIds(blocks);
         const pathBlocks = blocks.slice();
         const pathAssignments = Object.assign({}, switchAssignments);
 
@@ -290,7 +316,8 @@ const PathingController = {
             startBlock: startBlock,
             destBlock: destBlock,
             switchAssignments: pathAssignments,
-            signalIds: signalIds
+            signalIds: signalIds,
+            blockSignals: blockSignals
         };
 
         this._resetSelection();

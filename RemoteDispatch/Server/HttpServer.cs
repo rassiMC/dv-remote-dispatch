@@ -522,12 +522,23 @@ namespace DvMod.RemoteDispatch
 					var pathEntry = JObject.Parse(bodyText);
 					var id = PathingData.AddPath(pathEntry);
 
-					var signalIds = pathEntry["signalIds"] as JArray;
-					if (signalIds != null)
+					var blockSignals = pathEntry["blockSignals"] as JObject;
+					if (blockSignals != null)
 					{
-						var ids = signalIds.ToObject<List<string>>() ?? new List<string>();
+						var ids = blockSignals.Properties().Select(p => p.Value.ToString()).ToList();
 						PathingActivation.ClearRouteSignals(ids);
 					}
+					else
+					{
+						var signalIds = pathEntry["signalIds"] as JArray;
+						if (signalIds != null)
+						{
+							var ids = signalIds.ToObject<List<string>>() ?? new List<string>();
+							PathingActivation.ClearRouteSignals(ids);
+						}
+					}
+
+					Render200(context, ContentTypes.Json, new JObject { ["id"] = id }.ToString());
 
 					Render200(context, ContentTypes.Json, new JObject { ["id"] = id }.ToString());
 				}
@@ -567,7 +578,7 @@ namespace DvMod.RemoteDispatch
 			{
 				if (segments.Length == 2)
 				{
-					var storedIds = PathingData.GetAllSignalIds();
+					var storedIds = PathingData.GetAllBlockSignalIds();
 					PathingData.ClearPaths();
 					PathingActivation.RevertRouteSignals(storedIds);
 					RenderEmpty(context, 204);
@@ -575,7 +586,7 @@ namespace DvMod.RemoteDispatch
 				else if (segments.Length >= 3)
 				{
 					var pathId = segments[2].TrimEnd('/');
-					var storedIds = PathingData.GetSignalIdsForPath(pathId);
+					var storedIds = PathingData.GetBlockSignalIdsForPath(pathId);
 					PathingData.RemovePath(pathId);
 					PathingActivation.RevertRouteSignals(storedIds);
 					RenderEmpty(context, 204);

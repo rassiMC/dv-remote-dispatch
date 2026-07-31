@@ -51,6 +51,39 @@ namespace DvMod.RemoteDispatch
             }
         }
 
+        public static List<string> GetAllBlockSignalIds()
+        {
+            lock (paths)
+            {
+                var result = new List<string>();
+                foreach (var p in paths)
+                {
+                    var blockSignals = p["blockSignals"] as JObject;
+                    if (blockSignals != null)
+                    {
+                        foreach (var prop in blockSignals.Properties())
+                        {
+                            if (prop.Value != null)
+                                result.Add(prop.Value.ToString());
+                        }
+                    }
+                }
+                return result;
+            }
+        }
+
+        public static List<string> GetBlockSignalIdsForPath(string id)
+        {
+            lock (paths)
+            {
+                var p = paths.FirstOrDefault(x => x.Value<string>("id") == id);
+                if (p == null) return new List<string>();
+                var blockSignals = p["blockSignals"] as JObject;
+                if (blockSignals == null) return new List<string>();
+                return blockSignals.Properties().Select(prop => prop.Value.ToString()).ToList();
+            }
+        }
+
         public static bool HasSignalIds(string id)
         {
             lock (paths)

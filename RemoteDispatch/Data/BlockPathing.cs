@@ -111,6 +111,15 @@ namespace DvMod.RemoteDispatch
 
         private static void ActivatePathOnBlockInternal(string blockId, JObject path)
         {
+            var blockSignals = path["blockSignals"] as JObject;
+            if (blockSignals != null && blockSignals[blockId] != null)
+            {
+                var sigId = blockSignals[blockId].ToString();
+                Main.DebugLog($"BlockPathing: signal {sigId} -> Manual+S2 for path {path.Value<string>("id")} on block {blockId}");
+                SignalsShim.SetSignalMode(sigId, "Manual");
+                SignalsShim.SetSignalAspect(sigId, "S2");
+            }
+
             if (!OccupancyData.TryGetOwnSwitchIndex(blockId, out var jIdx) || jIdx < 0)
                 return;
             if (jIdx >= RailTrackRegistry.Instance.OrderedJunctions.Length)
@@ -126,13 +135,6 @@ namespace DvMod.RemoteDispatch
                     Main.DebugLog($"BlockPathing: toggling J-{jIdx} for path {path.Value<string>("id")} on block {blockId}");
                     junction.Switch(Junction.SwitchMode.REGULAR);
                 }
-            }
-
-            var signalIds = OccupancyData.GetOwnSwitchSignalIdsForBlock(blockId);
-            foreach (var sigId in signalIds)
-            {
-                Main.DebugLog($"BlockPathing: signal {sigId} -> Automatic for path {path.Value<string>("id")}");
-                SignalsShim.SetSignalMode(sigId, "Automatic");
             }
 
             Sessions.AddTag("signals");
@@ -167,6 +169,17 @@ namespace DvMod.RemoteDispatch
                     if (isFlagged && isOccupied)
                     {
                         var poppedPathId = queue[0];
+                        if (pathsById.TryGetValue(poppedPathId, out var poppedPath))
+                        {
+                            var blockSignals = poppedPath["blockSignals"] as JObject;
+                            if (blockSignals != null && blockSignals[blockId] != null)
+                            {
+                                var sigId = blockSignals[blockId].ToString();
+                                Main.DebugLog($"BlockPathing: signal {sigId} -> Manual+S1 on block {blockId} occupied");
+                                SignalsShim.SetSignalMode(sigId, "Manual");
+                                SignalsShim.SetSignalAspect(sigId, "S1");
+                            }
+                        }
                         queue.RemoveAt(0);
                         activeClearBlocks.Remove(blockId);
                         changed = true;

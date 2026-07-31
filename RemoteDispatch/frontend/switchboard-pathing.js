@@ -553,6 +553,37 @@ const PathingController = {
         }
     },
 
+    _printPath(pathId) {
+        const p = this.lockedPaths.find(x => x.id === pathId);
+        if (!p) { console.warn('[Pathing] Path not found:', pathId); return; }
+        console.log(`=== Path ${pathId}: ${p.startBlock || '?'} → ${p.destBlock || '?'} ===`);
+        console.log(`Blocks (${(p.blocks || []).length}):`);
+        for (const b of (p.blocks || [])) {
+            const state = (p.blockStates && p.blockStates[b]) || 'unclaimed';
+            console.log(`  ${b}: ${state}`);
+        }
+        console.log('Switch assignments:', JSON.stringify(p.switchAssignments));
+        console.log('Signal IDs:', p.signalIds);
+    },
+
+    _deletePath(pathId) {
+        fetch(new URL(`/path/${pathId}`, location), { method: 'DELETE' })
+            .then(resp => {
+                if (!resp.ok) return;
+                fetch(new URL('/path', location))
+                    .then(r => r.json())
+                    .then(data => this.syncFromServer(data));
+            });
+    },
+
+    _stateColor(state) {
+        if (state === 'claimed') return '#208020';
+        if (state === 'unclaimed' || state === 'waiting') return '#ffdd44';
+        if (state === 'occupied') return '#a02020';
+        if (state === 'completed') return '#888';
+        return '#666';
+    },
+
     renderPathList() {
         try {
             const el = document.getElementById('pathList');
@@ -563,11 +594,22 @@ const PathingController = {
             }
             const items = this.lockedPaths.map((p) => {
                 const label = `${p.startBlock || '?'} \u2192 ${p.destBlock || '?'}`;
-                const count = p.blocks ? p.blocks.length : 0;
-                return `<div style="display:flex;align-items:center;gap:6px;margin:4px 0;">
-                    <span style="color:#4c4;font-size:16px">\u2713</span>
-                    <span style="font-size:14px">${label}</span>
-                    <span style="color:#666;font-size:12px;margin-left:auto">${count}</span>
+                const blockChips = (p.blocks || []).map((b, i) => {
+                    const state = (p.blockStates && p.blockStates[b]) || 'unclaimed';
+                    const color = this._stateColor(state);
+                    const isCurrent = state === 'occupied';
+                    const extra = isCurrent ? 'border:1px solid #fff;' : 'border:1px solid transparent;';
+                    return `<span style="display:inline-block;background:${color};color:#000;font-size:11px;padding:1px 5px;margin:1px;border-radius:3px;${extra}font-weight:600">${b}</span>`;
+                }).join('');
+                const pid = p.id;
+                return `<div style="margin:6px 0;padding:4px;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <span style="color:#4c4;font-size:14px">\u2713</span>
+                        <span style="font-size:13px;font-weight:600;flex:1">${label}</span>
+                        <button onclick="PathingController._printPath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer" title="Print path to F12 console">\u{1F4DD}</button>
+                        <button onclick="PathingController._deletePath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#c44" title="Delete this path">\u2716</button>
+                    </div>
+                    <div style="margin-top:4px;line-height:1.8">${blockChips}</div>
                 </div>`;
             }).join('');
             el.innerHTML = `<div style="font-size:13px;color:#aaa;margin-bottom:4px;border-bottom:1px solid #444;padding-bottom:3px;font-weight:600">Active Paths (${this.lockedPaths.length})</div>${items}`;

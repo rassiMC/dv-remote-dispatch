@@ -576,6 +576,20 @@ const PathingController = {
             });
     },
 
+    _advancePath(pathId) {
+        fetch(new URL(`/path/${pathId}/advance`, location), { method: 'POST' })
+            .then(resp => resp.json())
+            .then(data => {
+                if (data && data.ok) {
+                    fetch(new URL('/path', location))
+                        .then(r => r.json())
+                        .then(serverData => this.syncFromServer(serverData));
+                } else {
+                    console.warn('[Pathing] Advance failed:', data && data.error);
+                }
+            });
+    },
+
     _stateColor(state) {
         if (state === 'claimed') return '#208020';
         if (state === 'unclaimed' || state === 'waiting') return '#ffdd44';
@@ -608,6 +622,7 @@ const PathingController = {
                         <span style="font-size:13px;font-weight:600;flex:1">${label}</span>
                         <button onclick="PathingController._printPath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer" title="Print path to F12 console">\u{1F4DD}</button>
                         <button onclick="PathingController._deletePath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#c44" title="Delete this path">\u2716</button>
+                        <button onclick="PathingController._advancePath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#48f" title="Claim next block">\u25B6</button>
                     </div>
                     <div style="margin-top:4px;line-height:1.8">${blockChips}</div>
                 </div>`;

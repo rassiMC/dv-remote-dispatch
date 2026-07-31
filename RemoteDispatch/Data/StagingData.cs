@@ -111,6 +111,40 @@ namespace DvMod.RemoteDispatch
             }
         }
 
+        public static bool ForceClaimNextBlock(string pathId)
+        {
+            lock (lockObj)
+            {
+                if (!_pathProgress.TryGetValue(pathId, out var staging))
+                    return false;
+                if (staging.status != "Active")
+                    return false;
+
+                var occupancy = OccupancyData.GetOccupancyData();
+                int ws = staging.currentBlockIndex + 1;
+
+                for (int i = ws; i < staging.blocks.Length; i++)
+                {
+                    var blockId = staging.blocks[i];
+                    if (_activeBlocks.ContainsKey(blockId))
+                        continue;
+                    if (occupancy.TryGetValue(blockId, out var occ) && occ == true)
+                        continue;
+
+                    int needed = i - staging.currentBlockIndex;
+                    if (needed > staging.lookAhead)
+                        staging.lookAhead = needed;
+
+                    ActivateBlock(blockId, staging);
+                    Sessions.AddTag("paths");
+                    Sessions.AddTag("signals");
+                    return true;
+                }
+
+                return false;
+            }
+        }
+
         public static void RemovePath(string pathId)
         {
             lock (lockObj)
@@ -171,6 +205,31 @@ namespace DvMod.RemoteDispatch
             }
         }
 
+        private static void PrunePastBlocks(PathStaging staging)
+        {
+            int removeCount = staging.currentBlockIndex;
+            if (removeCount <= 0) return;
+
+            var pruned = new List<string>();
+            for (int i = 0; i < removeCount; i++)
+                pruned.Add(staging.blocks[i]);
+
+            staging.blocks = staging.blocks.Skip(removeCount).ToArray();
+            staging.currentBlockIndex = 0;
+
+            foreach (var blockId in pruned)
+            {
+                if (_blockQueues.TryGetValue(blockId, out var queue))
+                {
+                    queue.Remove(staging.pathId);
+                    if (queue.Count == 0)
+                        _blockQueues.Remove(blockId);
+                }
+            }
+
+            PathingData.RemovePrefixFromPath(staging.pathId, removeCount);
+        }
+
         private static void ActivateLookAhead(PathStaging staging, Dictionary<string, bool?> occupancy)
         {
             int windowStart = staging.currentBlockIndex + 1;
@@ -180,11 +239,11 @@ namespace DvMod.RemoteDispatch
             {
                 var blockId = staging.blocks[i];
                 if (_activeBlocks.ContainsKey(blockId))
-                    continue;
+                    break;
                 if (!_blockQueues.TryGetValue(blockId, out var queue) || queue.Count == 0 || queue[0] != staging.pathId)
-                    continue;
-                if (!occupancy.TryGetValue(blockId, out var occ) || occ != false)
-                    continue;
+                    break;
+                if (occupancy.TryGetValue(blockId, out var occ) && occ == true)
+                    break;
 
                 ActivateBlock(blockId, staging);
             }
@@ -279,6 +338,7 @@ namespace DvMod.RemoteDispatch
                                 SetSignalToStop(prevBlockId, staging.pathId);
 
                             staging.currentBlockIndex = nextIdx;
+                            PrunePastBlocks(staging);
                             changed = true;
                             Main.DebugLog($"StagingData: path {staging.pathId} advanced to block {nextBlockId} (index {nextIdx})");
 
@@ -286,6 +346,8 @@ namespace DvMod.RemoteDispatch
                             if (windowStart >= staging.blocks.Length)
                             {
                                 staging.status = "Completed";
+                                Main.DebugLog($"StagingData: path {staging.pathId} completed, cleaning up");
+                                changed = true;
                                 continue;
                             }
                         }
@@ -313,11 +375,11 @@ namespace DvMod.RemoteDispatch
                             continue;
                         }
                         if (_activeBlocks.ContainsKey(blockId))
-                            continue;
+                            break;
                         if (!_blockQueues.TryGetValue(blockId, out var queue) || queue.Count == 0 || queue[0] != staging.pathId)
-                            continue;
-                        if (!occupancy.TryGetValue(blockId, out var occ) || occ != false)
-                            continue;
+                            break;
+                        if (occupancy.TryGetValue(blockId, out var occ) && occ == true)
+                            break;
 
                         ActivateBlock(blockId, staging);
                         changed = true;
@@ -328,6 +390,20 @@ namespace DvMod.RemoteDispatch
                         ReleaseBlock(staleId);
                         changed = true;
                     }
+                }
+
+                var completed = _pathProgress.Where(kvp => kvp.Value.status == "Completed").Select(kvp => kvp.Key).ToList();
+                foreach (var pathId in completed)
+                {
+                    var staging = _pathProgress[pathId];
+                    var lastBlock = staging.blocks[staging.blocks.Length - 1];
+                    if (_activeBlocks.TryGetValue(lastBlock, out var cp) && cp == pathId)
+                        ReleaseBlock(lastBlock);
+                    else
+                        SetSignalToStop(lastBlock, pathId);
+                    _pathProgress.Remove(pathId);
+                    PathingData.RemovePathFromStoredList(pathId);
+                    Main.DebugLog($"StagingData: path {pathId} fully cleaned up from server");
                 }
 
                 _activeBlocks.RemoveWhere(kvp =>

@@ -168,6 +168,40 @@ namespace DvMod.RemoteDispatch
             }
         }
 
+        public static void RemovePrefixFromPath(string id, int count)
+        {
+            lock (paths)
+            {
+                var p = paths.FirstOrDefault(x => x.Value<string>("id") == id);
+                if (p == null) return;
+                var blocks = p["blocks"] as JArray;
+                if (blocks == null || blocks.Count < count) return;
+                var removed = new List<string>();
+                for (int i = 0; i < count && i < blocks.Count; i++)
+                {
+                    if (blocks[i] is JValue val) removed.Add(val.ToString());
+                }
+                var remaining = blocks.Skip(count).ToArray();
+                p.Remove("blocks");
+                p["blocks"] = new JArray(remaining);
+
+                if (p["blockSignals"] is JObject blockSignals)
+                    foreach (var r in removed)
+                        blockSignals.Remove(r);
+                if (p["switchAssignments"] is JObject switchAssignments)
+                    foreach (var r in removed)
+                        switchAssignments.Remove(r);
+            }
+        }
+
+        public static void RemovePathFromStoredList(string id)
+        {
+            lock (paths)
+            {
+                paths.RemoveAll(p => p.Value<string>("id") == id);
+            }
+        }
+
         public static void ClearPaths()
         {
             lock (paths)

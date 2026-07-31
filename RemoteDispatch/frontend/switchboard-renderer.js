@@ -366,14 +366,10 @@ const TrackRenderer = {
         group.addTo(this.map);
 
         group.on('click', () => {
-            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-                PathingController.onSegmentClick(segment.id);
-                return;
-            }
             if (jIdx !== null) {
                 fetch(new URL(`/junction/${jIdx}/toggle`, location), { method: 'POST' })
                     .then(resp => resp.ok ? resp.text() : Promise.reject(new Error(`${resp.status}`)))
-                    .then(newBranch => console.log(`%c[${segment.id}] toggled -> branch ${newBranch}`, 'color: #00ff00'))
+                    .then(newBranch => console.log(`%c[${segment.id}] toggled -> branch ${newBranch} (block: ${segment.blockId})`, 'color: #00ff00'))
                     .catch(err => console.error(`%c[${segment.id}] toggle failed: ${err.message}`, 'color: #ff0000'));
             } else {
                 console.log(`%c[${segment.id}] -> NO MAPPING (unmapped switch)`, 'color: #ff0000');
@@ -381,15 +377,9 @@ const TrackRenderer = {
         });
 
         group.on('mouseover', () => {
-            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-                PathingController.onSegmentHover(segment.id);
-            }
         });
 
         group.on('mouseout', () => {
-            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
-                PathingController.onSegmentHoverEnd();
-            }
         });
 
         return group;

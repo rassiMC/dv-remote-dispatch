@@ -560,6 +560,22 @@ namespace DvMod.RemoteDispatch
 				return;
 			}
 
+			if (method == "POST" && segments.Length >= 4 && segments[3].TrimEnd('/') == "advance")
+			{
+				var pathId = segments[2].TrimEnd('/');
+				if (!Main.settings.permissions.HasPathingPermission(username))
+				{
+					RenderEmpty(context, 403);
+					return;
+				}
+				bool ok = StagingData.ForceClaimNextBlock(pathId);
+				if (ok)
+					Render200(context, ContentTypes.Json, new JObject { ["ok"] = true }.ToString());
+				else
+					Render200(context, ContentTypes.Json, new JObject { ["ok"] = false, ["error"] = "No claimable block found" }.ToString());
+				return;
+			}
+
 			if (method == "DELETE")
 			{
 				if (segments.Length == 2)

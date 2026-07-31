@@ -115,9 +115,8 @@ namespace DvMod.RemoteDispatch
             if (blockSignals != null && blockSignals[blockId] != null)
             {
                 var sigId = blockSignals[blockId].ToString();
-                Main.DebugLog($"BlockPathing: signal {sigId} -> Manual+S2 for path {path.Value<string>("id")} on block {blockId}");
-                SignalsShim.SetSignalMode(sigId, "Manual");
-                SignalsShim.SetSignalAspect(sigId, "S2");
+                Main.DebugLog($"BlockPathing: signal {sigId} -> Automatic for path {path.Value<string>("id")} on block {blockId}");
+                SignalsShim.SetSignalMode(sigId, "Automatic");
             }
 
             if (!OccupancyData.TryGetOwnSwitchIndex(blockId, out var jIdx) || jIdx < 0)

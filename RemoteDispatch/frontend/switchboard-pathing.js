@@ -45,7 +45,6 @@ const PathingController = {
                 const nodeId = seg[nodeName];
                 if (!nodeId) continue;
                 for (const otherSeg of TrackData.segments.values()) {
-                    if (otherSeg.type === 'switch') continue;
                     if (otherSeg.n1 !== nodeId && otherSeg.n2 !== nodeId) continue;
                     if (!otherSeg.blockId) continue;
                     if (otherSeg.blockId === swBlockId) continue;

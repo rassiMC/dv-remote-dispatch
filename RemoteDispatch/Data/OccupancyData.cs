@@ -219,6 +219,8 @@ namespace DvMod.RemoteDispatch
 
         private static void EnsureTrackCache()
         {
+            if (_trackByIdCache != null)
+                return;
             var allTracks = UnityEngine.Object.FindObjectsOfType<RailTrack>();
             _trackByIdCache = new Dictionary<string, RailTrack>();
             _endpointAdjCache = new Dictionary<string, List<(string trackId, bool atStart)>>();

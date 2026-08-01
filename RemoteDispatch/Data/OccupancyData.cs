@@ -293,13 +293,30 @@ namespace DvMod.RemoteDispatch
 
             foreach (var (junctionId, port, junctionIndex, isOwnSwitch) in entries)
             {
-                if (isOwnSwitch)
-                    continue;
-
                 if (junctionIndex < 0 || junctionIndex >= junctionStates.Length)
                     continue;
 
                 var junction = RailTrackRegistry.Instance.OrderedJunctions[junctionIndex];
+
+                if (isOwnSwitch)
+                {
+                    if (junction.inBranch?.track != null)
+                    {
+                        string tid;
+                        try { tid = junction.inBranch.track.LogicTrack().ID.ToString(); }
+                        catch { continue; }
+                        trackIds.Add(tid);
+                    }
+                    foreach (var b in junction.outBranches)
+                    {
+                        if (b?.track == null) continue;
+                        string tid;
+                        try { tid = b.track.LogicTrack().ID.ToString(); }
+                        catch { continue; }
+                        trackIds.Add(tid);
+                    }
+                    continue;
+                }
 
                 if (port == "common")
                 {

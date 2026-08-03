@@ -298,26 +298,6 @@ namespace DvMod.RemoteDispatch
 
                 var junction = RailTrackRegistry.Instance.OrderedJunctions[junctionIndex];
 
-                if (isOwnSwitch)
-                {
-                    if (junction.inBranch?.track != null)
-                    {
-                        string tid;
-                        try { tid = junction.inBranch.track.LogicTrack().ID.ToString(); }
-                        catch { continue; }
-                        trackIds.Add(tid);
-                    }
-                    foreach (var b in junction.outBranches)
-                    {
-                        if (b?.track == null) continue;
-                        string tid;
-                        try { tid = b.track.LogicTrack().ID.ToString(); }
-                        catch { continue; }
-                        trackIds.Add(tid);
-                    }
-                    continue;
-                }
-
                 if (port == "common")
                 {
                     if (junction.inBranch?.track != null)
@@ -340,7 +320,6 @@ namespace DvMod.RemoteDispatch
                             string tid;
                             try { tid = b.track.LogicTrack().ID.ToString(); }
                             catch { continue; }
-                            trackIds.Add(tid);
                             walkSeeds.Add((tid, !b.first));
                         }
                     }
@@ -439,6 +418,18 @@ namespace DvMod.RemoteDispatch
                     continue;
                 }
 
+                bool isOwnSwitch = false;
+                foreach (var e in entries)
+                {
+                    if (e.isOwnSwitch) { isOwnSwitch = true; break; }
+                }
+
+                if (isOwnSwitch)
+                {
+                    result[blockId] = CheckSwitchOccupied(entries, junctionStates);
+                    continue;
+                }
+
                 var trackIds = CollectTracksForBlock(entries, junctionStates);
 
                 if (trackIds.Count == 0)
@@ -464,6 +455,32 @@ namespace DvMod.RemoteDispatch
             }
 
             _currentOccupancy = result;
+        }
+
+        private static bool? CheckSwitchOccupied(
+            List<(string junctionId, string port, int junctionIndex, bool isOwnSwitch)> entries,
+            byte[] junctionStates)
+        {
+            bool foundAny = false;
+
+            foreach (var entry in entries)
+            {
+                if (!entry.isOwnSwitch) continue;
+                if (entry.junctionIndex < 0 || entry.junctionIndex >= junctionStates.Length)
+                    continue;
+
+                var junction = RailTrackRegistry.Instance.OrderedJunctions[entry.junctionIndex];
+
+                foreach (var b in junction.outBranches)
+                {
+                    if (b?.track == null) continue;
+                    foundAny = true;
+                    if (SignalsShim.IsTrackOccupied(b.track))
+                        return true;
+                }
+            }
+
+            return foundAny ? false : (bool?)null;
         }
 
         public static Dictionary<string, bool?> GetOccupancyData()

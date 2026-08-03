@@ -140,11 +140,11 @@ const PathingController = {
                     const branch = inPort === 'common' && outPort === 'left' ? 0 :
                         inPort === 'common' && outPort === 'right' ? 1 :
                         outPort === 'common' && inPort === 'left' ? 0 :
-                        outPort === 'common' && inPort === 'right' ? 1 :
-                        inPort === 'left' && outPort === 'right' ? 1 :
-                        inPort === 'right' && outPort === 'left' ? 0 : null;
+                        outPort === 'common' && inPort === 'right' ? 1 : null;
                     if (branch !== null)
                         switchAssignments[blockId] = branch;
+                    else
+                        return null;
                 }
                 return { blocks: path, switchAssignments };
             }
@@ -268,6 +268,11 @@ const PathingController = {
         this._hoverTimer = setTimeout(() => {
             this._hoverTimer = null;
             const result = this.computeBlockPath(this.startBlockId, blockId);
+            const oldBlocks = this.currentPathBlocks;
+            this.currentPathBlocks = [];
+            this.currentPathSwitchAssignments = {};
+            if (oldBlocks.length > 0)
+                this._updateSegmentColors(oldBlocks);
             if (result && result.blocks.length > 0) {
                 this.currentPathBlocks = result.blocks;
                 this.currentPathSwitchAssignments = result.switchAssignments;
@@ -282,13 +287,6 @@ const PathingController = {
         if (this._hoverTimer) {
             clearTimeout(this._hoverTimer);
             this._hoverTimer = null;
-        }
-        if (this.state !== 'selectingDest') return;
-        if (this.currentPathBlocks.length > 0) {
-            const oldBlocks = this.currentPathBlocks;
-            this.currentPathBlocks = [];
-            this.currentPathSwitchAssignments = {};
-            this._updateSegmentColors(oldBlocks);
         }
     },
 

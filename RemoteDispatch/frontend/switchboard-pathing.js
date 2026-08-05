@@ -12,6 +12,7 @@ const PathingController = {
     _hoverBlockId: null,
     _hoverTimer: null,
     _needsRerender: false,
+    _serverActive: false,
 
     MODE_YELLOW: '#ffdd44',
     MODE_BLUE: '#4488ff',
@@ -502,6 +503,20 @@ const PathingController = {
                 this.rerender();
                 this.updateStatus('Click an occupied block to start, then a destination block.');
             });
+        this._activateIfNeeded();
+    },
+
+    enableFromMapping() {
+        if (!this.enabled) return;
+        // Mapping has now been built (switchboard opened), so re-arm the block
+        // graph and send the real activation if it hasn't reached the server yet.
+        this.buildBlockGraph();
+        this._activateIfNeeded();
+    },
+
+    _activateIfNeeded() {
+        if (this._serverActive) return;
+        if (!SwitchboardMapper.mapping || SwitchboardMapper.mapping.size === 0) return;
         this._activateWithRetry();
     },
 
@@ -510,8 +525,12 @@ const PathingController = {
         if (attempts > 20) { console.warn('[Pathing] Activation failed'); return; }
         fetch(new URL('/pathing/activate', location), { method: 'POST' })
             .then(resp => {
-                if (resp.ok) console.log('[Pathing] Activation sent');
-                else if (resp.status === 403) console.warn('[Pathing] No permission');
+                if (resp.ok) {
+                    this._serverActive = true;
+                    console.log('[Pathing] Activation sent');
+                } else if (resp.status === 403) {
+                    console.warn('[Pathing] No permission');
+                }
             })
             .catch(() => {
                 setTimeout(() => this._activateWithRetry(attempts + 1), 1000);
@@ -523,6 +542,8 @@ const PathingController = {
         this.enabled = false;
         this._detachKeyHandler();
         this._resetSelection();
+        this.lockedPaths = [];
+        this._serverActive = false;
         this.rerender();
         this.updateStatus('disabled');
     },

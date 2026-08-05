@@ -1220,9 +1220,6 @@ switchboardToggleBtn.addEventListener('click', () => {
 			setTimeout(() => switchboardMap.invalidateSize(), 50);
 		}
 	} else {
-		if (typeof PathingController !== 'undefined') {
-			PathingController.disable();
-		}
 		if (typeof map !== 'undefined') {
 			setTimeout(() => map.invalidateSize(), 50);
 		}
@@ -1959,10 +1956,8 @@ async function buildSwitchMapping(enablePathing) {
 			switchboardRenderer.rerenderAllSegments();
 		}
 
-		if (enablePathing && typeof PathingController !== 'undefined') {
-			PathingController.enable();
-		} else if (typeof PathingController !== 'undefined') {
-			PathingController.disable();
+		if (typeof PathingController !== 'undefined') {
+			PathingController.enableFromMapping();
 		}
 	} catch (e) {
 		console.error('Failed to build switch mapping:', e);

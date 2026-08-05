@@ -1,16 +1,16 @@
-# Remote Dispatch — Current State
+# Remote Dispatch - Current State
 
 This document describes **what the codebase actually does right now** (the "is"),
-based on the local branch — 48 commits ahead of upstream `trunk` (1.7.0). It is a
+based on the local branch - 50 commits ahead of upstream `trunk` (1.7.0). It is a
 snapshot, not a plan. For intended direction, see `docs/VISION.md` (if present).
 
-- Branch: `trunk`, 48 commits ahead of `origin/trunk` (merge-base `f4c3f21`, "publish 1.7.0")
+- Branch: `trunk`, 50 commits ahead of `origin/trunk` (merge-base `f4c3f21`, "publish 1.7.0")
 - Upstream: https://github.com/domroutley/dv-remote-dispatch
 - Local remotes: `origin` (domroutley), `fork` (rassiMC)
 
 > Breaking up the bigger picture: the stable, released features (cars, players,
 > jobs, junctions, loco control, core signals readout) are inherited from
-> upstream. The 48 local commits are almost entirely **switchboard** work — a
+> upstream. The 48 local commits are almost entirely **switchboard** work - a
 > second-screen dispatch UI with occupancy, signal control, and block-level
 > pathing/staging. That is the part of the codebase that is WIP and poorly
 > documented; this file goes deepest there.
@@ -108,7 +108,7 @@ RemoteDispatch.Signals/     # separate DLL loaded at runtime via reflection
   It is not wired into the mod and is not an embedded resource.
 - Root-level duplicates exist: the same `RD_1.0.4.json`, plus stray
   `DvMod.RemoteDispatch.frontend.RD_1.0.4.json`, track-layout JS/JSON, etc.
-  These are upstream/legacy artifacts — don't confuse them with the embedded
+  These are upstream/legacy artifacts - don't confuse them with the embedded
   frontend.
 - `RemoteDispatch/RemoteDispatch.csproj` embeds the real frontend via
   `frontend.*` fully-qualified resource names.
@@ -134,7 +134,7 @@ Server: `Server/HttpServer.cs` (port from `Main.settings.serverPort`, default
 | `/car`, `/car/{guid}`, `/car/{guid}/control` | GET/POST | CarData/LocoControl | car data, single car, loco command |
 | `/junction`, `/junction/{idx}/toggle` | GET/POST | RailTracks/Junctions | junction list + toggle (permission-gated) |
 | `/track` | GET | RailTracks | track points JSON |
-| `/graph` | GET | RailTracks/Junctions | `BuildTrackGraph()` — junction graph for switchboard mapping |
+| `/graph` | GET | RailTracks/Junctions | `BuildTrackGraph()` - junction graph for switchboard mapping |
 | `/player` | GET | PlayerData | player blips (permission-gated) |
 | `/updates/{sessionId}` | GET | Sessions | long-polling update push |
 | `/signals` | GET | Sessions/SignalsShim | all-signals data (gated by `enableSignals`) |
@@ -152,7 +152,7 @@ Unknown paths return 404. Large POST bodies capped at 512 KiB; GET responses
 
 ## 4. Data flow detail
 
-### 4.1 Occupancy (`Data/OccupancyData.cs`) — the core new feature
+### 4.1 Occupancy (`Data/OccupancyData.cs`) - the core new feature
 Two modes, frontend-controlled:
 
 - **Direct mode** (default, `OccupancyMode.Direct = 1`): uses the Signals API
@@ -188,7 +188,7 @@ RemoteDispatch (Shims/SignalsShim)
   callbacks that push `Sessions.AddTag("signals")` on aspect/mode changes.
 - `Bootstrap.cs` is the small static API surface; `SignalsBridge.cs` does the
   real work: subscribe to `SignalsAPI.Loaded/Unloaded`, forward
-  `SignalAspectChanged`/`SignalModeChanged`, and — importantly — **force-update
+  `SignalAspectChanged`/`SignalModeChanged`, and - importantly - **force-update
   all signal aspects** before every read (`ForceUpdateAllSignalAspects`,
   throttled to 5s), so aspects are evaluated even far from the player. The
   initial `ForceUpdateAllSignals(bool)` API is preferred; a reflection
@@ -209,14 +209,14 @@ junction by **spatial proximity** (25f threshold) to its outBranch tracks, so
 branch-entry ("In") signals can be attributed to a junction.
 
 ### 4.4 Pathing & staging (backend)
-- `PathingData` — in-memory `List<JObject>` of "path" entries. Each path has:
+- `PathingData` - in-memory `List<JObject>` of "path" entries. Each path has:
   `id` (`p{n}`), `blocks` (`JArray` of block ids), `startBlock`, `destBlock`,
   `switchAssignments` (blockId → branch 0/1), `signalIds`, `blockSignals`
   (blockId → signal id), plus `lookAhead`. Paths are visible to the frontend
   via `/path` GET and enriched with per-block `blockStates` from `StagingData`.
   CRUD: `AddPath`, `RemovePath`, `UpdatePath`, `RemovePrefixFromPath`,
   `RemovePathFromStoredList`, `ClearPaths`.
-- `StagingData` — the **route-claim engine**. Models each path's progress as
+- `StagingData` - the **route-claim engine**. Models each path's progress as
   `PathStaging { blocks[], currentBlockIndex, lookAhead, status }` and keeps
   per-block FIFO queues (`_blockQueues`) plus `_activeBlocks` (blockId →
   claiming pathId). `Process()` runs every 0.5s while pathing is enabled:
@@ -231,10 +231,16 @@ branch-entry ("In") signals can be attributed to a junction.
   "advance" button (`POST /path/{id}/advance`).
   States exposed per block: `occupied`, `claimed`, `waiting`, `unclaimed`,
   `completed`.
-- `PathingActivation` — `ActivatePathingMode()` sweeps all signals: any with a
+- `PathingActivation` - `ActivatePathingMode()` sweeps all signals: any with a
   junction the pathing mapping detected go **Manual+S1** (so the dispatcher is
-  in control), everything else (non-distant) returns to **Automatic**. Also
-  `RevertRouteSignals` / `ClearRouteSignals` helpers for path teardown.
+  in control), everything else (non-distant) returns to **Automatic**.
+  `DeactivatePathingMode()` is the clean teardown: it releases staging claims
+  (`StagingData.ClearAll()`, which reverts each claimed block's guard signal to
+  Manual+S1 while stored paths still exist), clears stored paths, then sweeps
+  every non-distant signal back to **Automatic** and pushes a `signals` tag.
+  It is called when the `enablePathing` flag is toggled off (on the main thread)
+  and on mod disable. `RevertRouteSignals` / `ClearRouteSignals` remain as
+  per-path teardown helpers.
 
 ---
 
@@ -255,13 +261,16 @@ and finally `main.js?v=...` (cache-busted with a date).
 | `switchboard-signals.js` | `SwitchboardSignals` | per-switch signal mapping, `VirtualSignal` forward/composition of aspects |
 | `switchboard-occupation.js` | `SwitchboardOccupancy` | occupancy mode (direct/hardcore) → POST `/occupancy` |
 | `switchboard-pathing.js` | `PathingController` | interactive path select + A*-style block routing on frontend, then POST `/path`; displays locked paths, block chips, advance/delete; colours claimed/waiting blocks |
-| `main.js` | — | map set-up, sidebar tabs, jobs/cars tables, and switchboard bootstrap (`initSwitchboard`, `loadSampleTrackData`, `buildSwitchMapping`, `sendBlockOccupancyMapping`) |
+| `main.js` | - | map set-up, sidebar tabs, jobs/cars tables, and switchboard bootstrap (`initSwitchboard`, `loadSampleTrackData`, `buildSwitchMapping`, `sendBlockOccupancyMapping`) |
 
 ### Switchboard view
 - Toggled via **"Show Switchboard"** button → toggles `body.switchboard-active`
-  and `#switchboard-view`; the map pane is swapped.
+  and `#switchboard-view`; the map pane is swapped. The toggle is a purely
+  cosmetic view swap - it keeps active pathing running in the background,
+  still syncing `blockStates` and rendering to the hidden switchboard map, so
+  returning to the board shows up-to-date paths.
 - `#switchboard-map` uses `L.CRS.Simple` with
-  `TrackRenderer.coordsToLatLng(x, y) = L.latLng(y, x)` — i.e. switchboard
+  `TrackRenderer.coordsToLatLng(x, y) = L.latLng(y, x)` - i.e. switchboard
   "x/y" are treated as lng/lat directly (no fancy geographic projection).
 - `loadSampleTrackData()` fetches `/modconfig` to learn `doubleTrack` +
   `enablePathing`, then loads the static layout JSON
@@ -284,6 +293,11 @@ and finally `main.js?v=...` (cache-busted with a date).
   seeding; the frontend keeps server-side `blockStates` in sync via
   `syncFromServer`, rendering claimed (green), waiting (yellow), occupied
   (red) segments + switch rims.
+- `PathingController` is armed by the `enablePathing` flag via the `modconfig`
+  tag (not by the view toggle). Activation (`POST /pathing/activate`) is only
+  sent once a real switch→junction mapping exists; if the flag is on before the
+  switchboard is ever opened, `enableFromMapping()` fires the activation as soon
+  as the board builds its mapping.
 - The sidebar `#pathList` renders each locked path with block chips, a
   print-to-console button, a delete button, and a ▶**advance** button (backed
   by `/path/{id}/advance`).
@@ -326,19 +340,19 @@ Derived from reading the code; not a plan. The most fragile points:
    coordinate-based ground truth, so unmapped switches/junctions can still
    occur.
 3. **Static switchboard layouts** are baked JSON files (`RD_1.0.4/1.0.7/1.0.8`,
-   `DoubbleTrack1.0_1.4.3`) — the board itself is *not* derived from the live
+   `DoubbleTrack1.0_1.4.3`) - the board itself is *not* derived from the live
    game; only switch/when mapping and occupancy are live. Layout edits require
    re-exporting these files, and `loadSampleTrackData` is hardcoded to those
    two filenames.
 4. **No tests.** Everything above is unverified by automated tests.
 5. **Force-update hacks** in `SignalsBridge` depend on Signals internal types
-   via reflection (`Signals.Game.SignalManager`, `BasicSignalController`) —
+   via reflection (`Signals.Game.SignalManager`, `BasicSignalController`) -
    brittle across Signals versions.
 6. **Multi-threading**: `StagingData`/`OccupancyData` are touched from the HTTP
    thread and the main-thread coroutines; the code uses locks + `RunOnMainThread`
    to stay safe, but the boundaries are easy to break.
 7. `OccupancyData` direct-mode caches track geometry once at startup
-   (`EnsureTrackCache`) — if the world changes (scene load), stale cache can
+   (`EnsureTrackCache`) - if the world changes (scene load), stale cache can
    persist; `ClearMapping` exists on teardown only.
 
 ### Release blockers (per maintainer, April 2026)
@@ -348,19 +362,21 @@ they are fair game for agent help:
 
 1. **One in-game junction breaks the switch mapping** on *both* the single-track
    and DoubleTrack layouts (a station's mapping is wrong in both versions).
-   Owner: maintainer — must fix personally, and must be done before release.
+   Owner: maintainer - must fix personally, and must be done before release.
 2. **Block colouring mismatch**: what the maintainer *wants* the block colours
    to mean differs from what the code currently renders. Must be resolved
    before release.
-3. Disabling pathing is not cleanly supported, and
-4. **switching between the map and the switchboard view breaks pathing** (the
-   toggle tears down / resets path state). Both must be fixed before release.
-5. **Path conflicts**: multi-train handling has no complete solution. For the
+3. **Path conflicts**: multi-train handling has no complete solution. For the
    upcoming release the plan is to *prevent* conflicts outright rather than
    resolve them live, to avoid issues.
-6. A **new DoubleTrack mod version** is planned; it will need a new
+4. A **new DoubleTrack mod version** is planned; it will need a new
    switchboard layout, but work can only start once the scope of that release
    is known (coordinated with the maintainer).
+
+> Resolved: pathing disable/re-enable is now a clean operation
+> (`PathingActivation.DeactivatePathingMode()`), and the map ⇄ switchboard view
+> toggle no longer tears down active pathing - it keeps running in the
+> background. Corresponding VISION blockers removed.
 
 Softer / held: full UI polish is WIP but not blocking; Hardcore occupancy is
 disabled and not blocking; everything else is on hold.

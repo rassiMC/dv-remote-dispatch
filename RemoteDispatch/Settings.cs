@@ -234,6 +234,10 @@ namespace DvMod.RemoteDispatch
 
             if (enablePathing != _prevPathing || enableSignals != _prevSignals)
             {
+                if (enablePathing == false && _prevPathing == true)
+                {
+                    PathingActivation.DeactivatePathingMode();
+                }
                 _prevSignals = enableSignals;
                 _prevPathing = enablePathing;
                 Sessions.AddTag("modconfig");

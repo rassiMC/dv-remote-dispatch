@@ -57,6 +57,52 @@ namespace DvMod.RemoteDispatch
             Main.Log($"PathingActivation: {detectedCount} detected -> Manual+S1, {undetectedCount} undetected -> Automatic, {distantSkipped} distant skipped");
         }
 
+        public static void DeactivatePathingMode()
+        {
+            Main.Log("PathingActivation: Deactivating pathing mode...");
+
+            // Release claims first while stored paths still exist so SetSignalToStop
+            // can resolve each block's guard signal back to Manual+S1.
+            StagingData.ClearAll();
+            PathingData.ClearPaths();
+            SweepSignalsToAutomatic();
+        }
+
+        private static void SweepSignalsToAutomatic()
+        {
+            var allSignalsData = SignalsShim.GetAllSignalsData();
+            if (allSignalsData == null)
+                return;
+
+            var signalsObj = allSignalsData as JObject;
+            if (signalsObj == null)
+                return;
+
+            int restoredCount = 0;
+            int distantSkipped = 0;
+
+            foreach (var prop in signalsObj.Properties())
+            {
+                var signalId = prop.Name;
+                var signalData = prop.Value as JObject;
+                if (signalData == null) continue;
+
+                var type = signalData["Type"]?.ToString() ?? "";
+                if (type == "Distant")
+                {
+                    distantSkipped++;
+                    continue;
+                }
+
+                Main.DebugLog($"PathingActivation: Restoring signal {signalId} to Automatic");
+                SignalsShim.SetSignalMode(signalId, "Automatic");
+                restoredCount++;
+            }
+
+            Main.Log($"PathingActivation: {restoredCount} signals restored to Automatic, {distantSkipped} distant skipped");
+            Sessions.AddTag("signals");
+        }
+
         public static void ClearRouteSignals(List<string> signalIds)
         {
             int count = 0;

@@ -10,11 +10,11 @@ This is a C# UnityModManager mod for Derail Valley that provides remote dispatch
 > The solution is `RemoteDispatch.sln`.
 
 ## Docs
-- `docs/CURRENT-STATE.md` — **what the code does right now**: architecture, HTTP surface, occupancy/pathing/signals data flow, frontend switchboard modules, and known WIP/rough edges. Read this first.
-- `docs/VISION.md` — (target document) where the project is heading: intended switchboard/pathing experience and feature goals. Read this before planning work.
-- `docs/RELEASE_PROCESS.md` — release workflow steps.
+- `docs/CURRENT-STATE.md` - **what the code does right now**: architecture, HTTP surface, occupancy/pathing/signals data flow, frontend switchboard modules, and known WIP/rough edges. Read this first.
+- `docs/VISION.md` - (target document) where the project is heading: intended switchboard/pathing experience and feature goals. Read this before planning work.
+- `docs/RELEASE_PROCESS.md` - release workflow steps.
 
-The local branch is ~48 commits ahead of upstream trunk (1.7.0); the added work is the switchboard feature (occupancy, signal control, block-level pathing/staging).
+The local branch is ~50 commits ahead of upstream trunk (1.7.0); the added work is the switchboard feature (occupancy, signal control, block-level pathing/staging).
 
 ## File Descriptions
 

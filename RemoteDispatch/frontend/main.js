@@ -1874,7 +1874,7 @@ function loadSampleTrackData() {
 		.then(resp => resp.json())
 		.then(config => {
 			enablePathing = config.enablePathing ?? false;
-			const trackFile = config.doubleTrack ? 'DoubbleTrack1.0_1.4.3.json' : 'RD_1.0.8.json';
+			const trackFile = config.doubleTrack ? 'DT_2.1-hotfix.json' : 'ST_2.1-hotfix.json';
 			console.log(`Loading track data: ${trackFile} (DoubleTrack: ${config.doubleTrack ?? false})`);
 			return fetch(`res/${trackFile}`);
 		})

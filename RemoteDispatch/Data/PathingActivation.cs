@@ -55,6 +55,7 @@ namespace DvMod.RemoteDispatch
             }
 
             Main.Log($"PathingActivation: {detectedCount} detected -> Manual+S1, {undetectedCount} undetected -> Automatic, {distantSkipped} distant skipped");
+            Sessions.AddTag("signals");
         }
 
         public static void DeactivatePathingMode()

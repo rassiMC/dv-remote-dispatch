@@ -242,6 +242,11 @@ branch-entry ("In") signals can be attributed to a junction.
 - `PathingActivation` - `ActivatePathingMode()` sweeps all signals: any with a
   junction the pathing mapping detected go **Manual+S1** (so the dispatcher is
   in control), everything else (non-distant) returns to **Automatic**.
+  (Turning undetected signals - e.g. the #ROAD yard signals - fully **off**
+  via `SignalsAPI.TurnOffSignal` was considered but dropped: the API leaves
+  `Operation` in Automatic, so the next update re-lights them into a manual
+  S1c "Expect caution + dispatch control lamp" state. Needs a Signals mod fix
+  first; see §7.)
   `DeactivatePathingMode()` is the clean teardown: it releases staging claims
   (`StagingData.ClearAll()`, which reverts each claimed block's guard signal to
   Manual+S1 while stored paths still exist), clears stored paths, then sweeps
@@ -379,14 +384,20 @@ Derived from reading the code; not a plan. The most fragile points:
    and occupancy are live. Layout edits require re-exporting these files (the
    sources live under `switchboard/data/`), and `loadSampleTrackData` is
    hardcoded to those two filenames.
-4. **No tests.** Everything above is unverified by automated tests.
-5. **Force-update hacks** in `SignalsBridge` depend on Signals internal types
+4. **Turning off undetected signals** (e.g. the #ROAD yard signals) on pathing
+   activation is **deferred for release**: `SignalsAPI.TurnOffSignal` sets
+   `SetMode(Manual)` + `TurnOff()` but leaves the signal's `Operation` as
+   Automatic, so on the next update it re-lights into the manual S1c "Expect
+   caution" + dispatch-control-lamp state. Requires a Signals mod fix (set
+   `SignalOperationMode.FullManual` inside `TurnOffSignal`); see §4.4.
+5. **No tests.** Everything above is unverified by automated tests.
+6. **Force-update hacks** in `SignalsBridge` depend on Signals internal types
    via reflection (`Signals.Game.SignalManager`, `BasicSignalController`) -
    brittle across Signals versions.
-6. **Multi-threading**: `StagingData`/`OccupancyData` are touched from the HTTP
+7. **Multi-threading**: `StagingData`/`OccupancyData` are touched from the HTTP
    thread and the main-thread coroutines; the code uses locks + `RunOnMainThread`
    to stay safe, but the boundaries are easy to break.
-7. `OccupancyData` direct-mode caches track geometry once at startup
+8. `OccupancyData` direct-mode caches track geometry once at startup
    (`EnsureTrackCache`) - if the world changes (scene load), stale cache can
    persist; `ClearMapping` exists on teardown only.
 

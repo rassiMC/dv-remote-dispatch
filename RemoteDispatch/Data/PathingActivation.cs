@@ -10,6 +10,7 @@ namespace DvMod.RemoteDispatch
             Main.Log("PathingActivation: Activating pathing mode...");
 
             var detectedJunctionIds = OccupancyData.GetDetectedJunctionIds();
+            bool hasMapping = detectedJunctionIds.Count > 0;
 
             var allSignalsData = SignalsShim.GetAllSignalsData();
             if (allSignalsData == null)
@@ -41,10 +42,10 @@ namespace DvMod.RemoteDispatch
                     SignalsShim.SetSignalAspect(signalId, "S1");
                     detectedCount++;
                 }
-                else if (!isDistant)
+                else if (hasMapping && !isDistant)
                 {
-                    Main.DebugLog($"PathingActivation: Undetected signal {signalId} - turning off");
-                    SignalsShim.TurnOffSignal(signalId);
+                    Main.DebugLog($"PathingActivation: Undetected signal {signalId} - releasing to automatic");
+                    SignalsShim.SetSignalMode(signalId, "Automatic");
                     undetectedCount++;
                 }
                 else
@@ -53,7 +54,7 @@ namespace DvMod.RemoteDispatch
                 }
             }
 
-            Main.Log($"PathingActivation: {detectedCount} detected -> Manual+S1, {undetectedCount} undetected -> off, {distantSkipped} distant skipped");
+            Main.Log($"PathingActivation: {detectedCount} detected -> Manual+S1, {undetectedCount} undetected -> Automatic, {distantSkipped} distant skipped");
             Sessions.AddTag("signals");
         }
 

@@ -19,7 +19,6 @@ namespace DvMod.RemoteDispatch
 		// Cache reflection info to avoid recompiling every call
 		private static MethodInfo? _setSignalModeMethod;
 		private static MethodInfo? _isTrackOccupiedMethod;
-		private static MethodInfo? _turnOffSignalMethod;
 
 		internal static bool IsInitialized { get; private set; }
 
@@ -228,7 +227,6 @@ namespace DvMod.RemoteDispatch
 			// Signals.API → RemoteDispatch.Signals (bridge logic) → RemoteDispatch.Shims (reflection wrapper)
 			_setSignalModeMethod = bootstrap.GetMethod("SetSignalMode", BindingFlags.Public | BindingFlags.Static);
 			_isTrackOccupiedMethod = bootstrap.GetMethod("IsTrackOccupied", BindingFlags.Public | BindingFlags.Static);
-			_turnOffSignalMethod = bootstrap.GetMethod("TurnOffSignal", BindingFlags.Public | BindingFlags.Static);
 
 				initMethod?.Invoke(null, new object[]
 				{
@@ -343,14 +341,6 @@ namespace DvMod.RemoteDispatch
 		// Returns true on success, false on failure or 404 from API side.
 		internal static bool SetSignalMode(string signalId, string mode) =>
 			_setSignalModeMethod?.Invoke(null, new object[] { SignalsShimHelpers.StripSignalPrefix(signalId), mode }) is true;
-
-		/// <summary>
-		/// Wrapper to expose Signals.API's TurnOffSignal through reflection.
-		/// Turns the signal off (no aspect displayed) and switches it to Manual mode.
-		/// Returns true on success, false on failure.
-		/// </summary>
-		internal static bool TurnOffSignal(string signalId) =>
-			_turnOffSignalMethod?.Invoke(null, new object[] { SignalsShimHelpers.StripSignalPrefix(signalId) }) is true;
 
 		/// <summary>
 		/// Checks whether the given RailTrack has any trains physically on it.

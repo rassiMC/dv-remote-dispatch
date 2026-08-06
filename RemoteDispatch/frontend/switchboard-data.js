@@ -295,6 +295,21 @@ const TrackData = {
     },
 
     findAdjacentSwitch(startNodeId, visitedNodeIds, callerSwitchId) {
+        const found = this.findAdjacentSwitchInternal(startNodeId, visitedNodeIds, callerSwitchId);
+        if (!found) return null;
+        // Determine which node of the target switch was entered so ports stay
+        // distinct at crossovers where two switches share the same node.
+        const targetSwitch = this.getSegment(found.switchId);
+        if (!targetSwitch) return { switchId: found.switchId, viaNodeId: found.viaNodeId, entryNodeId: null };
+        const enteredNode = found.viaNodeId;
+        let entryPort = null;
+        if (enteredNode === targetSwitch.merging) entryPort = 'merging';
+        else if (enteredNode === targetSwitch.nl) entryPort = 'nl';
+        else if (enteredNode === targetSwitch.nr) entryPort = 'nr';
+        return { switchId: found.switchId, viaNodeId: found.viaNodeId, entryNodeId: enteredNode, entryPort };
+    },
+
+    findAdjacentSwitchInternal(startNodeId, visitedNodeIds, callerSwitchId) {
         const segsAtStart = this.getSegmentsForNode(startNodeId);
         for (const seg of segsAtStart) {
             if (seg.type === 'switch' && seg.id !== callerSwitchId && this.getSwitchNodes(seg).includes(startNodeId)) {
@@ -318,7 +333,7 @@ const TrackData = {
                 }
             }
 
-            const found = this.findAdjacentSwitch(otherNode, visitedNodeIds, callerSwitchId);
+            const found = this.findAdjacentSwitchInternal(otherNode, visitedNodeIds, callerSwitchId);
             if (found) return found;
         }
         return null;
@@ -344,6 +359,8 @@ const TrackData = {
                     neighbors.push({
                         switchId: result.switchId,
                         viaNodeId: result.viaNodeId,
+                        entryNodeId: result.entryNodeId ?? null,
+                        entryPort: result.entryPort ?? null,
                         fromNodeId: nodeId,
                         port: port
                     });

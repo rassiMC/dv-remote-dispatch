@@ -7,15 +7,7 @@ const SwitchboardMapper = {
         // Format: junctionIndex: { neighbors, addNeighbors, commonNeighbor, leftNeighbor, rightNeighbor, degree }
         // 'neighbors' replaces the full array. 'addNeighbors' merges into existing (no duplicates).
         // Only include fields you want to override.
-        539: { neighbors: [540, 541, 542], commonNeighbor: 542, leftNeighbor: 540, rightNeighbor: 541, degree: 3 },
-        540: { addNeighbors: [539, 541], leftNeighbor: 541, rightNeighbor: 539 },
-        541: { addNeighbors: [540, 549], leftNeighbor: 549, rightNeighbor: 540 },
-        542: { addNeighbors: [539], commonNeighbor: 539 },
-        404: { neighbors: [403, 370, 18], commonNeighbor: 18, leftNeighbor: 403, rightNeighbor: 370, degree: 3 },
-        403: { addNeighbors: [404], commonNeighbor: 404 },
-        18: { addNeighbors: [404], commonNeighbor: 404 },
-        370: { addNeighbors: [404], leftNeighbor: 404 },
-        125: { neighbors: [121, 123], leftNeighbor: 123, rightNeighbor: 121 },
+        // Empty: the /graph endpoint now produces correct topology for all junctions.
     },
 
     async fetchIngameGraph() {
@@ -103,50 +95,106 @@ const SwitchboardMapper = {
             return pa - pb;
         });
 
+        // Pass 1: strict port matches. Resolve every neighbor that has an
+        // available port target. When a strict port target is already claimed
+        // by a non-reciprocal switch, prefer the reciprocal crossover edge and
+        // evict the imposter. No degree-based fallback is used: it would
+        // reclaim evicted junctions and swap the crossover's two legs back.
+        const strictMatches = [];
+        const evictTargets = [];
         for (const sbNeighbor of sorted) {
             if (sbNeighbor.switchId === undefined) continue;
             if (usedThisRound.has(sbNeighbor.switchId)) continue;
 
-            const sbData = this.switchboardGraph.get(sbNeighbor.switchId);
-            if (!sbData) continue;
-
             const port = sbNeighbor.port || 'unknown';
-            let matchedIngameIdx = null;
-
             const portTarget = portToIngameNeighbor(port);
-            if (portTarget !== null && unmatchedIngame.includes(portTarget)) {
-                matchedIngameIdx = portTarget;
-            }
+            if (portTarget === null) continue;
 
-            if (matchedIngameIdx === null) {
-                let bestScore = -1;
-                for (const ingameIdx of unmatchedIngame) {
-                    const candidateData = this.ingameGraph.get(ingameIdx);
-                    if (!candidateData) continue;
-                    if (candidateData.degree === sbData.degree) {
-                        matchedIngameIdx = ingameIdx;
-                        break;
-                    }
-                    const score = 1.0 / (1 + Math.abs(candidateData.degree - sbData.degree));
-                    if (score > bestScore) {
-                        bestScore = score;
-                        matchedIngameIdx = ingameIdx;
-                    }
+            if (unmatchedIngame.includes(portTarget)) {
+                strictMatches.push({ sbNeighbor, portTarget });
+            } else {
+                // The port target is claimed by a switch already in the walk.
+                // Find the imposter (owner of portTarget) and check whether the
+                // reciprocal edge through it is genuine; if so, prefer it.
+                let imposter = null;
+                for (const [ownerId, j] of this.mapping) {
+                    if (j === portTarget) { imposter = ownerId; break; }
                 }
-            }
-
-            if (matchedIngameIdx !== null) {
-                matches.push({
-                    sbSwitchId: sbNeighbor.switchId,
-                    ingameJunctionIndex: matchedIngameIdx,
-                    port: port
-                });
-                unmatchedIngame.splice(unmatchedIngame.indexOf(matchedIngameIdx), 1);
-                usedThisRound.add(sbNeighbor.switchId);
+                if (imposter && imposter !== sbNeighbor.switchId &&
+                    this.isReciprocalEdge(sbNeighbor.switchId, portTarget, this.mapping)) {
+                    evictTargets.push({ sbNeighbor, portTarget, imposter });
+                }
             }
         }
 
+        for (const { sbNeighbor, portTarget } of strictMatches) {
+            matches.push({
+                sbSwitchId: sbNeighbor.switchId,
+                ingameJunctionIndex: portTarget,
+                port: sbNeighbor.port || 'unknown'
+            });
+            unmatchedIngame.splice(unmatchedIngame.indexOf(portTarget), 1);
+            usedThisRound.add(sbNeighbor.switchId);
+        }
+
+        // Handle reciprocal evictions: the imposter loses its junction, which
+        // becomes free for the reciprocal crossover edge.
+        for (const { sbNeighbor, portTarget, imposter } of evictTargets) {
+            if (usedThisRound.has(sbNeighbor.switchId)) continue;
+            matches.push({
+                sbSwitchId: sbNeighbor.switchId,
+                ingameJunctionIndex: portTarget,
+                port: sbNeighbor.port || 'unknown',
+                evict: { sbSwitchId: imposter, ingameJunctionIndex: portTarget }
+            });
+            if (unmatchedIngame.includes(portTarget)) unmatchedIngame.splice(unmatchedIngame.indexOf(portTarget), 1);
+            usedThisRound.add(sbNeighbor.switchId);
+        }
+
+        // No degree/score fallback: when a strict port target was unavailable,
+        // reciprocal crossover evictions resolve the right assignment. A blind
+        // degree match would otherwise reclaim evicted junctions and swap the
+        // crossover's two legs back.
         return matches;
+    },
+
+    // True if `sbId` is genuinely adjacent to the switch that currently owns
+        // `portTarget` in `mapping` (the walk's in-progress assignment). Used to
+        // prefer reciprocal crossover edges over non-reciprocal "closer" claims.
+    isReciprocalEdge(sbId, portTarget, mapping) {
+        let targetOwner = null;
+        for (const [ownerId, j] of mapping) {
+            if (j === portTarget) { targetOwner = ownerId; break; }
+        }
+        if (!targetOwner || targetOwner === sbId) return false;
+        const sbData = this.switchboardGraph.get(sbId);
+        if (!sbData) return false;
+        return sbData.neighbors.some(n => n.switchId === targetOwner);
+    },
+
+    // every mapped(n) must be a mutual neighbor of mapped(m). A violation here
+        // means at least one of the two mapped switches is assigned to the wrong
+        // junction (or the ingame graph is missing/linking that edge).
+    validateMapping() {
+        if (!this.mapping || !this.switchboardGraph || !this.ingameGraph) return [];
+        const violations = [];
+        for (const [sbId, jIdx] of this.mapping) {
+            const sbData = this.switchboardGraph.get(sbId);
+            if (!sbData) continue;
+            for (const nbr of sbData.neighbors) {
+                const nbrJ = this.mapping.get(nbr.switchId);
+                if (nbrJ === undefined || nbrJ === jIdx) continue;
+                const jData = this.ingameGraph.get(jIdx);
+                const nbrData = this.ingameGraph.get(nbrJ);
+                if (!jData || !nbrData) continue;
+                const forward = jData.neighbors.includes(nbrJ);
+                const backward = nbrData.neighbors.includes(jIdx);
+                if (!forward || !backward) {
+                    violations.push({ sbId, jIdx, nbrSwitchId: nbr.switchId, nbrJ, port: nbr.port || 'unknown', forward, backward });
+                }
+            }
+        }
+        return violations;
     },
 
     runParallelWalk(anchorSbId, anchorIngameIdx) {
@@ -157,6 +205,7 @@ const SwitchboardMapper = {
 
         const mapping = new Map();
         mapping.set(anchorSbId, anchorIngameIdx);
+        this.mapping = mapping;
 
         const usedIngame = new Set([anchorIngameIdx]);
         const queue = [{sbId: anchorSbId, ingameIdx: anchorIngameIdx}];
@@ -176,6 +225,15 @@ const SwitchboardMapper = {
             const matches = this.findMatches(sbNeighbors, ingameNeighbors, usedIngame, ingameIdx);
 
             for (const match of matches) {
+                if (match.evict) {
+                    // A reciprocal crossover edge wrested this junction from a
+                    // non-reciprocal occupier: unmap the imposter and let the
+                    // walk re-claim it later via its own reciprocal edge.
+                    const imposter = match.evict.sbSwitchId;
+                    mapping.delete(imposter);
+                    visitedSb.delete(imposter);
+                    usedIngame.delete(match.evict.ingameJunctionIndex);
+                }
                 mapping.set(match.sbSwitchId, match.ingameJunctionIndex);
                 visitedSb.add(match.sbSwitchId);
                 usedIngame.add(match.ingameJunctionIndex);
@@ -183,7 +241,6 @@ const SwitchboardMapper = {
             }
         }
 
-        this.mapping = mapping;
         return mapping;
     },
 
@@ -235,6 +292,11 @@ const SwitchboardMapper = {
         }
         if (unmappedIn.length > 0) {
             console.warn(`Unmapped ingame junctions: ${unmappedIn.join(', ')}`);
+        }
+        const violations = this.validateMapping();
+        if (violations.length > 0) {
+            console.warn(`Mapping consistency violations: ${violations.length}`);
+            console.warn(violations.slice(0, 20));
         }
     }
 };

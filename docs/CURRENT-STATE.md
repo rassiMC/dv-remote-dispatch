@@ -205,6 +205,12 @@ time it's requested (cached JSON). Per junction: `junctionIndex`,
 collects every group within the `CONNECTION_THRESHOLD` (1.5f) of a point).
 This graph feeds the frontend's switchboard mapping.
 
+> Note: a stricter "only proximity-link junction-owned endpoints" change to
+> `FindEndpointGroups` was tried and **reverted** - on DoubleTrack it collapsed
+> ~300 junctions to degree 1 and effectively disconnected the graph. The
+> proximity matching in the released code remains the plain
+> within-`CONNECTION_THRESHOLD` version.
+
 `GetInboundSignalMap()` / `BuildInboundSignalMap()` additionally matches
 "orphaned" signals (those the Signals API doesn't tag with `JunctionId`) to a
 junction by **spatial proximity** (25f threshold) to its outBranch tracks, so
@@ -259,7 +265,7 @@ and finally `main.js?v=...` (cache-busted with a date).
 |------|--------|----------------|
 | `switchboard-data.js` | `TrackData` | nodes/segments/blocks data model, JSON load/save (localStorage), block grouping (flood fill), switch adjacency/graph building |
 | `switchboard-renderer.js` | `TrackRenderer` | Leaflet rendering of nodes, segments, switch blocks, signal dots; colouring by occupancy/pathing |
-| `switchboard-mapper.js` | `SwitchboardMapper` | fetch `/graph`, build switchboard graph, `runParallelWalk` to map switchboard switches → ingame junctions, with hardcoded `GRAPH_OVERRIDES` |
+| `switchboard-mapper.js` | `SwitchboardMapper` | fetch `/graph`, build switchboard graph, `runParallelWalk` to map switchboard switches → ingame junctions (strict port matching + reciprocal crossover eviction, no degree fallback) |
 | `switchboard-signals.js` | `SwitchboardSignals` | per-switch signal mapping, `VirtualSignal` forward/composition of aspects |
 | `switchboard-occupation.js` | `SwitchboardOccupancy` | occupancy mode (direct/hardcore) → POST `/occupancy` |
 | `switchboard-pathing.js` | `PathingController` | interactive path select + A*-style block routing on frontend, then POST `/path`; displays locked paths, block chips, advance/delete; colours claimed/waiting blocks |
@@ -282,9 +288,32 @@ and finally `main.js?v=...` (cache-busted with a date).
 - `buildSwitchMapping()` fetches the **live** `/graph`, builds the switchboard
   graph, runs the parallel-walk mapping from a hardcoded anchor
   (`SWITCHBOARD_ANCHOR = { switchboardId: 's1677', ingameJunctionIndex: 0 }`),
-  prints unmapped switches/junctions, sends the block occupancy mapping to
-  `/occupancy`, initializes signals, and enables `PathingController` if
-  `enablePathing`.
+  prints unmapped switches/junctions + mapping-consistency violations, sends the
+  block occupancy mapping to `/occupancy`, initializes signals, and enables
+  `PathingController` if `enablePathing`.
+
+### Switchboard mapping (switch ↔ ingame junction)
+- The switchboard side is built by `TrackData.buildSwitchGraph()` (see
+  `switchboard-data.js`), which walks from each switch port (merging/nl/nr)
+  through connected tracks to its adjacent switch, recording both the *port
+  being left* (`common`/`left`/`right`) and the *node of the target switch that
+  is entered* (`entryNodeId` / `entryPort`: merging/nl/nr).
+- The ingame side comes from the live `/graph` (see §4.3), which carries
+  `commonNeighbor` / `leftNeighbor` / `rightNeighbor` per junction.
+- `SwitchboardMapper.runParallelWalk()` maps the two graphs with a BFS from the
+  anchor. For each visited switch it matches its switchboard neighbors in port
+  order (**strict port match** first: the neighbor's port picks the ingame port
+  target). If that target is already claimed, it checks whether the claimer
+  shares a **reciprocal switchboard edge** with the neighbor being matched
+  (`isReciprocalEdge`); if so, the imposter is **evicted** and the junction is
+  re-assigned to the reciprocal leg. This is what fixes crossover / double-slip
+  pairs (both legs of a switch collapse onto the same distant switch id, and a
+  blind degree fallback would swap the two legs).
+- There is **no degree/score fallback** any more: it re-claimed evicted
+  junctions and re-swapped crossover legs.
+- `GRAPH_OVERRIDES` is now **empty** (all hardcoded junction overrides removed:
+  the old J539–J542, J404/J403/J18/J370, and J125 entries were redundant against
+  the live graph and deleted along with the earlier J26 fix).
 
 ### Pathing UX (frontend)
 - Backed by `PathingController`. Selecting a block: start must be an *occupied*
@@ -336,12 +365,14 @@ Derived from reading the code; not a plan. The most fragile points:
    a WIP gimmick (currently disabled, not needed for release); mapping is done
    (the known J-issue below being the exception); path conflict handling is
    undecided; UI is WIP.
-2. **Frontend mapping is heuristic + hardcoded overrides**: `SwitchboardMapper`
-   needs `GRAPH_OVERRIDES` (e.g. J539–J542, J404/J403/J18/J370, J125) and a
-   hardcoded anchor to map switchboard → ingame switches; there is no
-   coordinate-based ground truth, so unmapped switches/junctions can still
-   occur. The J26/GF issue was resolved by endpoint **proximity matching** in
-   `BuildTrackGraph` (see §4.3); the J26 override was removed.
+2. **Frontend mapping is heuristic + hardcoded anchor**: `SwitchboardMapper`
+   previously leaned on `GRAPH_OVERRIDES` and hardcoded junction overrides; those
+   are now all removed (the graph endpoint produces correct topology). It still
+   relies on a hardcoded anchor (`SWITCHBOARD_ANCHOR` = `s1677` → junction 0) to
+   seed the fit, and there is no coordinate-based ground truth, so mismatches
+   can still occur. The crossover swap bug (two switches on a double-slip
+   getting their legs swapped) was fixed by reciprocal-edge eviction in
+   `findMatches`; see the mapping subsection in §5.
 3. **Static switchboard layouts** are baked JSON files
    (`ST_2.1-hotfix.json` single-track, `DT_2.1-hotfix.json` DoubleTrack) - the
    board itself is *not* derived from the live game; only switch/when mapping
@@ -385,6 +416,17 @@ they are fair game for agent help:
 > coordinate strings, and the J26 `GRAPH_OVERRIDES` entry was removed. The
 > single-track/DoubleTrack switchboard layouts were re-exported as the
 > `ST_2.1-hotfix.json` / `DT_2.1-hotfix.json` files.
+>
+> Resolved: the DoubleTrack crossover swap - on the hotfix layout, at track
+> crossovers/double-slips both legs of a switch collapsed onto the same distant
+> switch id, and the old degree fallback swapped the two legs ("switches on one
+> side correct, the other two swapped"). Fixed by recording the target's entry
+> node (`entryNodeId`/`entryPort` in `buildSwitchGraph`) and replacing the
+> degree fallback with **reciprocal-edge eviction** in `findMatches`, plus
+> removing the now-redundant `GRAPH_OVERRIDES` clusters (J539-542, J404/J403/
+> J18/J370, J125). Mapping went from 619/641 with 23 unmapped junctions to a
+> full 641/641 bijection; the residual inconsistencies are ~11 crossover pairs
+> where the layout genuinely has no counterpart junction in the ingame graph.
 
 Softer / held: full UI polish is WIP but not blocking; Hardcore occupancy is
 disabled and not blocking; everything else is on hold.

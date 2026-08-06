@@ -13,6 +13,7 @@ namespace DvMod.RemoteDispatch.Signals
 		public static string? GetSignalAspect(string signalId) => _bridge?.GetSignalAspect(signalId);
 		public static bool SetSignalAspect(string signalId, string aspect) => _bridge?.SetSignalAspect(signalId, aspect) ?? false;
 		public static bool SetSignalMode(string signalId, string mode) => _bridge?.SetSignalMode(signalId, mode) ?? false;
+		public static bool TurnOffSignal(string signalId) => _bridge?.TurnOffSignal(signalId) ?? false;
 
 		/// <summary>
 		/// Checks whether the given track has any trains physically on it.

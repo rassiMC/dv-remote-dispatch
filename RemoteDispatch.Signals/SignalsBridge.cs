@@ -371,5 +371,24 @@ namespace DvMod.RemoteDispatch.Signals
 				return false;
 			}
 		}
+
+		/// <summary>
+		/// Turns off a signal (no aspect displayed) and switches it to Manual mode.
+		/// Returns true on success.
+		/// </summary>
+		/// <param name="signalId">The ID of the signal to turn off</param>
+		internal bool TurnOffSignal(string signalId)
+		{
+			LoggingReturn.Log?.Invoke($"Attempting to turn off signal: {signalId}");
+			try
+			{
+				return SignalsAPI.TurnOffSignal(signalId);
+			}
+			catch (Exception ex)
+			{
+				LoggingReturn.Warning?.Invoke($"TurnOffSignal({signalId}) failed: {ex.Message}");
+				return false;
+			}
+		}
 	}
 }

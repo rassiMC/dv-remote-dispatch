@@ -1,16 +1,16 @@
 # Remote Dispatch - Current State
 
 This document describes **what the codebase actually does right now** (the "is"),
-based on the local branch - 50 commits ahead of upstream `trunk` (1.7.0). It is a
+based on the local branch - 51 commits ahead of upstream `trunk` (1.7.0). It is a
 snapshot, not a plan. For intended direction, see `docs/VISION.md` (if present).
 
-- Branch: `trunk`, 50 commits ahead of `origin/trunk` (merge-base `f4c3f21`, "publish 1.7.0")
+- Branch: `trunk`, 51 commits ahead of `origin/trunk` (merge-base `f4c3f21`, "publish 1.7.0")
 - Upstream: https://github.com/domroutley/dv-remote-dispatch
 - Local remotes: `origin` (domroutley), `fork` (rassiMC)
 
 > Breaking up the bigger picture: the stable, released features (cars, players,
 > jobs, junctions, loco control, core signals readout) are inherited from
-> upstream. The 48 local commits are almost entirely **switchboard** work - a
+> upstream. The local commits are almost entirely **switchboard** work - a
 > second-screen dispatch UI with occupancy, signal control, and block-level
 > pathing/staging. That is the part of the codebase that is WIP and poorly
 > documented; this file goes deepest there.
@@ -93,8 +93,7 @@ RemoteDispatch/
     ├── index.html / style.css / icon.svg
     ├── switchboard-data.js / switchboard-renderer.js / switchboard-mapper.js
     ├── switchboard-signals.js / switchboard-occupation.js / switchboard-pathing.js
-    ├── RD_1.0.4.json / RD_1.0.7.json / RD_1.0.8.json  # static switchboard layouts
-    └── DoubbleTrack1.0_1.4.3.json                       # (sic) DoubleTrack layout
+    └── ST_2.1-hotfix.json / DT_2.1-hotfix.json # static switchboard layouts (single / DoubleTrack)
 
 RemoteDispatch.Signals/     # separate DLL loaded at runtime via reflection
 ├── Bootstrap.cs            # public static API surface (Initialize/Teardown/...)
@@ -105,11 +104,13 @@ RemoteDispatch.Signals/     # separate DLL loaded at runtime via reflection
 ### Stale / potentially-confusing things
 - `switchboard/` at repo root (with `data.js`, `renderer.js`, `data/*.json`) is
   an **early prototype** superseded by `RemoteDispatch/frontend/switchboard-*.js`.
-  It is not wired into the mod and is not an embedded resource.
-- Root-level duplicates exist: the same `RD_1.0.4.json`, plus stray
-  `DvMod.RemoteDispatch.frontend.RD_1.0.4.json`, track-layout JS/JSON, etc.
-  These are upstream/legacy artifacts - don't confuse them with the embedded
-  frontend.
+  It is not wired into the mod and is not an embedded resource. The hotfix
+  layout sources live under `switchboard/data/` and are copied into
+  `RemoteDispatch/frontend/` before release.
+- The older static layouts (`RD_1.0.4/1.0.7/1.0.8.json`,
+  `DoubbleTrack1.0_1.4.3.json`) and the root-level
+  `DvMod.RemoteDispatch.frontend.RD_1.0.4.json` duplicate have been **removed**;
+  `main.js` now loads the `ST_2.1-hotfix.json` / `DT_2.1-hotfix.json` files.
 - `RemoteDispatch/RemoteDispatch.csproj` embeds the real frontend via
   `frontend.*` fully-qualified resource names.
 - `AGENTS.md` mentions `RemoteDispatch.Tests/`, `RemoteDispatch.Signals.Tests/`,
@@ -200,8 +201,9 @@ time it's requested (cached JSON). Per junction: `junctionIndex`,
 `position` (lat/lon), `incomingTracks`, `outgoingTracks`, `currentBranch`,
 `neighbors`, `degree`, and `commonNeighbor` / `leftNeighbor` / `rightNeighbor`
 (port-neighbor mapping via `TraceToJunctions`, matching track endpoints by
-position within a 1.5f threshold). This graph feeds the frontend's
-switchboard mapping.
+**position proximity**: endpoints are grouped by exact `Vector2`, and the walk
+collects every group within the `CONNECTION_THRESHOLD` (1.5f) of a point).
+This graph feeds the frontend's switchboard mapping.
 
 `GetInboundSignalMap()` / `BuildInboundSignalMap()` additionally matches
 "orphaned" signals (those the Signals API doesn't tag with `JunctionId`) to a
@@ -274,7 +276,7 @@ and finally `main.js?v=...` (cache-busted with a date).
   "x/y" are treated as lng/lat directly (no fancy geographic projection).
 - `loadSampleTrackData()` fetches `/modconfig` to learn `doubleTrack` +
   `enablePathing`, then loads the static layout JSON
-  (`DoubbleTrack1.0_1.4.3.json` if DoubleTrack, else `RD_1.0.8.json`) from
+  (`DT_2.1-hotfix.json` if DoubleTrack, else `ST_2.1-hotfix.json`) from
   `/res/`, runs `TrackData.fromJSON` → `groupIntoBlocks` → `renderAll`, and
   finally `buildSwitchMapping`.
 - `buildSwitchMapping()` fetches the **live** `/graph`, builds the switchboard
@@ -335,15 +337,17 @@ Derived from reading the code; not a plan. The most fragile points:
    (the known J-issue below being the exception); path conflict handling is
    undecided; UI is WIP.
 2. **Frontend mapping is heuristic + hardcoded overrides**: `SwitchboardMapper`
-   needs `GRAPH_OVERRIDES` (e.g. J539–J542, J404/J403/J18/J370, J26, J125) and a
+   needs `GRAPH_OVERRIDES` (e.g. J539–J542, J404/J403/J18/J370, J125) and a
    hardcoded anchor to map switchboard → ingame switches; there is no
    coordinate-based ground truth, so unmapped switches/junctions can still
-   occur.
-3. **Static switchboard layouts** are baked JSON files (`RD_1.0.4/1.0.7/1.0.8`,
-   `DoubbleTrack1.0_1.4.3`) - the board itself is *not* derived from the live
-   game; only switch/when mapping and occupancy are live. Layout edits require
-   re-exporting these files, and `loadSampleTrackData` is hardcoded to those
-   two filenames.
+   occur. The J26/GF issue was resolved by endpoint **proximity matching** in
+   `BuildTrackGraph` (see §4.3); the J26 override was removed.
+3. **Static switchboard layouts** are baked JSON files
+   (`ST_2.1-hotfix.json` single-track, `DT_2.1-hotfix.json` DoubleTrack) - the
+   board itself is *not* derived from the live game; only switch/when mapping
+   and occupancy are live. Layout edits require re-exporting these files (the
+   sources live under `switchboard/data/`), and `loadSampleTrackData` is
+   hardcoded to those two filenames.
 4. **No tests.** Everything above is unverified by automated tests.
 5. **Force-update hacks** in `SignalsBridge` depend on Signals internal types
    via reflection (`Signals.Game.SignalManager`, `BasicSignalController`) -
@@ -360,16 +364,13 @@ Derived from reading the code; not a plan. The most fragile points:
 Known before a wide release; unless explicitly marked "owner = maintainer",
 they are fair game for agent help:
 
-1. **One in-game junction breaks the switch mapping** on *both* the single-track
-   and DoubleTrack layouts (a station's mapping is wrong in both versions).
-   Owner: maintainer - must fix personally, and must be done before release.
-2. **Block colouring mismatch**: what the maintainer *wants* the block colours
+1. **Block colouring mismatch**: what the maintainer *wants* the block colours
    to mean differs from what the code currently renders. Must be resolved
    before release.
-3. **Path conflicts**: multi-train handling has no complete solution. For the
+2. **Path conflicts**: multi-train handling has no complete solution. For the
    upcoming release the plan is to *prevent* conflicts outright rather than
    resolve them live, to avoid issues.
-4. A **new DoubleTrack mod version** is planned; it will need a new
+3. A **new DoubleTrack mod version** is planned; it will need a new
    switchboard layout, but work can only start once the scope of that release
    is known (coordinated with the maintainer).
 
@@ -377,6 +378,13 @@ they are fair game for agent help:
 > (`PathingActivation.DeactivatePathingMode()`), and the map ⇄ switchboard view
 > toggle no longer tears down active pathing - it keeps running in the
 > background. Corresponding VISION blockers removed.
+>
+> Resolved: the junction that broke a station's switch mapping in both
+> single-track and DoubleTrack (GF) is fixed. `BuildTrackGraph`/`TraceToJunctions`
+> now match track endpoints by position proximity instead of exact (rounded)
+> coordinate strings, and the J26 `GRAPH_OVERRIDES` entry was removed. The
+> single-track/DoubleTrack switchboard layouts were re-exported as the
+> `ST_2.1-hotfix.json` / `DT_2.1-hotfix.json` files.
 
 Softer / held: full UI polish is WIP but not blocking; Hardcore occupancy is
 disabled and not blocking; everything else is on hold.

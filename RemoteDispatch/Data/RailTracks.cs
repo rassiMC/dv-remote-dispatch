@@ -112,6 +112,14 @@ namespace DvMod.RemoteDispatch
 	{
 		private const float CONNECTION_THRESHOLD = 1.5f;
 
+		// point position -> list of track endpoint records that sit at that point.
+		private class EndpointGroup
+		{
+			public readonly Vector2 point;
+			public readonly List<(string trackId, bool atStart)> endpoints = new List<(string, bool)>();
+			public EndpointGroup(Vector2 p) { point = p; }
+		}
+
 		private static string junctionPointJSON = string.Empty;
 
 		public static string GetJunctionPointJSON()
@@ -160,7 +168,7 @@ namespace DvMod.RemoteDispatch
 			var allTracks = Component.FindObjectsOfType<RailTrack>();
 
 			var trackLookup = new Dictionary<string, RailTrack>();
-			var endpointAdj = new Dictionary<string, List<(string trackId, bool atStart)>>();
+			var endpointAdj = new Dictionary<Vector2, EndpointGroup>();
 			var trackEndpointJunctions = new Dictionary<string, List<(int junctionIdx, bool atStart)>>();
 
 			foreach (var track in allTracks)
@@ -173,15 +181,9 @@ namespace DvMod.RemoteDispatch
 
 				var start = pointSet.points[0].position;
 				var end = pointSet.points[pointSet.points.Length - 1].position;
-				string startKey = $"{start.x:F1},{start.z:F1}";
-				string endKey = $"{end.x:F1},{end.z:F1}";
 
-				if (!endpointAdj.ContainsKey(startKey))
-					endpointAdj[startKey] = new List<(string, bool)>();
-				endpointAdj[startKey].Add((trackId, true));
-				if (!endpointAdj.ContainsKey(endKey))
-					endpointAdj[endKey] = new List<(string, bool)>();
-				endpointAdj[endKey].Add((trackId, false));
+				AddEndpoint(endpointAdj, new Vector2((float)start.x, (float)start.z), trackId, true);
+				AddEndpoint(endpointAdj, new Vector2((float)end.x, (float)end.z), trackId, false);
 			}
 
 			for (int i = 0; i < junctions.Length; i++)
@@ -203,6 +205,9 @@ namespace DvMod.RemoteDispatch
 					trackEndpointJunctions[tid].Add((i, j.inBranch.first));
 				}
 			}
+
+			if (endpointAdj.Count < 2)
+				throw new Exception($"BuildTrackGraph: expected >=2 endpoint groups from {allTracks.Length} tracks, got {endpointAdj.Count}");
 
 			var trackToJunctionMap = new Dictionary<string, List<int>>();
 			var portNeighborMap = new Dictionary<(int junctionIdx, string port), int>();
@@ -235,10 +240,10 @@ namespace DvMod.RemoteDispatch
 					var farPos = first
 						? ps.points[ps.points.Length - 1].position
 						: ps.points[0].position;
-					string farKey = $"{farPos.x:F1},{farPos.z:F1}";
+					var farPoint = new Vector2((float)farPos.x, (float)farPos.z);
 
 					var visited = new HashSet<string> { btId };
-					var neighbors = TraceToJunctions(farKey, btId, endpointAdj, trackLookup, trackEndpointJunctions, visited);
+					var neighbors = TraceToJunctions(farPoint, btId, endpointAdj, trackLookup, trackEndpointJunctions, visited);
 
 					foreach (var n in neighbors)
 					{
@@ -300,53 +305,83 @@ namespace DvMod.RemoteDispatch
 			return graphData;
 		}
 
+		private static void AddEndpoint(Dictionary<Vector2, EndpointGroup> endpointAdj, Vector2 point, string trackId, bool atStart)
+		{
+			if (!endpointAdj.TryGetValue(point, out var group))
+			{
+				group = new EndpointGroup(point);
+				endpointAdj[point] = group;
+			}
+			group.endpoints.Add((trackId, atStart));
+		}
+
+		// Returns all endpoint groups within CONNECTION_THRESHOLD of `point`.
+		// Vector2 == is exact float equality, so any geometric scattering or
+		// duplicate density would have produced distinct groups; iterate all
+		// candidates within range instead of relying on a single map key.
+		private static List<EndpointGroup> FindEndpointGroups(Dictionary<Vector2, EndpointGroup> endpointAdj, Vector2 point, float threshold)
+		{
+			var thresholdSqr = threshold * threshold;
+			var matches = new List<EndpointGroup>();
+			foreach (var kvp in endpointAdj)
+			{
+				if ((kvp.Value.point - point).sqrMagnitude <= thresholdSqr)
+					matches.Add(kvp.Value);
+			}
+			return matches;
+		}
+
 		private static List<int> TraceToJunctions(
-			string farKey,
+			Vector2 farPoint,
 			string originTrackId,
-			Dictionary<string, List<(string trackId, bool atStart)>> endpointAdj,
+			Dictionary<Vector2, EndpointGroup> endpointAdj,
 			Dictionary<string, RailTrack> trackLookup,
 			Dictionary<string, List<(int junctionIdx, bool atStart)>> trackEndpointJunctions,
 			HashSet<string> visited)
 		{
 			var result = new List<int>();
-			var queue = new Queue<(string key, string trackId, bool atStart)>();
-			queue.Enqueue((farKey, originTrackId, false));
+			var queue = new Queue<(Vector2 key, string trackId, bool atStart)>();
+			queue.Enqueue((farPoint, originTrackId, false));
 
 			while (queue.Count > 0)
 			{
 				var (key, prevTrackId, atStart) = queue.Dequeue();
-				if (!endpointAdj.TryGetValue(key, out var connected)) continue;
+				var connected = FindEndpointGroups(endpointAdj, key, CONNECTION_THRESHOLD);
+				if (connected.Count == 0) continue;
 
-				foreach (var (ctId, ctAtStart) in connected)
+				foreach (var group in connected)
 				{
-					if (ctId == prevTrackId) continue;
-					if (!visited.Add(ctId)) continue;
-
-					if (trackEndpointJunctions.TryGetValue(ctId, out var epJunctions))
+					foreach (var (ctId, ctAtStart) in group.endpoints)
 					{
-						bool found = false;
-						foreach (var (jIdx, jAtStart) in epJunctions)
+						if (ctId == prevTrackId) continue;
+						if (!visited.Add(ctId)) continue;
+
+						if (trackEndpointJunctions.TryGetValue(ctId, out var epJunctions))
 						{
-							if (ctAtStart == jAtStart)
+							bool found = false;
+							foreach (var (jIdx, jAtStart) in epJunctions)
 							{
-								if (!result.Contains(jIdx))
-									result.Add(jIdx);
-								found = true;
+								if (ctAtStart == jAtStart)
+								{
+									if (!result.Contains(jIdx))
+										result.Add(jIdx);
+									found = true;
+								}
 							}
+							if (found) continue;
 						}
-						if (found) continue;
-					}
 
-					if (trackLookup.TryGetValue(ctId, out var ct))
-					{
-						var ps = ct.GetKinkedPointSet();
-						if (ps.points.Length >= 1)
+						if (trackLookup.TryGetValue(ctId, out var ct))
 						{
-							var otherFarPos = ctAtStart
-								? ps.points[ps.points.Length - 1].position
-								: ps.points[0].position;
-							string otherFarKey = $"{otherFarPos.x:F1},{otherFarPos.z:F1}";
-							queue.Enqueue((otherFarKey, ctId, ctAtStart));
+							var ps = ct.GetKinkedPointSet();
+							if (ps.points.Length >= 1)
+							{
+								var otherFarPos = ctAtStart
+									? ps.points[ps.points.Length - 1].position
+									: ps.points[0].position;
+								var otherFarPoint = new Vector2((float)otherFarPos.x, (float)otherFarPos.z);
+								queue.Enqueue((otherFarPoint, ctId, ctAtStart));
+							}
 						}
 					}
 				}

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-08-06
+
+### Added
+
+- Switchboard block-level pathing/staging: server-side route claims, look-ahead
+  windows, and per-block signal/switch control.
+- Direct block occupancy via the Signals API `IsTrackOccupied`.
+
+### Fixed
+
+- GF switch mapping: `BuildTrackGraph`/`TraceToJunctions` now match track
+  endpoints by position proximity instead of exact (rounded) coordinate
+  strings, resolving the junction that broke a station's switch mapping on both
+  the single-track and DoubleTrack layouts. The J26 `GRAPH_OVERRIDES` entry was
+  removed.
+- Removed the redundant `GRAPH_OVERRIDES` for J26.
+- Switchboard layouts re-exported as `ST_2.1-hotfix.json` (single-track) and
+  `DT_2.1-hotfix.json` (DoubleTrack); obsolete `RD_1.0.4/1.0.7/1.0.8` and
+  `DoubbleTrack1.0_1.4.3` files removed.
+
 ## [1.6.1] - 2026-04-04
 
 ### Fixed

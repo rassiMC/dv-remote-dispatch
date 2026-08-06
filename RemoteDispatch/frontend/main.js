@@ -1957,7 +1957,7 @@ async function buildSwitchMapping(enablePathing) {
 		}
 
 		if (typeof PathingController !== 'undefined') {
-			PathingController.enableFromMapping();
+			PathingController.enableFromMapping(enablePathing);
 		}
 	} catch (e) {
 		console.error('Failed to build switch mapping:', e);

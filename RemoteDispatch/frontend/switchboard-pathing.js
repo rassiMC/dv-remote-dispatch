@@ -506,11 +506,14 @@ const PathingController = {
         this._activateIfNeeded();
     },
 
-    enableFromMapping() {
+    enableFromMapping(enablePathing) {
+        const wasEnabled = this.enabled;
+        if (!this.enabled && enablePathing) this.enable();
         if (!this.enabled) return;
         // Mapping has now been built (switchboard opened), so re-arm the block
         // graph and send the real activation if it hasn't reached the server yet.
         this.buildBlockGraph();
+        if (!wasEnabled) return; // enable() already handled activation
         this._activateIfNeeded();
     },
 

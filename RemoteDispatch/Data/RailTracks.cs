@@ -275,16 +275,39 @@ namespace DvMod.RemoteDispatch
 				var allTrackIds = new HashSet<string>(incomingTracks);
 				allTrackIds.UnionWith(outgoingTrackIds);
 
+				// A switch has at most three physical ports (common/left/right),
+				// so no junction may report more than that. In dense areas
+				// (e.g. the DT-SJX1 crossovers) parallel track endpoints sit so
+				// close together that TraceToJunctions links a spurious fourth
+				// continuation, inflating degree to 4. The genuine port targets
+				// take priority; track-derived neighbors only fill up to the cap.
+				const int MAX_DEGREE = 3;
+				var portTargets = new List<int>();
+				foreach (var port in new[] { "common", "left", "right" })
+				{
+					if (portNeighborMap.TryGetValue((i, port), out var pt) && !portTargets.Contains(pt))
+						portTargets.Add(pt);
+				}
+
 				foreach (var trackId in allTrackIds)
 				{
 					if (trackToJunctionMap.TryGetValue(trackId, out var connectedJunctions))
 					{
 						foreach (var otherIdx in connectedJunctions)
 						{
-							if (otherIdx != i && !neighbors.Contains(otherIdx))
+							if (otherIdx == i || neighbors.Contains(otherIdx)) continue;
+							// Prefer the physical port target for this neighbor.
+							if (portTargets.Contains(otherIdx))
 								neighbors.Add(otherIdx);
+							else if (neighbors.Count >= MAX_DEGREE)
+								continue;
+							else
+								neighbors.Add(otherIdx);
+
+							if (neighbors.Count >= MAX_DEGREE) break;
 						}
 					}
+					if (neighbors.Count >= MAX_DEGREE) break;
 				}
 
 				graphData[junction.junctionData.junctionIdLong.ToString()] = new JunctionGraphData

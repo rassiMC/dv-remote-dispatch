@@ -20,8 +20,6 @@ const SwitchboardSignals = {
         this.initAllSwitches();
         this.updateAllVirtualSignals();
         this.initialized = true;
-
-        console.log('SwitchboardSignals initialized with ' + SwitchboardMapper.switchboardGraph.size + ' switches');
     },
 
     initAllSwitches() {
@@ -54,9 +52,6 @@ const SwitchboardSignals = {
         if (!ingameData || !ingameData.junctionId) return;
 
         const junctionSignals = getSignalsByJunctionId(ingameData.junctionId);
-
-        console.log(`[SwitchboardSignals] sbId=${sbId} jIdx=${jIdx} junctionId=${ingameData.junctionId} found ${junctionSignals.length} signals`, junctionSignals.map(s => s.Id));
-
         for (const sig of junctionSignals) {
             const id = sig.Id || '';
             const colonIdx = id.lastIndexOf(':');

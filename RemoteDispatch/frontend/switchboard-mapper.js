@@ -197,6 +197,85 @@ const SwitchboardMapper = {
         return violations;
     },
 
+    // Whether two switchboard switches are graph-adjacent (share a neighbor edge).
+    _areSwitchAdjacent(aId, bId) {
+        const a = this.switchboardGraph.get(aId);
+        if (!a) return false;
+        return a.neighbors.some(n => n.switchId === bId);
+    },
+
+    // Score a candidate junction assignment for a switch: the number of the
+    // switch's switchboard neighbours that map to junctions adjacent to jIdx in
+    // the ingame graph. Higher = more consistent placement.
+    _scoreAssignment(sbId, jIdx) {
+        const sbData = this.switchboardGraph.get(sbId);
+        const jData = this.ingameGraph.get(jIdx);
+        if (!sbData || !jData) return 0;
+        let score = 0;
+        for (const nbr of sbData.neighbors) {
+            const nbrJ = this.mapping.get(nbr.switchId);
+            if (nbrJ === undefined || nbrJ === jIdx) continue;
+            if (jData.neighbors.includes(nbrJ)) score++;
+        }
+        return score;
+    },
+
+    // Post-walk consistency repair. Greedy BFS with local eviction cannot fix
+    // an earlier wrong strict assignment whose port collision never surfaces -
+    // both legs of a crossover get taken by non-colliding points and no eviction
+    // ever fires. Repair rescans the edges flagged by validateMapping() and, for
+    // each cluster of violations, tries swapping the two switches that share a
+    // junction (the classic crossover leg-swap: J-632/J-546, J-636/J-638) when
+    // the swap strictly improves both switches' adjacency scores. Iterates until
+    // a stable minimum is reached (bounded).
+    repairMapping() {
+        if (!this.mapping) return;
+        const MAX_PASSES = 20;
+        for (let pass = 0; pass < MAX_PASSES; pass++) {
+            const violations = this.validateMapping();
+            if (violations.length === 0) break;
+
+            let repaired = false;
+
+            // Group violations by the switch that would benefit from re-mapping.
+            // The ingame junction index is what's mis-assigned; collect candidate
+            // swaps for each switch currently implicated in >=1 violation.
+            const candidates = new Map();
+            for (const v of violations) {
+                if (!candidates.has(v.sbId)) candidates.set(v.sbId, []);
+                candidates.get(v.sbId).push(v);
+                if (!candidates.has(v.nbrSwitchId)) candidates.set(v.nbrSwitchId, []);
+                candidates.get(v.nbrSwitchId).push(v);
+            }
+
+            for (const [sbId, vList] of candidates) {
+                if (vList.length === 0) continue;
+                const curJ = this.mapping.get(sbId);
+                if (curJ === undefined) continue;
+
+                // Try swapping sbId's junction with every OTHER switch that maps
+                // to a junction adjacent to at least one of sbId's neighbors.
+                for (const [otherSbId, otherCurJ] of this.mapping) {
+                    if (otherSbId === sbId) continue;
+                    if (otherCurJ === undefined || otherCurJ === curJ) continue;
+                    if (!this._areSwitchAdjacent(sbId, otherSbId)) continue;
+
+                    const before = this._scoreAssignment(sbId, curJ) + this._scoreAssignment(otherSbId, otherCurJ);
+                    const afterSwap = this._scoreAssignment(sbId, otherCurJ) + this._scoreAssignment(otherSbId, curJ);
+                    if (afterSwap > before) {
+                        this.mapping.set(sbId, otherCurJ);
+                        this.mapping.set(otherSbId, curJ);
+                        repaired = true;
+                        break;
+                    }
+                }
+                if (repaired) break;
+            }
+
+            if (!repaired) break;
+        }
+    },
+
     runParallelWalk(anchorSbId, anchorIngameIdx) {
         if (!this.ingameGraph || !this.switchboardGraph) {
             console.error('Graphs not loaded. Call fetchIngameGraph() and buildSwitchGraph() first.');
@@ -240,6 +319,8 @@ const SwitchboardMapper = {
                 queue.push({sbId: match.sbSwitchId, ingameIdx: match.ingameJunctionIndex});
             }
         }
+
+        this.repairMapping();
 
         return mapping;
     },
@@ -297,6 +378,8 @@ const SwitchboardMapper = {
         if (violations.length > 0) {
             console.warn(`Mapping consistency violations: ${violations.length}`);
             console.warn(violations.slice(0, 20));
+        } else {
+            console.log('Mapping consistency: all edges validated.');
         }
     }
 };

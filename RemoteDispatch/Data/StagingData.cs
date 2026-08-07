@@ -13,6 +13,7 @@ namespace DvMod.RemoteDispatch
 
         private const int DefaultLookAhead = 5;
         private const int MaxAutoClaimAhead = 5;
+        private const int MaxTrainClaimAhead = 6;
 
         private class PathStaging
         {
@@ -579,6 +580,8 @@ namespace DvMod.RemoteDispatch
                     if (staging.status != "Active")
                         continue;
 
+                    bool trainAdvanced = false;
+
                     int nextIdx = staging.currentBlockIndex + 1;
                     if (nextIdx < staging.blocks.Length)
                     {
@@ -590,6 +593,7 @@ namespace DvMod.RemoteDispatch
                             if (_activeBlocks.TryGetValue(prevBlockId, out var cp) && cp == staging.pathId)
                                 _activeBlocks.Remove(prevBlockId);
 
+                            trainAdvanced = true;
                             if (prevBlockId != nextBlockId)
                                 SetSignalToStop(prevBlockId, staging.pathId);
 
@@ -617,22 +621,28 @@ namespace DvMod.RemoteDispatch
 
                     if (ws < staging.blocks.Length)
                     {
-                        bool canTry = true;
+                        // A path whose train just advanced claims immediately
+                        // (capped at 6 ahead); otherwise the 20s timer paces
+                        // extension up to 5 ahead.
+                        bool canTry;
+                        int maxBlocks;
 
-                        if (CountClaimedAhead(staging) >= MaxAutoClaimAhead)
+                        if (trainAdvanced)
                         {
-                            canTry = false;
+                            canTry = true;
+                            maxBlocks = MaxTrainClaimAhead - CountClaimedAhead(staging);
                         }
-                        else if (_retryTimes.TryGetValue(staging.pathId, out var retryTime)
-                                 && DateTime.UtcNow < retryTime)
+                        else
                         {
-                            canTry = false;
+                            canTry = CountClaimedAhead(staging) < MaxAutoClaimAhead;
+                            if (canTry && _retryTimes.TryGetValue(staging.pathId, out var retryTime)
+                                && DateTime.UtcNow < retryTime)
+                                canTry = false;
+                            maxBlocks = MaxAutoClaimAhead - CountClaimedAhead(staging);
                         }
 
-                        if (canTry)
+                        if (canTry && maxBlocks > 0)
                         {
-                            int maxBlocks = MaxAutoClaimAhead - CountClaimedAhead(staging);
-
                             var (claimed, _) = TryClaimFrom(staging, ws, maxBlocks, occupancy);
                             _retryTimes[staging.pathId] = DateTime.UtcNow + RetryInterval;
 

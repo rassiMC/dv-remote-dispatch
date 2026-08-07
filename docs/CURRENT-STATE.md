@@ -203,6 +203,10 @@ time it's requested (cached JSON). Per junction: `junctionIndex`,
 (port-neighbor mapping via `TraceToJunctions`, matching track endpoints by
 **position proximity**: endpoints are grouped by exact `Vector2`, and the walk
 collects every group within the `CONNECTION_THRESHOLD` (1.5f) of a point).
+**`neighbors` is capped at degree 3** (the physical switch limit): in dense
+double-track areas such as the DT-SJX1 crossovers, parallel track endpoints sit
+close enough that `TraceToJunctions` links a spurious fourth continuation,
+which would otherwise produce impossible junction signatures in `/graph`.
 This graph feeds the frontend's switchboard mapping.
 
 > Note: a stricter "only proximity-link junction-owned endpoints" change to
@@ -316,6 +320,12 @@ and finally `main.js?v=...` (cache-busted with a date).
   blind degree fallback would swap the two legs).
 - There is **no degree/score fallback** any more: it re-claimed evicted
   junctions and re-swapped crossover legs.
+- After the walk, `repairMapping()` runs a post-pass that re-scans the edges
+  flagged by `validateMapping()` and swaps two graph-adjacent switches' junction
+  assignments when the exchange strictly improves both switches' adjacency
+  scores, iterating to a stable minimum. This corrects residual crossover
+  leg-swaps that the BFS + eviction leaves behind (e.g. the MF J-632/J-546 and
+  J-636/J-638 pairs) without regressing the reciprocal-eviction guarantees.
 - `GRAPH_OVERRIDES` is now **empty** (all hardcoded junction overrides removed:
   the old J539–J542, J404/J403/J18/J370, and J125 entries were redundant against
   the live graph and deleted along with the earlier J26 fix).
@@ -372,12 +382,13 @@ Derived from reading the code; not a plan. The most fragile points:
    undecided; UI is WIP.
 2. **Frontend mapping is heuristic + hardcoded anchor**: `SwitchboardMapper`
    previously leaned on `GRAPH_OVERRIDES` and hardcoded junction overrides; those
-   are now all removed (the graph endpoint produces correct topology). It still
-   relies on a hardcoded anchor (`SWITCHBOARD_ANCHOR` = `s1677` → junction 0) to
-   seed the fit, and there is no coordinate-based ground truth, so mismatches
-   can still occur. The crossover swap bug (two switches on a double-slip
-   getting their legs swapped) was fixed by reciprocal-edge eviction in
-   `findMatches`; see the mapping subsection in §5.
+   are now all removed (the graph endpoint produces correct topology, and
+   junction degree is capped at 3). It still relies on a hardcoded anchor
+   (`SWITCHBOARD_ANCHOR` = `s1677` → junction 0) to seed the fit, and there is
+   no coordinate-based ground truth, so residual mismatches remain possible.
+   The crossover swap bugs (double-slip legs swapped, e.g. MF J-632/J-546,
+   J-636/J-638) were fixed by reciprocal-edge eviction in `findMatches`
+   combined with the `repairMapping()` post-pass; see the mapping subsection in §5.
 3. **Static switchboard layouts** are baked JSON files
    (`ST_2.1-hotfix.json` single-track, `DT_2.1-hotfix.json` DoubleTrack) - the
    board itself is *not* derived from the live game; only switch/when mapping
@@ -433,11 +444,13 @@ they are fair game for agent help:
 > switch id, and the old degree fallback swapped the two legs ("switches on one
 > side correct, the other two swapped"). Fixed by recording the target's entry
 > node (`entryNodeId`/`entryPort` in `buildSwitchGraph`) and replacing the
-> degree fallback with **reciprocal-edge eviction** in `findMatches`, plus
-> removing the now-redundant `GRAPH_OVERRIDES` clusters (J539-542, J404/J403/
-> J18/J370, J125). Mapping went from 619/641 with 23 unmapped junctions to a
-> full 641/641 bijection; the residual inconsistencies are ~11 crossover pairs
-> where the layout genuinely has no counterpart junction in the ingame graph.
+> degree fallback with **reciprocal-edge eviction** in `findMatches`, removing
+> the now-redundant `GRAPH_OVERRIDES` clusters (J539-542, J404/J403/J18/J370,
+> J125), capping junction `degree` at 3 in `/graph` (dense crossovers like
+> DT-SJX1 otherwise report a spurious fourth continuation), and adding the
+> `repairMapping()` post-pass for residual leg-swaps (e.g. the MF J-632/J-546
+> and J-636/J-638 pairs). The mapping is now a clean 641/641 bijection with
+> zero consistency violations.
 
 Softer / held: full UI polish is WIP but not blocking; Hardcore occupancy is
 disabled and not blocking; everything else is on hold.

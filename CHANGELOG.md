@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Switchboard layouts re-exported as `ST_2.1-hotfix.json` (single-track) and
   `DT_2.1-hotfix.json` (DoubleTrack); obsolete `RD_1.0.4/1.0.7/1.0.8` and
   `DoubbleTrack1.0_1.4.3` files removed.
+- Residual DoubleTrack crossover leg-swaps (e.g. MF J-632/J-546, J-636/J-638)
+  fixed: junction `degree` is now capped at 3 in `/graph` so dense crossovers
+  no longer report a spurious fourth continuation, and `repairMapping()` runs
+  after the parallel walk to correct any remaining swapped pairs. The switch
+  mapping is now a clean 641/641 bijection with zero consistency violations.
 
 ## [1.6.1] - 2026-04-04
 

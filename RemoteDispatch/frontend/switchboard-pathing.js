@@ -16,12 +16,12 @@ const PathingController = {
     _pathTreeCache: null,
     _pathTreeSource: null,
     _pathStatusTable: new Map(),
+    _pathColors: new Map(),
     _blockSwitchSegments: new Map(),
     _switchBlockIds: new Set(),
 
-    MODE_YELLOW: '#c9a800',
     MODE_BLUE: '#4488ff',
-    MODE_GREEN: '#208020',
+    MODE_YELLOW: '#c9a800',
     MODE_RED: '#a02020',
 
     get showGrayClear() {
@@ -389,24 +389,56 @@ const PathingController = {
         return this._pathStatusTable;
     },
 
-    // Rebuild the blockId -> { claimed, upcomingCount } table once per paths
-    // sync. resolveBlockColor reads this instead of scanning every path per
-    // segment, so block colouring is O(blocks + paths) instead of
-    // O(segments x paths) per repaint.
+    // Rebuild the blockId -> { claimed, claimedPaths, upcomingCount, upcomingPaths }
+    // table once per paths sync. resolveBlockColor reads this instead of scanning
+    // every path per segment, so block colouring is O(blocks + paths) instead of
+    // O(segments x paths) per repaint. Also assigns a stable random colour to
+    // each path id (kept in _pathColors across syncs) so colours persist between
+    // polls and across page reloads until the paths themselves change.
     rebuildPathStatusTable() {
         const table = new Map();
         if (this.enabled) {
+            const usedColors = new Set();
+            for (const o of this.lockedPaths) {
+                if (o && o.color) usedColors.add(o.color);
+            }
+            const assigned = new Set();
+            for (const p of this.lockedPaths) {
+                if (!p || !p.id) continue;
+                let color = this._pathColors.get(p.id);
+                if (!color) {
+                    let tries = 0;
+                    do {
+                        color = switchboardRenderer.randomPathColor();
+                    } while (color && usedColors.has(color) && ++tries < 32);
+                    this._pathColors.set(p.id, color);
+                }
+                usedColors.add(color);
+                if (assigned.has(p.id)) continue;
+                assigned.add(p.id);
+                p.color = color;
+            }
             for (const p of this.lockedPaths) {
                 if (!p.blocks) continue;
                 for (const blockId of p.blocks) {
                     let entry = table.get(blockId);
                     if (!entry) {
-                        entry = { claimed: false, upcomingCount: 0 };
+                        entry = {
+                            claimed: false,
+                            claimedPaths: [],
+                            upcomingCount: 0,
+                            upcomingPaths: []
+                        };
                         table.set(blockId, entry);
                     }
                     const state = p.blockStates && p.blockStates[blockId];
-                    if (state === 'claimed') entry.claimed = true;
-                    else entry.upcomingCount++;
+                    if (state === 'claimed') {
+                        entry.claimed = true;
+                        entry.claimedPaths.push(p);
+                    } else {
+                        entry.upcomingCount++;
+                        entry.upcomingPaths.push(p);
+                    }
                 }
             }
         }

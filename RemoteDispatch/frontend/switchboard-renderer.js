@@ -5,10 +5,13 @@ const TrackRenderer = {
     switchBounds: new Map(),
     showSignalAspects: true,
     CLEAR_GRAY: '#888888',
-    CLEAR_GREEN: '#208020',
-    CLEAR_YELLOW: '#c9a800',
-    CLEAR_LIGHTBLUE: '#7ec8ff',
     OCCUPIED_RED: '#a02020',
+    PATH_COLOR_MIN: 0x20,
+    PATH_COLOR_MAX: 0x90,
+    CLAIM_CAP_GREEN: 0xf0,
+    CLAIM_ADD_GREEN: 0x50,
+    CLAIM_SUB_BLUE: 0x50,
+    CLAIM_SUB_RED: 0x20,
     blockColors: ['#4CAF50', '#2196F3', '#FF9800', '#E91E63', '#9C27B0', '#00BCD4'],
     colorIndex: 0,
 
@@ -25,6 +28,58 @@ const TrackRenderer = {
             x: Math.round(latlng.lng),
             y: Math.round(latlng.lat)
         };
+    },
+
+    hex2(v) { return Math.round(v).toString(16).padStart(2, '0'); },
+
+    randRange(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    },
+
+    // Random per-path colour "between #203080 and #90b0d0" with B >= G >= R so
+    // paths are always blue-dominant (never read red or green). Each channel is
+    // kept within the endpoint box: R in [0x20,0x90], G in [0x30,0xb0],
+    // B in [0x80,0xd0]. R is drawn first, then B in [max(0x80, R), 0xd0] so
+    // B >= R always holds, then G in [max(R, 0x30), min(B, 0xb0)] to keep
+    // B >= G >= R while staying inside the box.
+    randomPathColor() {
+        const r = this.randRange(this.PATH_COLOR_MIN, this.PATH_COLOR_MAX);
+        const b = this.randRange(Math.max(0x80, r), 0xd0);
+        const g = this.randRange(Math.max(r, 0x30), Math.min(b, 0xb0));
+        return `#${this.hex2(r)}${this.hex2(g)}${this.hex2(b)}`;
+    },
+
+    // Claimed blocks: add 0x50 to the green channel, then subtract 0x50 from
+    // blue and 0x20 from red, then cap each channel so the result stays below
+    // #90f090 (R <= 0x90, G <= 0xf0, B <= 0x90).
+    claimColor(pathColor) {
+        const c = this.parseHex(pathColor);
+        if (!c) return '#208020';
+        const r = Math.min(Math.max(c.r - this.CLAIM_SUB_RED, 0), this.PATH_COLOR_MAX);
+        const g = Math.min(c.g + this.CLAIM_ADD_GREEN, this.CLAIM_CAP_GREEN);
+        const b = Math.min(Math.max(c.b - this.CLAIM_SUB_BLUE, 0), this.PATH_COLOR_MAX);
+        return `#${this.hex2(r)}${this.hex2(g)}${this.hex2(b)}`;
+    },
+
+    // Multi-path overlap: per-channel max of each path's base colour. Result
+    // stays within #203080..#90b0d0.
+    blendColor(colors) {
+        let r = 0x20, g = 0x30, b = 0x80;
+        for (const color of colors) {
+            const c = this.parseHex(color);
+            if (!c) continue;
+            r = Math.max(r, c.r);
+            g = Math.max(g, c.g);
+            b = Math.max(b, c.b);
+        }
+        return `#${this.hex2(r)}${this.hex2(g)}${this.hex2(b)}`;
+    },
+
+    parseHex(hex) {
+        if (typeof hex !== 'string') return null;
+        const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+        if (!m) return null;
+        return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
     },
 
     getNextColor() {
@@ -163,20 +218,23 @@ const TrackRenderer = {
             return this.OCCUPIED_RED;
         }
 
-        let upcomingCount = 0;
-        let claimed = false;
+        let claimedPaths = [];
+        let upcomingPaths = [];
         if (typeof PathingController !== 'undefined' && PathingController.enabled &&
             typeof PathingController.getBlockPathStatusTable === 'function') {
             const entry = PathingController.getBlockPathStatusTable().get(blockId);
             if (entry) {
-                claimed = entry.claimed;
-                upcomingCount = entry.upcomingCount;
+                claimedPaths = entry.claimedPaths || [];
+                upcomingPaths = entry.upcomingPaths || [];
             }
         }
 
-        if (claimed) return this.CLEAR_GREEN;
-        if (upcomingCount > 1) return this.CLEAR_YELLOW;
-        if (upcomingCount === 1) return this.CLEAR_LIGHTBLUE;
+        if (claimedPaths.length > 0) {
+            const c = claimedPaths[0] && claimedPaths[0].color;
+            return this.claimColor(c || '#4080c0');
+        }
+        if (upcomingPaths.length > 1) return this.blendColor(upcomingPaths.map(x => (x && x.color) || '#4080c0'));
+        if (upcomingPaths.length === 1) return (upcomingPaths[0] && upcomingPaths[0].color) || '#4080c0';
         return this.CLEAR_GRAY;
     },
 

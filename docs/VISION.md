@@ -83,9 +83,35 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 
 ### On hold / later
 - Full UI polish (WIP but not release-blocking).
+- **HB Bravo Yard misdrawn switches**: in both the single-track and DoubleTrack
+  layouts, some switches in HB Bravo Yard are drawn incorrectly. Cosmetic
+  layout-data bug; not needed before the upcoming release.
+- A **switchboard legend**: a visible colour key for block states (clear/path/occupied).
+  The block colouring scheme itself is defined and implemented (see below), but a legend
+  needs dedicated UI time and is intentionally deferred.
 - A **DoubleTrack 2.0-ready layout**: will need a new switchboard layout once
    the scope of the next DoubleTrack release is known.
 - Path-conflict *resolution* (as opposed to prevention).
+
+---
+
+## 2a. Block colouring scheme (accepted)
+
+The unified, single-source-of-truth palette for switchboard blocks. `Occupied`
+always wins regardless of path membership; a block claimed by an active path is
+Green even if another upcoming path also includes it.
+
+| Block situation                                  | Colour |
+|--------------------------------------------------|--------|
+| Not occupied, no pathing info                    | Gray |
+| Claimed by an active path (staging current/lookahead window) | Green |
+| Will be in exactly one upcoming path             | Light Blue |
+| Will be in more than one path                    | Yellow |
+| Occupied (regardless of path membership)         | Red |
+
+Priority: Red (occupied) > Green (claimed) > Yellow (>1 upcoming) > Light Blue
+(exactly 1 upcoming) > Gray. Draft path-selection highlighting (start/dest
+hover) is transient UX and independent of this scheme.
 
 ---
 

@@ -16,8 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TryClaimFrom`/`CalcRange`, refusing to claim past opposing or upcoming
   traffic on a shared span (`IsOpposing`) and backing off with a 20s retry
   timer; new paths seed with only their start block, auto-claiming stops
-  five blocks ahead. Manual "advance next" claims a single block when clear,
-  or the cleared range when passing opposing traffic.
+  five blocks ahead. Auto-extension is paced by the 20s timer on every attempt,
+  and a train advancing onto the next block triggers an immediate claim
+  extension (up to six blocks ahead). Manual "advance next" claims a single
+  block when clear, or the cleared range when passing opposing traffic.
+- Locked switchboard paths are each given a stable random **blue-dominant**
+  colour; upcoming blocks show the path colour (blended where paths overlap),
+  claimed blocks show the path colour boosted green, and occupied blocks stay
+  red. Sidebar path chips use the same colouring.
 
 ### Fixed
 
@@ -35,13 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer report a spurious fourth continuation, and `repairMapping()` runs
   after the parallel walk to correct any remaining swapped pairs. The switch
   mapping is now a clean 641/641 bijection with zero consistency violations.
-- Switchboard block colours unified into a single source of truth
-  (`TrackRenderer.resolveBlockColor`): gray clear, green claimed by an active
-  path, light blue in exactly one upcoming path, yellow in more than one path,
-  and red always wins for occupied blocks. Removed the per-file
+- Switchboard block colours unified into `TrackRenderer.resolveBlockColor`
+  as the single source of truth (occupied always reads as occupied; see the
+  per-path colour entry above). Removed the per-file
   `PathingController.getOverridesForSegment`/`getSwitchRimColor` override
   path; switch segments now repaint correctly on path sync, and sidebar path
-  chips use the same palette.
+  chips use the same colour source.
 
 ## [1.6.1] - 2026-04-04
 

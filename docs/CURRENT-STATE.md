@@ -243,7 +243,11 @@ branch-entry ("In") signals can be attributed to a junction.
   shared span). Non-opposing paths dequeue as they pass through; physical
   occupancy blocks a claim only for that block (walk continues past it).
   Failed claims back off for **20s** (`_retryTimes`) before retrying; the
-  automatic window stops once **5** blocks are claimed ahead.
+  automatic extension is paced by that timer on **every** attempt (not the
+  0.5s tick) and stopped once **5** blocks are claimed ahead
+  (`MaxAutoClaimAhead`). When a train **advances** onto the next block, the
+  same `TryClaimFrom` advance runs **immediately**, bypassing the timer and the
+  auto ceiling (up to **6** ahead, `MaxTrainClaimAhead`).
   `ForceClaimNextBlock` backs the manual "advance" button
   (`POST /path/{id}/advance`) - it claims the next single block when clear, or
   the full cleared range when clearing through opposing traffic.
@@ -350,10 +354,12 @@ and finally `main.js?v=...` (cache-busted with a date).
   blockSignals}` and POSTed to `/path`. The server assigns the path an id and
   seeding; the frontend keeps server-side `blockStates` in sync via
   `syncFromServer`, rendering colours via `TrackRenderer.resolveBlockColor`:
-  Gray (clear, no path), Green (claimed by an active path), Light Blue (in
-  exactly one upcoming path), Yellow (in more than one path), Red (occupied,
-  always wins). Draft path-selection highlighting (start/dest hover) is
-  transient UX with its own colours.
+  each locked path has a stable random **blue-dominant** colour
+  (`randomPathColor`); a block in one upcoming path shows that path's colour,
+  a block in several shows the per-channel blend (`blendColor`), a **claimed**
+  block shows the path colour boosted green (`claimColor`), and an **occupied**
+  block is always red and wins over path colouring. Draft path-selection
+  highlighting (start/dest hover) is transient UX with its own colours.
 - `PathingController` is armed by the `enablePathing` flag via the `modconfig`
   tag (not by the view toggle). Activation (`POST /pathing/activate`) is only
   sent once a real switch→junction mapping exists; if the flag is on before the
@@ -375,10 +381,15 @@ and finally `main.js?v=...` (cache-busted with a date).
   skipped; the show-toggle full repaint catches up. The path-list sidebar DOM is
   only rebuilt when its signature (ids/blocks/`blockStates`) changes.
 - Per-block colouring now reads a precomputed block → `{claimed,
-  upcomingCount}` table (`PathingController.rebuildPathStatusTable`) instead of
-  scanning every locked path per segment, and `TrackData.getBlockForSegment` is
-  O(1) via `_segmentBlockMap`. `renderSegment`/`rerenderBlocks` operate on
-  `block.segmentIds`, so a changed block re-renders only its own segments.
+  claimedPaths, upcomingCount, upcomingPaths}` table
+  (`PathingController.rebuildPathStatusTable`, rebuilt once per paths sync)
+  instead of scanning every locked path per segment, and
+  `TrackData.getBlockForSegment` is O(1) via `_segmentBlockMap`.
+  `renderSegment`/`rerenderBlocks` operate on `block.segmentIds`, so a changed
+  block re-renders only its own segments. `randomPathColor`/`claimColor`/
+  `blendColor` live in `TrackRenderer` and derive per-path colours from the
+  table; the path's assigned colour is cached in `_pathColors` (persists across
+  polls and reloads).
 - Path searching (`PathingController.computeBlockPath`) is now a **memoized
   single-source shortest-path tree** (binary-heap Dijkstra computed once per
   start block); each hover target is an O(path length) trace-back from the
@@ -453,9 +464,9 @@ Derived from reading the code; not a plan. The most fragile points:
 Known before a wide release; unless explicitly marked "owner = maintainer",
 they are fair game for agent help:
 
-1. **Block colouring mismatch**: what the maintainer *wants* the block colours
-   to mean differs from what the code currently renders. Must be resolved
-   before release.
+1. ~~**Block colouring mismatch**~~ - resolved: `resolveBlockColor` is the
+   single source of truth and occupied always reads as occupied (see the
+   "Resolved" note below).
 2. **Path conflicts**: multi-train handling has no complete solution. For the
    upcoming release the plan is to *prevent* conflicts outright rather than
    resolve them live, to avoid issues.
@@ -464,14 +475,13 @@ they are fair game for agent help:
    is known (coordinated with the maintainer).
 
 > Resolved: block colouring is unified. `TrackRenderer.resolveBlockColor` is
-> now the single source of truth for block colours:
-> **Gray** = clear, no pathing info; **Green** = claimed by an active path
-> (staging current/lookahead window); **Light Blue** = will be in exactly one
-> upcoming path; **Yellow** = will be in more than one path; **Red** =
-> occupied (always wins, even when a path includes the block). Priority is
-> Red > Green > Yellow > Light Blue. `PathingController.getOverridesForSegment`
-> / `getSwitchRimColor` were removed; locked-path colouring now flows through
-> `resolveBlockColor`, and the sidebar path chips use the same palette.
+> now the single source of truth for block colours. Each locked path gets a
+> stable random blue-dominant colour; blocks show the path colour (blended for
+> overlaps), **claimed** blocks get a green-boosted variant of the path colour,
+> and **occupied** blocks are always red and win over path colouring.
+> `PathingController.getOverridesForSegment` / `getSwitchRimColor` were removed;
+> locked-path colouring now flows through `resolveBlockColor`, and the sidebar
+> path chips use the same result.
 
 > Resolved: pathing disable/re-enable is now a clean operation
 > (`PathingActivation.DeactivatePathingMode()`), and the map ⇄ switchboard view

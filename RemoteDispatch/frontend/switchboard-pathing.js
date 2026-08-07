@@ -4,6 +4,8 @@ const PathingController = {
     startBlockId: null,
     destBlockId: null,
     waypoints: [],
+    extendPathId: null,
+    extendAnchorBlockId: null,
     currentPathBlocks: [],
     currentPathSwitchAssignments: {},
     lockedPaths: [],
@@ -22,15 +24,21 @@ const PathingController = {
     _blockSwitchSegments: new Map(),
     _switchBlockIds: new Set(),
     _waypointMarkers: new Map(),
+    _wasInteracting: false,
 
     MODE_BLUE: '#4488ff',
     MODE_YELLOW: '#c9a800',
     MODE_RED: '#a02020',
     MODE_PURPLE: '#a44be0',
+    MODE_GREEN: '#2fbf4f',
     OCCUPIED_PENALTY: 5,
 
     get showGrayClear() {
         return this.enabled;
+    },
+
+    _isDrawing() {
+        return this.state === 'selectingDest' || this.state === 'extendingPath';
     },
 
     buildBlockGraph() {
@@ -323,11 +331,14 @@ const PathingController = {
         this.startBlockId = null;
         this.destBlockId = null;
         this.waypoints = [];
+        this.extendPathId = null;
+        this.extendAnchorBlockId = null;
         this.currentPathBlocks = [];
         this.currentPathSwitchAssignments = {};
         this._pathTreeCache = null;
         this._pathTreeKey = null;
         this._clearWaypointMarkers();
+        this._clearExtendAnchorMarkers();
     },
 
     onBlockClick(blockId) {
@@ -357,13 +368,24 @@ const PathingController = {
             } else {
                 this.updateStatus('No path found between those blocks.');
             }
+        } else if (this.state === 'extendingPath') {
+            if (blockId === this.extendAnchorBlockId) return;
+            const result = this.computePathWithWaypoints(this.extendAnchorBlockId, blockId, this.waypoints);
+            if (result && result.blocks.length > 0) {
+                this.destBlockId = blockId;
+                this._needsRerender = true;
+                this.extendPath(result.blocks, result.switchAssignments);
+            } else {
+                this.updateStatus('No path found between those blocks.');
+            }
         }
     },
 
     onBlockContextMenu(blockId) {
         if (!this.enabled) return;
-        if (this.state !== 'selectingDest') return;
+        if (!this._isDrawing()) return;
         if (blockId === this.startBlockId) return;
+        if (this.state === 'extendingPath' && blockId === this.extendAnchorBlockId) return;
 
         const idx = this.waypoints.indexOf(blockId);
         if (idx >= 0) {
@@ -373,7 +395,8 @@ const PathingController = {
         } else {
             this.waypoints.push(blockId);
             this._addWaypointMarker(blockId);
-            this.updateStatus(`Waypoint added: ${blockId} [${this.waypoints.join(' -> ')}]. Click a destination block.`);
+            const verb = this.state === 'extendingPath' ? 'add a section' : 'click a destination block';
+            this.updateStatus(`Waypoint added: ${blockId} [${this.waypoints.join(' -> ')}]. Now ${verb}.`);
         }
         this._refreshHoverPath();
     },
@@ -381,13 +404,14 @@ const PathingController = {
     // Recompute the draft preview after a waypoint toggle so the shown route
     // reroutes through the (new) waypoint set.
     _refreshHoverPath() {
-        if (this.state !== 'selectingDest' || !this._hoverBlockId) return;
+        if (!this._isDrawing() || !this._hoverBlockId) return;
         if (this._hoverTimer) {
             clearTimeout(this._hoverTimer);
             this._hoverTimer = null;
         }
         const hoverBlockId = this._hoverBlockId;
-        const result = this.computePathWithWaypoints(this.startBlockId, hoverBlockId, this.waypoints);
+        const source = this.state === 'extendingPath' ? this.extendAnchorBlockId : this.startBlockId;
+        const result = this.computePathWithWaypoints(source, hoverBlockId, this.waypoints);
         const oldBlocks = this.currentPathBlocks;
         this.currentPathBlocks = [];
         this.currentPathSwitchAssignments = {};
@@ -462,7 +486,7 @@ const PathingController = {
     },
 
     onBlockHover(blockId) {
-        if (this.state !== 'selectingDest') return;
+        if (!this._isDrawing()) return;
         if (blockId === this.startBlockId || blockId === this._hoverBlockId) return;
         if (this._needsRerender) return;
         this._hoverBlockId = blockId;
@@ -474,7 +498,8 @@ const PathingController = {
 
         this._hoverTimer = setTimeout(() => {
             this._hoverTimer = null;
-            const result = this.computePathWithWaypoints(this.startBlockId, blockId, this.waypoints);
+            const source = this.state === 'extendingPath' ? this.extendAnchorBlockId : this.startBlockId;
+            const result = this.computePathWithWaypoints(source, blockId, this.waypoints);
             const oldBlocks = this.currentPathBlocks;
             this.currentPathBlocks = [];
             this.currentPathSwitchAssignments = {};
@@ -520,6 +545,9 @@ const PathingController = {
         const seg = TrackData.getSegment(segId);
         if (!seg || !seg.blockId) return null;
         const blockId = seg.blockId;
+
+        if (this.state === 'extendingPath' && blockId === this.extendAnchorBlockId)
+            return this.MODE_GREEN;
 
         if (this.currentPathBlocks.includes(blockId)) {
             const block = TrackData.getBlock(blockId);
@@ -639,6 +667,130 @@ const PathingController = {
         .catch(() => this.updateStatus('Failed to create path.'));
     },
 
+    // Enter extend mode for a locked path: the current last block becomes the
+    // anchor, and the same hover/A* drawing (including right-click waypoints)
+    // drafts an extension section from it. The user stays in extend mode after
+    // each confirm, re-anchored at the new route end, so sections can be
+    // chained. Esc / map right-click returns to idle.
+    beginExtendPath(pathId) {
+        if (!this.enabled) return;
+        const p = this.lockedPaths.find(x => x.id === pathId);
+        if (!p || !p.blocks || p.blocks.length === 0) return;
+
+        this._resetSelection();
+        this._needsRerender = false;
+        this.extendPathId = pathId;
+        this.extendAnchorBlockId = p.blocks[p.blocks.length - 1];
+
+        this._addExtendAnchorMarker(this.extendAnchorBlockId);
+        this.state = 'extendingPath';
+        this.rerender();
+        this.updateStatus(`Extending path ${pathId} from block ${this.extendAnchorBlockId}. Click a block to add a section (Esc to cancel).`);
+    },
+
+    // Merge a drawn extension section into a locked path and PATCH it to the
+    // server. Self-overlap is rejected (except the shared anchor block) so a
+    // path cannot loop back on itself. Staging conflicts with other paths are
+    // handled server-side by the claim engine, so no frontend check is needed.
+    extendPath(sectionBlocks, sectionSwitchAssignments) {
+        const pathId = this.extendPathId;
+        if (!pathId) return;
+        const p = this.lockedPaths.find(x => x.id === pathId);
+        if (!p) return;
+
+        const existing = p.blocks || [];
+        const anchor = this.extendAnchorBlockId;
+        const inExisting = new Set();
+        for (const b of existing) {
+            if (b !== anchor) inExisting.add(b);
+        }
+        for (const b of sectionBlocks) {
+            if (inExisting.has(b)) {
+                this.updateStatus(`Cannot extend: section passes through block ${b} already in the path.`);
+                return;
+            }
+        }
+
+        const merged = existing.slice();
+        const startSlice = (existing.length > 0 && existing[existing.length - 1] === sectionBlocks[0]) ? 1 : 0;
+        for (let i = startSlice; i < sectionBlocks.length; i++) merged.push(sectionBlocks[i]);
+
+        const switchAssignments = Object.assign({}, p.switchAssignments || {}, sectionSwitchAssignments);
+        const signalIds = this._getSignalIdsForPath(merged);
+        const blockSignals = this._getBlockSignalIds(merged);
+
+        const pathEntry = {
+            blocks: merged,
+            startBlock: p.startBlock,
+            destBlock: merged[merged.length - 1],
+            switchAssignments: switchAssignments,
+            signalIds: signalIds,
+            blockSignals: blockSignals
+        };
+
+        const newAnchor = merged[merged.length - 1];
+        this._resetSelection();
+        this.extendPathId = pathId;
+        this.extendAnchorBlockId = newAnchor;
+
+        fetch(new URL(`/path/${pathId}`, location), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pathEntry)
+        })
+        .then(resp => {
+            if (!resp.ok) {
+                this.updateStatus(`Failed to extend path ${pathId}.`);
+                this._resetSelection();
+                this.rerender();
+                return;
+            }
+            fetch(new URL('/path', location))
+                .then(r => r.json())
+                .then(serverData => {
+                    this.syncFromServer(serverData);
+                    this.state = 'extendingPath';
+                    this._needsRerender = false;
+                    this._addExtendAnchorMarker(newAnchor);
+                    this.rerender();
+                    this.updateStatus(`Extended path ${pathId} to block ${newAnchor} (${merged.length} blocks). Click a block to keep adding (Esc to cancel).`);
+                });
+        })
+        .catch(() => {
+            this.updateStatus(`Failed to extend path ${pathId}.`);
+            this._resetSelection();
+            this.rerender();
+        });
+    },
+
+    _extendAnchorMarkers: new Map(),
+
+    _addExtendAnchorMarker(blockId) {
+        if (!switchboardMap || this._extendAnchorMarkers.has(blockId)) return;
+        const center = this._getBlockCenter(blockId);
+        if (!center) return;
+        const pos = switchboardRenderer ? switchboardRenderer.coordsToLatLng(center.x, center.y) : L.latLng(center.y, center.x);
+        const marker = L.circle(pos, {
+            radius: 0.45,
+            color: '#fff',
+            weight: 1,
+            fillColor: this.MODE_GREEN,
+            fillOpacity: 1
+        }).addTo(switchboardMap);
+        this._extendAnchorMarkers.set(blockId, marker);
+    },
+
+    _clearExtendAnchorMarkers() {
+        if (!switchboardMap) {
+            this._extendAnchorMarkers.clear();
+            return;
+        }
+        for (const marker of this._extendAnchorMarkers.values()) {
+            switchboardMap.removeLayer(marker);
+        }
+        this._extendAnchorMarkers.clear();
+    },
+
     onSegmentClick(segmentId) {
         if (!this.enabled) return;
         const seg = TrackData.getSegment(segmentId);
@@ -647,7 +799,7 @@ const PathingController = {
     },
 
     onSegmentHover(segmentId) {
-        if (this.state !== 'selectingDest') return;
+        if (!this._isDrawing()) return;
         const seg = TrackData.getSegment(segmentId);
         if (!seg || !seg.blockId) return;
         this.onBlockHover(seg.blockId);
@@ -788,7 +940,11 @@ const PathingController = {
         if (this._onKeyDown) return;
         this._onKeyDown = e => {
             if (e.key === 'Escape') {
-                if (this.state !== 'idle') {
+                if (this.state === 'extendingPath') {
+                    this._resetSelection();
+                    this.rerender();
+                    this.updateStatus('Extending cancelled.');
+                } else if (this.state !== 'idle') {
                     this._resetSelection();
                     this.rerender();
                     this.updateStatus('Cancelled. Click an occupied block to begin.');
@@ -873,9 +1029,9 @@ const PathingController = {
         return '#666';
     },
 
-    renderPathList() {
+    renderPathList(force) {
         try {
-            if (typeof switchboardRepaint !== 'undefined' && switchboardRepaint && !switchboardRepaint.pathsSignatureChanged()) {
+            if (!force && typeof switchboardRepaint !== 'undefined' && switchboardRepaint && !switchboardRepaint.pathsSignatureChanged()) {
                 return;
             }
             const el = document.getElementById('pathList');
@@ -895,13 +1051,18 @@ const PathingController = {
                     return `<span style="display:inline-block;background:${color};color:#000;font-size:11px;padding:1px 5px;margin:1px;border-radius:3px;${extra}font-weight:600">${b}</span>`;
                 }).join('');
                 const pid = p.id;
-                return `<div style="margin:6px 0;padding:4px;">
+                const isExtending = this.state === 'extendingPath' && this.extendPathId === pid;
+                const rowStyle = isExtending
+                    ? 'margin:6px 0;padding:4px;border:1px solid #2fbf4f;border-radius:4px;'
+                    : 'margin:6px 0;padding:4px;';
+                return `<div style="${rowStyle}">
                     <div style="display:flex;align-items:center;gap:6px;">
                         <span style="color:#4c4;font-size:14px">\u2713</span>
                         <span style="font-size:13px;font-weight:600;flex:1">${label}</span>
                         <button onclick="PathingController._printPath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer" title="Print path to F12 console">\u{1F4DD}</button>
                         <button onclick="PathingController._deletePath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#c44" title="Delete this path">\u2716</button>
                         <button onclick="PathingController._advancePath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#48f" title="Claim next block">\u25B6</button>
+                        <button onclick="PathingController.beginExtendPath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#2fbf4f" title="Add unclaimed sections to this path">\u2295</button>
                     </div>
                     <input id="note-${pid}" type="text" placeholder="Locomotive / destination / note" value="${note}"
                         style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:2px 5px;font-size:11px;background:#222;color:#ddd;border:1px solid #555;border-radius:3px;"
@@ -945,7 +1106,11 @@ const PathingController = {
             } else {
                 el.textContent = 'Pathing: disabled';
             }
-            this.renderPathList();
+            // The signature guard would hide extend-mode row highlighting, so
+            // force a rebuild whenever extend mode is active or just changed.
+            const interacting = this.state !== 'idle';
+            this.renderPathList(interacting || this._wasInteracting);
+            this._wasInteracting = interacting;
         } catch (e) {
             console.warn('[Pathing] updateStatus error:', e);
         }

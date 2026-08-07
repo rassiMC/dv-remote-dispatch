@@ -4,6 +4,11 @@ const TrackRenderer = {
     segmentLayers: new Map(),
     switchBounds: new Map(),
     showSignalAspects: true,
+    CLEAR_GRAY: '#888888',
+    CLEAR_GREEN: '#208020',
+    CLEAR_YELLOW: '#c9a800',
+    CLEAR_LIGHTBLUE: '#7ec8ff',
+    OCCUPIED_RED: '#a02020',
     blockColors: ['#4CAF50', '#2196F3', '#FF9800', '#E91E63', '#9C27B0', '#00BCD4'],
     colorIndex: 0,
 
@@ -139,31 +144,41 @@ const TrackRenderer = {
         }
     },
 
+    resolveBlockColor(blockId, segmentId) {
+        const block = TrackData.getBlock(blockId);
+        if (!block) return '#666';
+
+        if (block.occupancyState === 'occupied') {
+            return this.OCCUPIED_RED;
+        }
+
+        let upcomingCount = 0;
+        let claimed = false;
+        if (typeof PathingController !== 'undefined' && PathingController.lockedPaths.length > 0) {
+            for (const p of PathingController.lockedPaths) {
+                if (!p.blocks || !p.blocks.includes(blockId)) continue;
+                const state = p.blockStates && p.blockStates[blockId];
+                if (state === 'claimed') {
+                    claimed = true;
+                } else {
+                    upcomingCount++;
+                }
+            }
+        }
+
+        if (claimed) return this.CLEAR_GREEN;
+        if (upcomingCount > 1) return this.CLEAR_YELLOW;
+        if (upcomingCount === 1) return this.CLEAR_LIGHTBLUE;
+        return this.CLEAR_GRAY;
+    },
+
     renderSegment(segment) {
         if (this.segmentLayers.has(segment.id)) {
             this.clearSegment(segment.id);
         }
 
         const block = TrackData.getBlockForSegment(segment.id);
-        let color;
-        if (!block) {
-            color = '#666';
-        } else if (block.occupancyState === 'occupied') {
-            color = '#a02020';
-        } else if (block.occupancyState === 'clear') {
-            if (typeof PathingController !== 'undefined' && PathingController.showGrayClear) {
-                color = '#888';
-            } else {
-                color = '#208020';
-            }
-        } else {
-            color = '#888';
-        }
-
-        if (typeof PathingController !== 'undefined' && (PathingController.state !== 'idle' || PathingController.lockedPaths.length > 0)) {
-            const pathOverride = PathingController.getOverridesForSegment(segment.id);
-            if (pathOverride) color = pathOverride.color;
-        }
+        const color = block ? this.resolveBlockColor(block.id, segment.id) : '#666';
 
         let layer;
         
@@ -251,14 +266,6 @@ const TrackRenderer = {
         const currentBranch = ingameData?.currentBranch;
 
         let rimColor = color;
-        if (typeof PathingController !== 'undefined' && (PathingController.state !== 'idle' || PathingController.lockedPaths.length > 0)) {
-            const pcRim = PathingController.getSwitchRimColor(segment.id);
-            if (pcRim) rimColor = pcRim;
-        } else if (typeof SwitchboardSignals !== 'undefined' && SwitchboardSignals.initialized && typeof SwitchboardOccupancy !== 'undefined' && SwitchboardOccupancy.mode === 'hardcore') {
-            const aspectState = SwitchboardSignals.getSwitchAspectForBlock(segment.id);
-            if (aspectState === 'clear') rimColor = '#208020';
-            else if (aspectState === 'occupied') rimColor = '#a02020';
-        }
 
         const rect = L.rectangle(rectBounds, {
             color: rimColor,

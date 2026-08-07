@@ -337,8 +337,11 @@ and finally `main.js?v=...` (cache-busted with a date).
   chosen path is converted to `{blocks, switchAssignments, signalIds,
   blockSignals}` and POSTed to `/path`. The server assigns the path an id and
   seeding; the frontend keeps server-side `blockStates` in sync via
-  `syncFromServer`, rendering claimed (green), waiting (yellow), occupied
-  (red) segments + switch rims.
+  `syncFromServer`, rendering colours via `TrackRenderer.resolveBlockColor`:
+  Gray (clear, no path), Green (claimed by an active path), Light Blue (in
+  exactly one upcoming path), Yellow (in more than one path), Red (occupied,
+  always wins). Draft path-selection highlighting (start/dest hover) is
+  transient UX with its own colours.
 - `PathingController` is armed by the `enablePathing` flag via the `modconfig`
   tag (not by the view toggle). Activation (`POST /pathing/activate`) is only
   sent once a real switch→junction mapping exists; if the flag is on before the
@@ -426,6 +429,16 @@ they are fair game for agent help:
 3. A **new DoubleTrack mod version** is planned; it will need a new
    switchboard layout, but work can only start once the scope of that release
    is known (coordinated with the maintainer).
+
+> Resolved: block colouring is unified. `TrackRenderer.resolveBlockColor` is
+> now the single source of truth for block colours:
+> **Gray** = clear, no pathing info; **Green** = claimed by an active path
+> (staging current/lookahead window); **Light Blue** = will be in exactly one
+> upcoming path; **Yellow** = will be in more than one path; **Red** =
+> occupied (always wins, even when a path includes the block). Priority is
+> Red > Green > Yellow > Light Blue. `PathingController.getOverridesForSegment`
+> / `getSwitchRimColor` were removed; locked-path colouring now flows through
+> `resolveBlockColor`, and the sidebar path chips use the same palette.
 
 > Resolved: pathing disable/re-enable is now a clean operation
 > (`PathingActivation.DeactivatePathingMode()`), and the map ⇄ switchboard view

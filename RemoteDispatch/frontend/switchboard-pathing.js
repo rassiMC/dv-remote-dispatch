@@ -14,7 +14,7 @@ const PathingController = {
     _needsRerender: false,
     _serverActive: false,
 
-    MODE_YELLOW: '#ffdd44',
+    MODE_YELLOW: '#c9a800',
     MODE_BLUE: '#4488ff',
     MODE_GREEN: '#208020',
     MODE_RED: '#a02020',
@@ -314,16 +314,21 @@ const PathingController = {
         const seg = TrackData.getSegment(segId);
         if (!seg || !seg.blockId) return null;
         const blockId = seg.blockId;
-        const override = this.getOverridesForSegment(segId);
-        if (override) return override.color;
-        if (seg.type === 'switch') {
-            const rim = this.getSwitchRimColor(segId);
-            if (rim) return rim;
+
+        if (this.currentPathBlocks.includes(blockId)) {
+            const block = TrackData.getBlock(blockId);
+            if (block && block.occupancyState === 'occupied') return this.MODE_RED;
+            if (blockId === this.startBlockId) return this.MODE_BLUE;
+            if (blockId === this.destBlockId) return this.MODE_YELLOW;
+            return this.MODE_YELLOW;
         }
+
+        if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer.resolveBlockColor)
+            return switchboardRenderer.resolveBlockColor(blockId, segId);
+
         const block = TrackData.getBlock(blockId);
         if (!block) return '#888';
-        if (block.occupancyState === 'occupied') return '#a02020';
-        if (block.occupancyState === 'clear') return this.showGrayClear ? '#888' : '#208020';
+        if (block.occupancyState === 'occupied') return this.MODE_RED;
         return '#888';
     },
 
@@ -383,60 +388,6 @@ const PathingController = {
         this.onBlockHoverEnd();
     },
 
-    getOverridesForSegment(segId) {
-        const seg = TrackData.getSegment(segId);
-        if (!seg || !seg.blockId) return null;
-        const blockId = seg.blockId;
-
-        if (this.lockedPaths.length > 0) {
-            for (const p of this.lockedPaths) {
-                if (p.blocks && p.blocks.includes(blockId)) {
-                    if (p.blockStates && p.blockStates[blockId]) {
-                        const state = p.blockStates[blockId];
-                        if (state === 'claimed') return { color: this.MODE_GREEN };
-                        if (state === 'unclaimed' || state === 'waiting') return { color: this.MODE_YELLOW };
-                        return null;
-                    }
-                }
-            }
-        }
-
-        if (this.currentPathBlocks.includes(blockId)) {
-            const block = TrackData.getBlock(blockId);
-            if (block && block.occupancyState === 'occupied') return { color: this.MODE_RED };
-            if (blockId === this.startBlockId) return { color: this.MODE_BLUE };
-            if (blockId === this.destBlockId) return { color: this.MODE_YELLOW };
-            return { color: this.MODE_YELLOW };
-        }
-
-        return null;
-    },
-
-    getSwitchRimColor(swId) {
-        const seg = TrackData.getSegment(swId);
-        if (!seg || !seg.blockId) return null;
-        const blockId = seg.blockId;
-
-        if (this.lockedPaths.length > 0) {
-            for (const p of this.lockedPaths) {
-                if (p.blocks && p.blocks.includes(blockId)) {
-                    if (p.blockStates && p.blockStates[blockId]) {
-                        const state = p.blockStates[blockId];
-                        if (state === 'claimed') return this.MODE_GREEN;
-                        if (state === 'unclaimed' || state === 'waiting') return this.MODE_YELLOW;
-                        return null;
-                    }
-                }
-            }
-        }
-
-        if (this.currentPathBlocks.includes(blockId)) {
-            return this.MODE_YELLOW;
-        }
-
-        return null;
-    },
-
     syncFromServer(serverPaths) {
         if (!this.enabled) return;
         const oldBlockIds = new Set();
@@ -454,14 +405,19 @@ const PathingController = {
 
         const allBlockIds = new Set([...oldBlockIds, ...newBlockIds]);
         const changedSegments = [];
+        const changedSwitches = [];
         for (const blockId of allBlockIds) {
             const block = TrackData.getBlock(blockId);
             if (block && block.segmentIds) {
-                changedSegments.push(...block.segmentIds);
+                for (const segId of block.segmentIds) {
+                    const seg = TrackData.getSegment(segId);
+                    if (seg && seg.type === 'switch') changedSwitches.push(segId);
+                    else changedSegments.push(segId);
+                }
             }
         }
 
-        this.rerender(changedSegments, []);
+        this.rerender(changedSegments, changedSwitches);
         this.renderPathList();
     },
 
@@ -612,11 +568,11 @@ const PathingController = {
             });
     },
 
-    _stateColor(state) {
-        if (state === 'claimed') return '#208020';
-        if (state === 'unclaimed' || state === 'waiting') return '#ffdd44';
-        if (state === 'occupied') return '#a02020';
-        if (state === 'completed') return '#888';
+    _blockChipColor(blockId) {
+        if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer.resolveBlockColor)
+            return switchboardRenderer.resolveBlockColor(blockId, null);
+        const block = TrackData.getBlock(blockId);
+        if (block && block.occupancyState === 'occupied') return this.MODE_RED;
         return '#666';
     },
 
@@ -632,9 +588,9 @@ const PathingController = {
                 const label = `${p.startBlock || '?'} \u2192 ${p.destBlock || '?'}`;
                 const blockChips = (p.blocks || []).map((b, i) => {
                     const state = (p.blockStates && p.blockStates[b]) || 'unclaimed';
-                    const color = this._stateColor(state);
-                    const isCurrent = state === 'occupied';
-                    const extra = isCurrent ? 'border:1px solid #fff;' : 'border:1px solid transparent;';
+                    const color = this._blockChipColor(b);
+                    const isOccupied = color === this.MODE_RED || (state === 'occupied');
+                    const extra = isOccupied ? 'border:1px solid #fff;' : 'border:1px solid transparent;';
                     return `<span style="display:inline-block;background:${color};color:#000;font-size:11px;padding:1px 5px;margin:1px;border-radius:3px;${extra}font-weight:600">${b}</span>`;
                 }).join('');
                 const pid = p.id;

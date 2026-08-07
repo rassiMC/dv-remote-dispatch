@@ -96,9 +96,10 @@ namespace DvMod.RemoteDispatch
                 var occupancy = OccupancyData.GetOccupancyData();
                 if (blocksArr.Length > 0 && occupancy.TryGetValue(blocksArr[0], out var occ) && occ == true)
                 {
-                    if (blocksArr.Length > 1)
-                        ActivateLookAhead(staging, occupancy);
+                    ActivateBlock(blocksArr[0], staging);
                 }
+
+                _retryTimes[pathId] = DateTime.UtcNow;
             }
         }
 
@@ -129,7 +130,7 @@ namespace DvMod.RemoteDispatch
                     return false;
 
                 var occupancy = OccupancyData.GetOccupancyData();
-                var (ok, count) = TryClaimFrom(staging, b2Index, int.MaxValue, occupancy);
+                var (ok, count) = TryClaimFrom(staging, b2Index, int.MaxValue, occupancy, manualAdvance: true);
                 if (ok)
                 {
                     int claimedEnd = b2Index + count - 1;
@@ -233,6 +234,19 @@ namespace DvMod.RemoteDispatch
             return (claimed, b1, b1 + 1);
         }
 
+        /// <summary>
+        /// Counts how many blocks the path has claimed strictly ahead of its
+        /// current block (the contiguous lookahead window). Excludes the block
+        /// the train currently occupies.
+        /// </summary>
+        private static int CountClaimedAhead(PathStaging staging)
+        {
+            var (claimed, b1Index, _) = GetClaimWindowEnd(staging);
+            if (!claimed)
+                return 0;
+            return b1Index - staging.currentBlockIndex;
+        }
+
         private static List<string> GetPathsWithBlockUpcoming(string blockId, string excludePathId)
         {
             var result = new List<string>();
@@ -307,25 +321,6 @@ namespace DvMod.RemoteDispatch
             }
 
             PathingData.RemovePrefixFromPath(staging.pathId, removeCount);
-        }
-
-        private static void ActivateLookAhead(PathStaging staging, Dictionary<string, bool?> occupancy)
-        {
-            int windowStart = staging.currentBlockIndex + 1;
-            int windowEnd = Math.Min(staging.currentBlockIndex + staging.lookAhead, staging.blocks.Length - 1);
-
-            for (int i = windowStart; i <= windowEnd; i++)
-            {
-                var blockId = staging.blocks[i];
-                if (_activeBlocks.ContainsKey(blockId))
-                    break;
-                if (!_blockQueues.TryGetValue(blockId, out var queue) || queue.Count == 0 || queue[0] != staging.pathId)
-                    break;
-                if (occupancy.TryGetValue(blockId, out var occ) && occ == true)
-                    break;
-
-                ActivateBlock(blockId, staging);
-            }
         }
 
         private static void ActivateBlock(string blockId, PathStaging staging)
@@ -445,13 +440,18 @@ namespace DvMod.RemoteDispatch
         /// <summary>
         /// Conflict-aware claim attempt. Tries to claim blocks starting at
         /// startIndex, respecting opposing/upcoming paths and physical occupancy.
+        /// When manualAdvance is true (the Claim Next block button) it claims a
+        /// single block when nothing is in the way, and the full cleared range
+        /// when clearing through opposing traffic. Otherwise it fills up to
+        /// maxBlocks (the automatic lookahead window).
         /// Returns (success, claimedCount); claimedCount == 0 means nothing claimed.
         /// </summary>
         private static (bool, int) TryClaimFrom(
             PathStaging staging,
             int startIndex,
             int maxBlocks,
-            Dictionary<string, bool?> occupancy)
+            Dictionary<string, bool?> occupancy,
+            bool manualAdvance = false)
         {
             if (startIndex >= staging.blocks.Length)
                 return (false, 0);
@@ -493,7 +493,7 @@ namespace DvMod.RemoteDispatch
 
                 int claimLimit = Math.Min(clearCount, maxBlocks);
                 int claimCount = 0;
-                for (int i = startIndex; i < startIndex + claimLimit && i < staging.blocks.Length; i++)
+                for (int i = startIndex; i < staging.blocks.Length && (i - startIndex) < claimLimit; i++)
                 {
                     var blockId = staging.blocks[i];
                     if (_activeBlocks.TryGetValue(blockId, out var claimer) && claimer != staging.pathId)
@@ -521,9 +521,13 @@ namespace DvMod.RemoteDispatch
             }
             else
             {
+                int bound = manualAdvance ? 1 : maxBlocks;
                 int claimCount = 0;
-                for (int i = startIndex; i < staging.blocks.Length && i < startIndex + maxBlocks; i++)
+
+                for (int i = startIndex; i < staging.blocks.Length; i++)
                 {
+                    if ((i - startIndex) >= bound)
+                        break;
                     var blockId = staging.blocks[i];
                     if (_activeBlocks.ContainsKey(blockId))
                         break;
@@ -607,17 +611,24 @@ namespace DvMod.RemoteDispatch
                     if (staging.status != "Active")
                         continue;
 
-                    var (_, b1Index, b2Index) = GetClaimWindowEnd(staging);
+                    var (_, b1Index, _) = GetClaimWindowEnd(staging);
                     int ws = b1Index + 1;
 
                     if (ws < staging.blocks.Length)
                     {
-                        bool tryNow = true;
-                        if (_retryTimes.TryGetValue(staging.pathId, out var retryTime)
-                            && DateTime.UtcNow < retryTime)
-                            tryNow = false;
+                        bool canTry = true;
 
-                        if (tryNow)
+                        if (CountClaimedAhead(staging) >= 5)
+                        {
+                            canTry = false;
+                        }
+                        else if (_retryTimes.TryGetValue(staging.pathId, out var retryTime)
+                                 && DateTime.UtcNow < retryTime)
+                        {
+                            canTry = false;
+                        }
+
+                        if (canTry)
                         {
                             int we = Math.Min(staging.currentBlockIndex + staging.lookAhead, staging.blocks.Length - 1);
                             int maxBlocks = we - ws + 1;

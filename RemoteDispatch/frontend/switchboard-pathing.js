@@ -13,6 +13,11 @@ const PathingController = {
     _hoverTimer: null,
     _needsRerender: false,
     _serverActive: false,
+    _pathTreeCache: null,
+    _pathTreeSource: null,
+    _pathStatusTable: new Map(),
+    _blockSwitchSegments: new Map(),
+    _switchBlockIds: new Set(),
 
     MODE_YELLOW: '#c9a800',
     MODE_BLUE: '#4488ff',
@@ -33,10 +38,14 @@ const PathingController = {
 
         this._blockSwitchPorts = new Map();
         this._switchSwitchPorts = new Map();
+        this._blockSwitchSegments = new Map();
 
         const nodeToBlocks = new Map();
         for (const [segId, seg] of TrackData.segments) {
             if (!seg.blockId) continue;
+            if (seg.type === 'switch') {
+                this._blockSwitchSegments.set(seg.blockId, segId);
+            }
             for (const nodeName of ['n1', 'n2', 'merging', 'nl', 'nr']) {
                 const nid = seg[nodeName];
                 if (!nid) continue;
@@ -45,6 +54,7 @@ const PathingController = {
                     nodeToBlocks.get(nid).push({ blockId: seg.blockId, segId, type: seg.type });
             }
         }
+        this._switchBlockIds = new Set(this._blockSwitchSegments.keys());
 
         for (const [nodeId, entries] of nodeToBlocks) {
             if (entries.length < 2) continue;
@@ -59,6 +69,8 @@ const PathingController = {
         }
 
         this._blockGraph = graph;
+        this._pathTreeCache = null;
+        this._pathTreeSource = null;
         return graph;
     },
 
@@ -98,75 +110,114 @@ const PathingController = {
         const graph = this._blockGraph;
         if (!graph.has(fromBlockId) || !graph.has(toBlockId)) return null;
 
-        const openSet = [fromBlockId];
+        const tree = this._ensurePathTree(fromBlockId);
+        if (!tree.has(toBlockId)) return null;
+
+        const path = [];
+        let node = toBlockId;
+        while (node !== undefined) {
+            path.unshift(node);
+            if (node === fromBlockId) break;
+            node = tree.get(node);
+        }
+        if (path[0] !== fromBlockId) return null;
+
+        const switchAssignments = {};
+        for (let i = 1; i < path.length - 1; i++) {
+            const blockId = path[i];
+            if (!this._switchBlockIds.has(blockId)) continue;
+
+            const prevBlock = path[i - 1];
+            const nextBlock = path[i + 1];
+
+            const inPort = this._getPortForBlockAtSwitch(prevBlock, blockId);
+            const outPort = this._getPortForBlockAtSwitch(nextBlock, blockId);
+            if (!inPort || !outPort) continue;
+
+            const branch = inPort === 'common' && outPort === 'left' ? 0 :
+                inPort === 'common' && outPort === 'right' ? 1 :
+                outPort === 'common' && inPort === 'left' ? 0 :
+                outPort === 'common' && inPort === 'right' ? 1 : null;
+            if (branch !== null)
+                switchAssignments[blockId] = branch;
+            else
+                return null;
+        }
+        return { blocks: path, switchAssignments };
+    },
+
+    // Single-source shortest-path tree from `source` (parent-pointer map),
+    // computed once per source with a binary heap and memoized. Every hover
+    // path query from the same start is then an O(path length) trace-back.
+    _ensurePathTree(source) {
+        if (this._pathTreeCache && this._pathTreeSource === source) {
+            return this._pathTreeCache;
+        }
+        if (!this._blockGraph) this.buildBlockGraph();
+        const graph = this._blockGraph;
+
         const cameFrom = new Map();
-        const gScore = new Map();
-        gScore.set(fromBlockId, 0);
-        const openIdx = new Map();
-        openIdx.set(fromBlockId, 0);
+        cameFrom.set(source, undefined);
+        const gScore = new Map([[source, 0]]);
+        const heap = [{ id: source, g: 0 }];
+        const closed = new Set();
 
-        while (openSet.length > 0) {
-            let current = openSet[0], currentG = gScore.get(current) ?? Infinity;
-            let bestIdx = 0;
-            for (let i = 1; i < openSet.length; i++) {
-                const g = gScore.get(openSet[i]) ?? Infinity;
-                if (g < currentG) { currentG = g; current = openSet[i]; bestIdx = i; }
+        const heapPush = item => {
+            const h = heap;
+            h.push(item);
+            let i = h.length - 1;
+            while (i > 0) {
+                const p = (i - 1) >> 1;
+                if (h[p].g <= h[i].g) break;
+                const t = h[p]; h[p] = h[i]; h[i] = t;
+                i = p;
             }
-            openSet[bestIdx] = openSet[openSet.length - 1];
-            openSet.pop();
-            openIdx.delete(current);
-
-            if (current === toBlockId) {
-                const path = [];
-                let node = current;
-                while (node) {
-                    path.unshift(node);
-                    node = cameFrom.get(node);
+        };
+        const heapPop = () => {
+            const h = heap;
+            const top = h[0];
+            const last = h.pop();
+            if (h.length > 0 && last) {
+                h[0] = last;
+                let i = 0;
+                while (true) {
+                    const l = i * 2 + 1;
+                    const r = l + 1;
+                    let smallest = i;
+                    if (l < h.length && h[l].g < h[smallest].g) smallest = l;
+                    if (r < h.length && h[r].g < h[smallest].g) smallest = r;
+                    if (smallest === i) break;
+                    const t = h[i]; h[i] = h[smallest]; h[smallest] = t;
+                    i = smallest;
                 }
-                const switchAssignments = {};
-                for (let i = 1; i < path.length - 1; i++) {
-                    const blockId = path[i];
-                    const prevBlock = path[i - 1];
-                    const nextBlock = path[i + 1];
-
-                    const isSwitch = Array.from(TrackData.segments.values()).some(
-                        s => s.type === 'switch' && s.blockId === blockId
-                    );
-                    if (!isSwitch) continue;
-
-                    const inPort = this._getPortForBlockAtSwitch(prevBlock, blockId);
-                    const outPort = this._getPortForBlockAtSwitch(nextBlock, blockId);
-                    if (!inPort || !outPort) continue;
-
-                    const branch = inPort === 'common' && outPort === 'left' ? 0 :
-                        inPort === 'common' && outPort === 'right' ? 1 :
-                        outPort === 'common' && inPort === 'left' ? 0 :
-                        outPort === 'common' && inPort === 'right' ? 1 : null;
-                    if (branch !== null)
-                        switchAssignments[blockId] = branch;
-                    else
-                        return null;
-                }
-                return { blocks: path, switchAssignments };
             }
+            return top;
+        };
+
+        while (heap.length > 0) {
+            const current = heapPop().id;
+            if (closed.has(current)) continue;
+            closed.add(current);
+            const curG = gScore.get(current);
 
             const entry = graph.get(current);
             if (!entry) continue;
 
             for (const neighbor of entry.neighbors) {
                 const nbrId = neighbor.blockId;
-                const tentG = (gScore.get(current) ?? Infinity) + 1;
+                if (closed.has(nbrId)) continue;
+                const tentG = curG + 1;
                 if (tentG < (gScore.get(nbrId) ?? Infinity)) {
-                    cameFrom.set(nbrId, current);
                     gScore.set(nbrId, tentG);
-                    if (!openIdx.has(nbrId)) {
-                        openSet.push(nbrId);
-                        openIdx.set(nbrId, openSet.length - 1);
-                    }
+                    cameFrom.set(nbrId, current);
+                    heapPush({ id: nbrId, g: tentG });
                 }
             }
         }
-        return null;
+
+        this._pathTreeCache = cameFrom;
+        this._pathTreeSource = source;
+        return cameFrom;
     },
 
     _getSignalIdsForPath(path) {
@@ -223,6 +274,8 @@ const PathingController = {
         this.destBlockId = null;
         this.currentPathBlocks = [];
         this.currentPathSwitchAssignments = {};
+        this._pathTreeCache = null;
+        this._pathTreeSource = null;
     },
 
     onBlockClick(blockId) {
@@ -332,6 +385,34 @@ const PathingController = {
         return '#888';
     },
 
+    getBlockPathStatusTable() {
+        return this._pathStatusTable;
+    },
+
+    // Rebuild the blockId -> { claimed, upcomingCount } table once per paths
+    // sync. resolveBlockColor reads this instead of scanning every path per
+    // segment, so block colouring is O(blocks + paths) instead of
+    // O(segments x paths) per repaint.
+    rebuildPathStatusTable() {
+        const table = new Map();
+        if (this.enabled) {
+            for (const p of this.lockedPaths) {
+                if (!p.blocks) continue;
+                for (const blockId of p.blocks) {
+                    let entry = table.get(blockId);
+                    if (!entry) {
+                        entry = { claimed: false, upcomingCount: 0 };
+                        table.set(blockId, entry);
+                    }
+                    const state = p.blockStates && p.blockStates[blockId];
+                    if (state === 'claimed') entry.claimed = true;
+                    else entry.upcomingCount++;
+                }
+            }
+        }
+        this._pathStatusTable = table;
+    },
+
     confirmPath(blocks, switchAssignments, startBlock, destBlock) {
         if (!blocks || blocks.length === 0) return;
 
@@ -397,27 +478,31 @@ const PathingController = {
 
         const paths = Array.isArray(serverPaths) ? serverPaths : [];
         this.lockedPaths = paths;
+        this.rebuildPathStatusTable();
 
-        const newBlockIds = new Set();
+        const allBlockIds = new Set(oldBlockIds);
         for (const p of this.lockedPaths) {
-            if (p.blocks) for (const b of p.blocks) newBlockIds.add(b);
+            if (p.blocks) for (const b of p.blocks) allBlockIds.add(b);
         }
 
-        const allBlockIds = new Set([...oldBlockIds, ...newBlockIds]);
-        const changedSegments = [];
-        const changedSwitches = [];
-        for (const blockId of allBlockIds) {
-            const block = TrackData.getBlock(blockId);
-            if (block && block.segmentIds) {
-                for (const segId of block.segmentIds) {
-                    const seg = TrackData.getSegment(segId);
-                    if (seg && seg.type === 'switch') changedSwitches.push(segId);
-                    else changedSegments.push(segId);
+        if (typeof switchboardRepaint !== 'undefined' && switchboardRepaint) {
+            switchboardRepaint.markBlocks(allBlockIds);
+        } else {
+            const changedSegments = [];
+            const changedSwitches = [];
+            for (const blockId of allBlockIds) {
+                const block = TrackData.getBlock(blockId);
+                if (block && block.segmentIds) {
+                    for (const segId of block.segmentIds) {
+                        const seg = TrackData.getSegment(segId);
+                        if (seg && seg.type === 'switch') changedSwitches.push(segId);
+                        else changedSegments.push(segId);
+                    }
                 }
             }
+            this.rerender(changedSegments, changedSwitches);
         }
 
-        this.rerender(changedSegments, changedSwitches);
         this.renderPathList();
     },
 
@@ -434,6 +519,7 @@ const PathingController = {
                 if (resp.ok) {
                     this.lockedPaths = [];
                     this._resetSelection();
+                    this.rebuildPathStatusTable();
                     this.rerender();
                     this.updateStatus('All paths cleared.');
                 } else if (resp.status === 403) {
@@ -452,10 +538,12 @@ const PathingController = {
             .then(resp => resp.json())
             .then(data => {
                 this.lockedPaths = Array.isArray(data) ? data : [];
+                this.rebuildPathStatusTable();
                 this.rerender();
                 this.updateStatus('Click an occupied block to start, then a destination block.');
             })
             .catch(() => {
+                this.rebuildPathStatusTable();
                 this.rerender();
                 this.updateStatus('Click an occupied block to start, then a destination block.');
             });
@@ -503,6 +591,7 @@ const PathingController = {
         this._resetSelection();
         this.lockedPaths = [];
         this._serverActive = false;
+        this.rebuildPathStatusTable();
         this.rerender();
         this.updateStatus('disabled');
     },
@@ -578,6 +667,9 @@ const PathingController = {
 
     renderPathList() {
         try {
+            if (typeof switchboardRepaint !== 'undefined' && switchboardRepaint && !switchboardRepaint.pathsSignatureChanged()) {
+                return;
+            }
             const el = document.getElementById('pathList');
             if (!el) return;
             if (!this.enabled || this.lockedPaths.length === 0) {

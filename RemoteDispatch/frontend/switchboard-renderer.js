@@ -65,17 +65,28 @@ const TrackRenderer = {
 
     rerenderBlocks(blockIds) {
         const _t0 = performance.now();
-        for (const seg of TrackData.segments.values()) {
-            const block = TrackData.getBlockForSegment(seg.id);
-            if (block && blockIds.has(block.id)) {
-                this.renderSegment(seg);
+        for (const blockId of blockIds) {
+            const block = TrackData.getBlock(blockId);
+            if (!block || !block.segmentIds) continue;
+            for (const segId of block.segmentIds) {
+                this.renderSegment(TrackData.getSegment(segId));
             }
         }
         const _elapsed = performance.now() - _t0;
         if (_elapsed > 100) console.warn(`[PERF] rerenderBlocks(${blockIds.size}) took ${_elapsed.toFixed(0)}ms`);
     },
 
-    rerenderSwitches() {
+    rerenderSwitches(switchIds) {
+        if (switchIds && switchIds.size > 0) {
+            const _t0 = performance.now();
+            for (const swId of switchIds) {
+                const seg = TrackData.getSegment(swId);
+                if (seg && seg.type === 'switch') this.renderSegment(seg);
+            }
+            const _elapsed = performance.now() - _t0;
+            if (_elapsed > 100) console.warn(`[PERF] rerenderSwitches(${switchIds.size}) took ${_elapsed.toFixed(0)}ms`);
+            return;
+        }
         for (const seg of TrackData.segments.values()) {
             if (seg.type === 'switch') {
                 this.renderSegment(seg);
@@ -154,15 +165,12 @@ const TrackRenderer = {
 
         let upcomingCount = 0;
         let claimed = false;
-        if (typeof PathingController !== 'undefined' && PathingController.lockedPaths.length > 0) {
-            for (const p of PathingController.lockedPaths) {
-                if (!p.blocks || !p.blocks.includes(blockId)) continue;
-                const state = p.blockStates && p.blockStates[blockId];
-                if (state === 'claimed') {
-                    claimed = true;
-                } else {
-                    upcomingCount++;
-                }
+        if (typeof PathingController !== 'undefined' && PathingController.enabled &&
+            typeof PathingController.getBlockPathStatusTable === 'function') {
+            const entry = PathingController.getBlockPathStatusTable().get(blockId);
+            if (entry) {
+                claimed = entry.claimed;
+                upcomingCount = entry.upcomingCount;
             }
         }
 
@@ -173,6 +181,7 @@ const TrackRenderer = {
     },
 
     renderSegment(segment) {
+        if (!segment) return null;
         if (this.segmentLayers.has(segment.id)) {
             this.clearSegment(segment.id);
         }

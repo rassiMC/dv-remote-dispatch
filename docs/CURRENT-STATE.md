@@ -296,6 +296,9 @@ and finally `main.js?v=...` (cache-busted with a date).
   still syncing `blockStates` and rendering to the hidden switchboard map, so
   returning to the board shows up-to-date paths.
 - `#switchboard-map` uses `L.CRS.Simple` with
+  `preferCanvas: true` (all existing `L.polyline`/`L.rectangle`/`L.circle`
+  layers created without an explicit renderer adopt the map's canvas renderer;
+  the original map with job/track overlays keeps its own `L.canvas()`).
   `TrackRenderer.coordsToLatLng(x, y) = L.latLng(y, x)` - i.e. switchboard
   "x/y" are treated as lng/lat directly (no fancy geographic projection).
 - `loadSampleTrackData()` fetches `/modconfig` to learn `doubleTrack` +
@@ -359,6 +362,27 @@ and finally `main.js?v=...` (cache-busted with a date).
 - The sidebar `#pathList` renders each locked path with block chips, a
   print-to-console button, a delete button, and a ▶**advance** button (backed
   by `/path/{id}/advance`).
+
+### Switchboard performance notes
+- The switchboard map uses `preferCanvas: true` (§ "Switchboard view"), so all
+  ~1.5–1.7k track segments + switches render to one canvas instead of thousands
+  of SVG DOM nodes.
+- Repaints are **coalesced** through `switchboardRepaint` (`main.js`): tag
+  handlers (`occupancy`, `paths`, `signals`, `junctions`) mutate state and mark
+  dirty blocks/switches; a single `requestAnimationFrame` pass renders the union
+  once, and multiple tags in one poll (or consecutive 100ms polls) collapse into
+  one pass. While the board is hidden (`!body.switchboard-active`) painting is
+  skipped; the show-toggle full repaint catches up. The path-list sidebar DOM is
+  only rebuilt when its signature (ids/blocks/`blockStates`) changes.
+- Per-block colouring now reads a precomputed block → `{claimed,
+  upcomingCount}` table (`PathingController.rebuildPathStatusTable`) instead of
+  scanning every locked path per segment, and `TrackData.getBlockForSegment` is
+  O(1) via `_segmentBlockMap`. `renderSegment`/`rerenderBlocks` operate on
+  `block.segmentIds`, so a changed block re-renders only its own segments.
+- Path searching (`PathingController.computeBlockPath`) is now a **memoized
+  single-source shortest-path tree** (binary-heap Dijkstra computed once per
+  start block); each hover target is an O(path length) trace-back from the
+  cached parent-pointer map.
 
 ### Permission model (frontend-facing)
 `Permissions` in `Settings.cs`: per-user toggles for junctions, loco control,

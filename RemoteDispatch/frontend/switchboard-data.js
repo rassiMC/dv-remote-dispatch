@@ -2,6 +2,7 @@ const TrackData = {
     nodes: new Map(),
     segments: new Map(),
     blocks: new Map(),
+    _segmentBlockMap: new Map(),
     nextNodeId: 1,
     nextSegmentId: 1,
     nextBlockId: 1,
@@ -95,16 +96,30 @@ const TrackData = {
         }
         if (blockId) {
             const block = this.blocks.get(blockId);
-            if (block && !block.segmentIds.includes(segmentId)) {
-                block.segmentIds.push(segmentId);
+            if (block) {
+                if (!block.segmentIds.includes(segmentId)) {
+                    block.segmentIds.push(segmentId);
+                }
+                this._segmentBlockMap.set(segmentId, blockId);
+                return;
+            }
+        }
+        this._segmentBlockMap.delete(segmentId);
+    },
+
+    _rebuildSegmentBlockMap() {
+        this._segmentBlockMap.clear();
+        for (const [blockId, block] of this.blocks) {
+            if (!block.segmentIds) continue;
+            for (const segId of block.segmentIds) {
+                this._segmentBlockMap.set(segId, blockId);
             }
         }
     },
 
     getBlockForSegment(segmentId) {
-        for (const block of this.blocks.values()) {
-            if (block.segmentIds.includes(segmentId)) return block;
-        }
+        const blockId = this._segmentBlockMap.get(segmentId);
+        if (blockId !== undefined) return this.blocks.get(blockId) || null;
         return null;
     },
 
@@ -116,6 +131,7 @@ const TrackData = {
         this.nodes.clear();
         this.segments.clear();
         this.blocks.clear();
+        this._segmentBlockMap.clear();
         this.nextNodeId = 1;
         this.nextSegmentId = 1;
         this.nextBlockId = 1;
@@ -140,6 +156,7 @@ const TrackData = {
         this.nextNodeId = data.nextNodeId ?? this.nextNodeId;
         this.nextSegmentId = data.nextSegmentId ?? this.nextSegmentId;
         this.nextBlockId = data.nextBlockId ?? this.nextBlockId;
+        this._rebuildSegmentBlockMap();
     },
 
     save(name) {
@@ -180,6 +197,7 @@ const TrackData = {
         visited.add(segmentId);
         seg.blockId = block.id;
         block.segmentIds.push(segmentId);
+        this._segmentBlockMap.set(segmentId, block.id);
 
         const nodesToExplore = [];
         if (entryNodeId === null) {
@@ -201,6 +219,7 @@ const TrackData = {
 
     groupIntoBlocks() {
         this.blocks.clear();
+        this._segmentBlockMap.clear();
         for (const seg of this.segments.values()) {
             seg.blockId = null;
         }
@@ -230,6 +249,7 @@ const TrackData = {
 
             seg.blockId = targetBlock.id;
             targetBlock.segmentIds.push(seg.id);
+            this._segmentBlockMap.set(seg.id, targetBlock.id);
         }
 
         if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer && switchboardRenderer.rerenderAllSegments) {

@@ -820,11 +820,135 @@ function updateAllSignals(signalsData) {
 		SwitchboardSignals.updateAllVirtualSignals();
 	}
 
+	if (switchboardRepaint.exist()) {
+		if (anyChanged) switchboardRepaint.markAllSwitches();
+		return;
+	}
 	if (anyChanged && typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
 		switchboardRenderer.rerenderSwitches();
 	}
 
 }
+
+/////////////////////
+// switchboard repaint coalescer
+//
+// Every tag handler mutates state and calls switchboardRepaint.markBlocks()/
+// markAllSegments()/markAllSwitches() instead of painting directly. A single
+// debounced pass (rAF) then renders the union of dirty blocks once, and while
+// the board is hidden it skips painting; the toggle's full repaint on show
+// covers anything marked while hidden.
+
+function switchboardVisible() {
+	return document.body.classList.contains('switchboard-active');
+}
+
+const switchboardRepaint = {
+	_blocks: null,
+	_allSegments: false,
+	_allSwitches: false,
+	_scheduled: false,
+	_repainting: false,
+	_lastPathsSignature: '',
+
+	init() {
+		this._blocks = new Set();
+		this._allSegments = false;
+		this._allSwitches = false;
+		this._scheduled = false;
+		this._repainting = false;
+	},
+
+	markBlocks(blockIds) {
+		if (!this._blocks || this._repainting) {
+			if (switchboardRenderer) switchboardRenderer.rerenderBlocks(blockIds);
+			return;
+		}
+		for (const blockId of blockIds) {
+			const block = TrackData.getBlock(blockId);
+			if (block && block.segmentIds) {
+				for (const segId of block.segmentIds) {
+					this._blocks.add(segId);
+				}
+			}
+		}
+		this._schedule();
+	},
+
+	markAllSegments() {
+		if (!this._blocks || this._repainting) {
+			if (switchboardRenderer) switchboardRenderer.rerenderAllSegments();
+			return;
+		}
+		this._allSegments = true;
+		this._schedule();
+	},
+
+	markAllSwitches() {
+		if (!this._blocks || this._repainting) {
+			if (switchboardRenderer) switchboardRenderer.rerenderSwitches();
+			return;
+		}
+		this._allSwitches = true;
+		this._schedule();
+	},
+
+	_schedule() {
+		if (this._scheduled) return;
+		this._scheduled = true;
+		requestAnimationFrame(() => {
+			this._scheduled = false;
+			this.flush();
+		});
+	},
+
+	exist() {
+		return this._blocks !== null;
+	},
+
+	flush() {
+		if (!switchboardRenderer || !this.exist()) return;
+		try {
+			if (!switchboardVisible()) {
+				if (typeof PathingController !== 'undefined') PathingController.renderPathList();
+				return;
+			}
+			this._repainting = true;
+			if (this._allSegments) {
+				switchboardRenderer.rerenderAllSegments();
+			} else {
+				if (this._blocks.size > 0) switchboardRenderer.rerenderBlocks(this._blocks);
+				if (this._allSwitches) switchboardRenderer.rerenderSwitches();
+			}
+		} finally {
+			this._repainting = false;
+			this._blocks.clear();
+			this._allSegments = false;
+			this._allSwitches = false;
+			if (typeof PathingController !== 'undefined') PathingController.renderPathList();
+		}
+	},
+
+	// Compare the paths/blockStates signature for the sidebar path list so we
+	// only rebuild its DOM when it actually changed.
+	pathsSignatureChanged() {
+		if (typeof PathingController === 'undefined') return false;
+		const p = PathingController.lockedPaths;
+		if (!p) return false;
+		let sig = '';
+		for (const path of p) {
+			sig += (path.id || '') + ':' + (path.startBlock || '') + ':' + (path.destBlock || '') + ';';
+			const states = path.blockStates || {};
+			for (const b of (path.blocks || [])) sig += b + (states[b] || 'u') + ',';
+			sig += '|';
+		}
+		if (sig !== this._lastPathsSignature) {
+			this._lastPathsSignature = sig;
+			return true;
+		}
+		return false;
+	},
+};
 
 function updateBlockOccupancy(occupancyData) {
 	if (typeof TrackData === 'undefined' || !TrackData.blocks) return;
@@ -834,22 +958,23 @@ function updateBlockOccupancy(occupancyData) {
 		return;
 	}
 
-	let changed = false;
+	const changedBlocks = new Set();
 	for (const [blockId, occupied] of Object.entries(occupancyData)) {
 		const block = TrackData.getBlock(blockId);
 		if (block) {
 			const newState = occupied === null ? 'unknown' : (occupied ? 'occupied' : 'clear');
 			if (block.occupancyState !== newState) {
 				block.occupancyState = newState;
-				changed = true;
+				changedBlocks.add(blockId);
 			}
 		}
 	}
 
-	if (changed) {
+	if (changedBlocks.size > 0 && switchboardRepaint.exist()) {
+		switchboardRepaint.markBlocks(changedBlocks);
+	} else if (changedBlocks.size > 0) {
 		switchboardRenderer.rerenderAllSegments();
 	}
-
 }
 
 function computeAllBlockOccupancyFromVirtualSignals() {
@@ -863,7 +988,9 @@ function computeAllBlockOccupancyFromVirtualSignals() {
 			changedBlocks.add(blockId);
 		}
 	}
-	if (changedBlocks.size > 0 && typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
+	if (changedBlocks.size > 0 && switchboardRepaint.exist()) {
+		switchboardRepaint.markBlocks(changedBlocks);
+	} else if (changedBlocks.size > 0 && typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
 		switchboardRenderer.rerenderBlocks(changedBlocks);
 		if (typeof switchboardRenderer.rerenderSwitches === 'function') {
 			switchboardRenderer.rerenderSwitches();
@@ -1216,6 +1343,9 @@ switchboardToggleBtn.addEventListener('click', () => {
 	switchboardToggleBtn.textContent = isActive ? 'Show Map' : 'Show Switchboard';
 	if (isActive) {
 		initSwitchboard();
+		if (switchboardRenderer) {
+			switchboardRenderer.rerenderAllSegments();
+		}
 		if (switchboardMap) {
 			setTimeout(() => switchboardMap.invalidateSize(), 50);
 		}
@@ -1839,7 +1969,8 @@ function initSwitchboard() {
 			zoomControl: false,
 			center: [0, 0],
 			zoom: 10,
-			crs: L.CRS.Simple
+			crs: L.CRS.Simple,
+			preferCanvas: true
 		});
 
 		switchboardMap.on('contextmenu', e => {
@@ -1858,6 +1989,7 @@ function initSwitchboard() {
 			// Initialize track renderer
 			switchboardRenderer = Object.create(TrackRenderer);
 			switchboardRenderer.init(switchboardMap);
+			switchboardRepaint.init();
 
 			if (typeof SwitchboardOccupancy !== 'undefined') {
 				SwitchboardOccupancy.sendMode();

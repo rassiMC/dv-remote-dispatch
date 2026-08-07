@@ -3,6 +3,7 @@ const PathingController = {
     state: 'idle',
     startBlockId: null,
     destBlockId: null,
+    waypoints: [],
     currentPathBlocks: [],
     currentPathSwitchAssignments: {},
     lockedPaths: [],
@@ -14,15 +15,19 @@ const PathingController = {
     _needsRerender: false,
     _serverActive: false,
     _pathTreeCache: null,
-    _pathTreeSource: null,
+    _pathTreeKey: null,
+    _pathTreeCount: 0,
     _pathStatusTable: new Map(),
     _pathColors: new Map(),
     _blockSwitchSegments: new Map(),
     _switchBlockIds: new Set(),
+    _waypointMarkers: new Map(),
 
     MODE_BLUE: '#4488ff',
     MODE_YELLOW: '#c9a800',
     MODE_RED: '#a02020',
+    MODE_PURPLE: '#a44be0',
+    OCCUPIED_PENALTY: 5,
 
     get showGrayClear() {
         return this.enabled;
@@ -70,7 +75,8 @@ const PathingController = {
 
         this._blockGraph = graph;
         this._pathTreeCache = null;
-        this._pathTreeSource = null;
+        this._pathTreeKey = null;
+        this._pathTreeCount++;
         return graph;
     },
 
@@ -146,15 +152,41 @@ const PathingController = {
         return { blocks: path, switchAssignments };
     },
 
-    // Single-source shortest-path tree from `source` (parent-pointer map),
-    // computed once per source with a binary heap and memoized. Every hover
-    // path query from the same start is then an O(path length) trace-back.
-    _ensurePathTree(source) {
-        if (this._pathTreeCache && this._pathTreeSource === source) {
-            return this._pathTreeCache;
+    // Chains computeBlockPath over [start, ...waypoints, dest], merging the
+    // hops and dropping the shared boundary block between consecutive hops.
+    // Waypoints are forced intermediate anchors for the draft route; they are
+    // not sent to the server and are forgotten once the path is confirmed.
+    computePathWithWaypoints(fromBlockId, toBlockId, waypoints) {
+        const anchors = [fromBlockId];
+        for (const w of waypoints) {
+            if (w !== anchors[anchors.length - 1]) anchors.push(w);
         }
+        if (toBlockId !== anchors[anchors.length - 1]) anchors.push(toBlockId);
+        if (anchors.length < 2) return null;
+
+        const blocks = [];
+        const switchAssignments = {};
+        for (let i = 1; i < anchors.length; i++) {
+            const hop = this.computeBlockPath(anchors[i - 1], anchors[i]);
+            if (!hop) return null;
+            const hopBlocks = hop.blocks;
+            const startSlice = (blocks.length === 0) ? 0 : 1;
+            for (let j = startSlice; j < hopBlocks.length; j++) blocks.push(hopBlocks[j]);
+            Object.assign(switchAssignments, hop.switchAssignments);
+        }
+        return { blocks, switchAssignments };
+    },
+
+    // Per-hop memoized tree used for waypoint routing: one entry per source
+    // block and per occupancy invalidation (see invalidatePathTree).
+    _ensurePathTree(source) {
         if (!this._blockGraph) this.buildBlockGraph();
         const graph = this._blockGraph;
+
+        const treeKey = `${source}#${this._pathTreeCount}`;
+        if (this._pathTreeCache && this._pathTreeKey === treeKey) {
+            return this._pathTreeCache;
+        }
 
         const cameFrom = new Map();
         cameFrom.set(source, undefined);
@@ -206,7 +238,7 @@ const PathingController = {
             for (const neighbor of entry.neighbors) {
                 const nbrId = neighbor.blockId;
                 if (closed.has(nbrId)) continue;
-                const tentG = curG + 1;
+                const tentG = curG + this._edgeCost(nbrId);
                 if (tentG < (gScore.get(nbrId) ?? Infinity)) {
                     gScore.set(nbrId, tentG);
                     cameFrom.set(nbrId, current);
@@ -216,8 +248,26 @@ const PathingController = {
         }
 
         this._pathTreeCache = cameFrom;
-        this._pathTreeSource = source;
+        this._pathTreeKey = treeKey;
         return cameFrom;
+    },
+
+    // Occupied blocks cost extra block-steps so routing prefers a detour around
+    // them, but still routes straight through when no detour exists. Only the
+    // destination itself is exempt: the tree is built from the start side, and
+    // every hop into another block pays for that block's occupancy.
+    _edgeCost(blockId) {
+        const block = TrackData.getBlock(blockId);
+        if (block && block.occupancyState === 'occupied') return 1 + this.OCCUPIED_PENALTY;
+        return 1;
+    },
+
+    // Occupancy changed, so edge costs may have changed too. Drop the memoized
+    // per-source trees; they are recomputed lazily on the next hover query.
+    invalidatePathTree() {
+        this._pathTreeCache = null;
+        this._pathTreeKey = null;
+        this._pathTreeCount++;
     },
 
     _getSignalIdsForPath(path) {
@@ -272,10 +322,12 @@ const PathingController = {
         this.state = 'idle';
         this.startBlockId = null;
         this.destBlockId = null;
+        this.waypoints = [];
         this.currentPathBlocks = [];
         this.currentPathSwitchAssignments = {};
         this._pathTreeCache = null;
-        this._pathTreeSource = null;
+        this._pathTreeKey = null;
+        this._clearWaypointMarkers();
     },
 
     onBlockClick(blockId) {
@@ -297,7 +349,7 @@ const PathingController = {
             this.rerender();
         } else if (this.state === 'selectingDest') {
             if (blockId === this.startBlockId) return;
-            const result = this.computeBlockPath(this.startBlockId, blockId);
+            const result = this.computePathWithWaypoints(this.startBlockId, blockId, this.waypoints);
             if (result && result.blocks.length > 0) {
                 this.destBlockId = blockId;
                 this._needsRerender = true;
@@ -306,6 +358,107 @@ const PathingController = {
                 this.updateStatus('No path found between those blocks.');
             }
         }
+    },
+
+    onBlockContextMenu(blockId) {
+        if (!this.enabled) return;
+        if (this.state !== 'selectingDest') return;
+        if (blockId === this.startBlockId) return;
+
+        const idx = this.waypoints.indexOf(blockId);
+        if (idx >= 0) {
+            this.waypoints.splice(idx, 1);
+            this._removeWaypointMarker(blockId);
+            this.updateStatus(`Waypoint ${blockId} removed. ${this.waypoints.length} waypoint(s).`);
+        } else {
+            this.waypoints.push(blockId);
+            this._addWaypointMarker(blockId);
+            this.updateStatus(`Waypoint added: ${blockId} [${this.waypoints.join(' -> ')}]. Click a destination block.`);
+        }
+        this._refreshHoverPath();
+    },
+
+    // Recompute the draft preview after a waypoint toggle so the shown route
+    // reroutes through the (new) waypoint set.
+    _refreshHoverPath() {
+        if (this.state !== 'selectingDest' || !this._hoverBlockId) return;
+        if (this._hoverTimer) {
+            clearTimeout(this._hoverTimer);
+            this._hoverTimer = null;
+        }
+        const hoverBlockId = this._hoverBlockId;
+        const result = this.computePathWithWaypoints(this.startBlockId, hoverBlockId, this.waypoints);
+        const oldBlocks = this.currentPathBlocks;
+        this.currentPathBlocks = [];
+        this.currentPathSwitchAssignments = {};
+        if (oldBlocks.length > 0)
+            this._updateSegmentColors(oldBlocks);
+        if (result && result.blocks.length > 0) {
+            this.currentPathBlocks = result.blocks;
+            this.currentPathSwitchAssignments = result.switchAssignments;
+            this._updateSegmentColors(result.blocks);
+        }
+    },
+
+    onSegmentContextMenu(segmentId) {
+        if (!this.enabled) return;
+        const seg = TrackData.getSegment(segmentId);
+        if (!seg || !seg.blockId) return;
+        this.onBlockContextMenu(seg.blockId);
+    },
+
+    // Purple dot markers for draft waypoints. They are selection-only layers,
+    // kept separate from the coalesced block repaints, and are torn down on
+    // reset/confirm.
+    _getBlockCenter(blockId) {
+        const block = TrackData.getBlock(blockId);
+        if (!block || !block.segmentIds || block.segmentIds.length === 0) return null;
+        let sx = 0, sy = 0, count = 0;
+        for (const segId of block.segmentIds) {
+            const seg = TrackData.getSegment(segId);
+            if (!seg) continue;
+            for (const nodeId of [seg.n1, seg.n2, seg.merging, seg.nl, seg.nr]) {
+                const node = TrackData.getNode(nodeId);
+                if (!node) continue;
+                sx += node.x; sy += node.y; count++;
+            }
+        }
+        if (count === 0) return null;
+        return { x: sx / count, y: sy / count };
+    },
+
+    _addWaypointMarker(blockId) {
+        if (!switchboardMap || this._waypointMarkers.has(blockId)) return;
+        const center = this._getBlockCenter(blockId);
+        if (!center) return;
+        const pos = switchboardRenderer ? switchboardRenderer.coordsToLatLng(center.x, center.y) : L.latLng(center.y, center.x);
+        const marker = L.circle(pos, {
+            radius: 0.45,
+            color: '#fff',
+            weight: 1,
+            fillColor: this.MODE_PURPLE,
+            fillOpacity: 1
+        }).addTo(switchboardMap);
+        this._waypointMarkers.set(blockId, marker);
+    },
+
+    _removeWaypointMarker(blockId) {
+        const marker = this._waypointMarkers.get(blockId);
+        if (marker) {
+            if (switchboardMap) switchboardMap.removeLayer(marker);
+            this._waypointMarkers.delete(blockId);
+        }
+    },
+
+    _clearWaypointMarkers() {
+        if (!switchboardMap) {
+            this._waypointMarkers.clear();
+            return;
+        }
+        for (const marker of this._waypointMarkers.values()) {
+            switchboardMap.removeLayer(marker);
+        }
+        this._waypointMarkers.clear();
     },
 
     onBlockHover(blockId) {
@@ -321,7 +474,7 @@ const PathingController = {
 
         this._hoverTimer = setTimeout(() => {
             this._hoverTimer = null;
-            const result = this.computeBlockPath(this.startBlockId, blockId);
+            const result = this.computePathWithWaypoints(this.startBlockId, blockId, this.waypoints);
             const oldBlocks = this.currentPathBlocks;
             this.currentPathBlocks = [];
             this.currentPathSwitchAssignments = {};
@@ -372,9 +525,12 @@ const PathingController = {
             const block = TrackData.getBlock(blockId);
             if (block && block.occupancyState === 'occupied') return this.MODE_RED;
             if (blockId === this.startBlockId) return this.MODE_BLUE;
+            if (this.waypoints.includes(blockId)) return this.MODE_PURPLE;
             if (blockId === this.destBlockId) return this.MODE_YELLOW;
             return this.MODE_YELLOW;
         }
+
+        if (this.waypoints.includes(blockId)) return this.MODE_PURPLE;
 
         if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer.resolveBlockColor)
             return switchboardRenderer.resolveBlockColor(blockId, segId);
@@ -655,7 +811,7 @@ const PathingController = {
     _printPath(pathId) {
         const p = this.lockedPaths.find(x => x.id === pathId);
         if (!p) { console.warn('[Pathing] Path not found:', pathId); return; }
-        console.log(`=== Path ${pathId}: ${p.startBlock || '?'} → ${p.destBlock || '?'} ===`);
+        console.log(`=== Path ${pathId}: ${p.startBlock || '?'} → ${p.destBlock || '?'}${p.note ? ` [${p.note}]` : ''} ===`);
         console.log(`Blocks (${(p.blocks || []).length}):`);
         for (const b of (p.blocks || [])) {
             const state = (p.blockStates && p.blockStates[b]) || 'unclaimed';
@@ -689,6 +845,26 @@ const PathingController = {
             });
     },
 
+    _saveNote(pathId) {
+        const p = this.lockedPaths.find(x => x.id === pathId);
+        if (!p) return;
+        const input = document.getElementById(`note-${pathId}`);
+        if (!input) return;
+        const note = input.value.trim();
+        fetch(new URL(`/path/${pathId}/note`, location), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ note: note })
+        })
+            .then(resp => {
+                if (!resp.ok) {
+                    console.warn('[Pathing] Failed to save note for', pathId);
+                    return;
+                }
+                p.note = note || undefined;
+            });
+    },
+
     _blockChipColor(blockId) {
         if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer.resolveBlockColor)
             return switchboardRenderer.resolveBlockColor(blockId, null);
@@ -710,6 +886,7 @@ const PathingController = {
             }
             const items = this.lockedPaths.map((p) => {
                 const label = `${p.startBlock || '?'} \u2192 ${p.destBlock || '?'}`;
+                const note = p.note || '';
                 const blockChips = (p.blocks || []).map((b, i) => {
                     const state = (p.blockStates && p.blockStates[b]) || 'unclaimed';
                     const color = this._blockChipColor(b);
@@ -726,6 +903,10 @@ const PathingController = {
                         <button onclick="PathingController._deletePath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#c44" title="Delete this path">\u2716</button>
                         <button onclick="PathingController._advancePath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#48f" title="Claim next block">\u25B6</button>
                     </div>
+                    <input id="note-${pid}" type="text" placeholder="Locomotive / destination / note" value="${note}"
+                        style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:2px 5px;font-size:11px;background:#222;color:#ddd;border:1px solid #555;border-radius:3px;"
+                        title="Note for this path"
+                        onchange="PathingController._saveNote('${pid}')"/>
                     <div style="margin-top:4px;line-height:1.8">${blockChips}</div>
                 </div>`;
             }).join('');

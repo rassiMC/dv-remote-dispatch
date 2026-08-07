@@ -536,6 +536,30 @@ namespace DvMod.RemoteDispatch
 				return;
 			}
 
+			if (method == "PATCH" && segments.Length >= 4 && segments[3].TrimEnd('/') == "note")
+			{
+				try
+				{
+					const int maxBodySize = 524288;
+					using var stream = context.Request.InputStream;
+					using var ms = new System.IO.MemoryStream();
+					stream.CopyTo(ms);
+					if (ms.Length > maxBodySize)
+						throw new Exception("Request body too large");
+					string bodyText = Encoding.UTF8.GetString(ms.ToArray());
+					var noteObj = JObject.Parse(bodyText);
+					var pathId = segments[2].TrimEnd('/');
+					PathingData.UpdatePathNote(pathId, noteObj.Value<string>("note"));
+					RenderEmpty(context, 204);
+				}
+				catch (Exception e)
+				{
+					Main.Warning($"Failed to parse path note request: {e.Message}");
+					RenderEmpty(context, 400);
+				}
+				return;
+			}
+
 			if (method == "PATCH" && segments.Length >= 3)
 			{
 				try

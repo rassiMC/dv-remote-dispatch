@@ -156,6 +156,8 @@ namespace DvMod.RemoteDispatch
                 if (existing != null)
                 {
                     oldPath = (JObject)existing.DeepClone();
+                    if (oldPath["note"] != null && pathEntry.Property("note") == null)
+                        pathEntry["note"] = oldPath["note"];
                     paths[paths.IndexOf(existing)] = (JObject)pathEntry.DeepClone();
                 }
             }
@@ -166,6 +168,20 @@ namespace DvMod.RemoteDispatch
                     StagingData.UpdatePath(id, newBlocks);
                 Sessions.AddTag("paths");
             }
+        }
+
+        public static void UpdatePathNote(string id, string? note)
+        {
+            lock (paths)
+            {
+                var p = paths.FirstOrDefault(x => x.Value<string>("id") == id);
+                if (p == null) return;
+                if (string.IsNullOrEmpty(note))
+                    p.Remove("note");
+                else
+                    p["note"] = note;
+            }
+            Sessions.AddTag("paths");
         }
 
         public static void RemovePrefixFromPath(string id, int count)

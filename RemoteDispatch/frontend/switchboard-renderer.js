@@ -286,6 +286,15 @@ const TrackRenderer = {
             }
         });
 
+        polyline.on('contextmenu', (e) => {
+            // Stop the Leaflet event so the map-level contextmenu (cancel
+            // selection) does not also fire after a waypoint toggle.
+            L.DomEvent.stop(e);
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.onSegmentContextMenu(segment.id);
+            }
+        });
+
         polyline.on('mouseover', () => {
             if (typeof PathingController !== 'undefined' && PathingController.enabled) {
                 PathingController.onSegmentHover(segment.id);
@@ -447,6 +456,15 @@ const TrackRenderer = {
                     .catch(err => console.error(`%c[${segment.id}] toggle failed: ${err.message}`, 'color: #ff0000'));
             } else {
                 console.log(`%c[${segment.id}] -> NO MAPPING (unmapped switch)`, 'color: #ff0000');
+            }
+        });
+
+        group.on('contextmenu', (e) => {
+            // Stop the Leaflet event so the map-level contextmenu (cancel
+            // selection) does not also fire after a waypoint toggle.
+            L.DomEvent.stop(e);
+            if (typeof PathingController !== 'undefined' && PathingController.enabled) {
+                PathingController.onSegmentContextMenu(segment.id);
             }
         });
 

@@ -934,7 +934,7 @@ const switchboardRepaint = {
 		if (!p) return false;
 		let sig = '';
 		for (const path of p) {
-			sig += (path.id || '') + ':' + (path.startBlock || '') + ':' + (path.destBlock || '') + ';';
+			sig += (path.id || '') + ':' + (path.startBlock || '') + ':' + (path.destBlock || '') + ':' + (path.note || '') + ';';
 			const states = path.blockStates || {};
 			for (const b of (path.blocks || [])) sig += b + (states[b] || 'u') + ',';
 			sig += '|';
@@ -967,6 +967,14 @@ function updateBlockOccupancy(occupancyData) {
 		}
 	}
 
+	if (changedBlocks.size > 0) {
+		// Occupancy feeds the pathfinding edge cost, so drop the memoized A*
+		// trees whenever it changes; they are rebuilt lazily on the next hover.
+		if (typeof PathingController !== 'undefined' && PathingController) {
+			PathingController.invalidatePathTree();
+		}
+	}
+
 	if (changedBlocks.size > 0 && switchboardRepaint.exist()) {
 		switchboardRepaint.markBlocks(changedBlocks);
 	} else if (changedBlocks.size > 0) {
@@ -983,6 +991,11 @@ function computeAllBlockOccupancyFromVirtualSignals() {
 		if (block.occupancyState !== newState) {
 			block.occupancyState = newState;
 			changedBlocks.add(blockId);
+		}
+	}
+	if (changedBlocks.size > 0) {
+		if (typeof PathingController !== 'undefined' && PathingController) {
+			PathingController.invalidatePathTree();
 		}
 	}
 	if (changedBlocks.size > 0 && switchboardRepaint.exist()) {
@@ -1972,6 +1985,9 @@ function initSwitchboard() {
 
 		switchboardMap.on('contextmenu', e => {
 			if (typeof PathingController !== 'undefined' && PathingController.enabled && PathingController.state !== 'idle') {
+				// Right-click on empty map cancels selection; right-click on a
+				// segment/switch toggles a waypoint and is stopped upstream so it
+				// does not reach this map-level handler.
 				PathingController._resetSelection();
 				PathingController.rerender();
 				PathingController.updateStatus('Cancelled. Click an occupied block to begin.');

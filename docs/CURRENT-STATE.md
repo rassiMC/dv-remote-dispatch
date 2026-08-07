@@ -141,6 +141,7 @@ Server: `Server/HttpServer.cs` (port from `Main.settings.serverPort`, default
 | `/signals` | GET | Sessions/SignalsShim | all-signals data (gated by `enableSignals`) |
 | `/occupancy` | GET/POST | OccupancyData | occupancy JSON; POST sets mapping/mode |
 | `/path` | GET/POST/PATCH/DELETE | PathingData/StagingData | path CRUD + `…/advance` |
+| `/path/{id}/note` | PATCH | PathingData | set a path's note text |
 | `/staging` | GET | StagingData | path staging state JSON |
 | `/pathing/activate` | POST | PathingActivation | enter pathing mode + seed staging |
 | `/signal/control` | POST | SignalsShim | set signal aspect/mode (permission-gated) |
@@ -224,10 +225,12 @@ branch-entry ("In") signals can be attributed to a junction.
 - `PathingData` - in-memory `List<JObject>` of "path" entries. Each path has:
   `id` (`p{n}`), `blocks` (`JArray` of block ids), `startBlock`, `destBlock`,
   `switchAssignments` (blockId → branch 0/1), `signalIds`, `blockSignals`
-  (blockId → signal id), plus `lookAhead`. Paths are visible to the frontend
-  via `/path` GET and enriched with per-block `blockStates` from `StagingData`.
+  (blockId → signal id), plus `lookAhead` and an optional `note` (free text,
+  preserved across path updates via `UpdatePathNote`). Paths are visible to the
+  frontend via `/path` GET and enriched with per-block `blockStates` from
+  `StagingData`.
   CRUD: `AddPath`, `RemovePath`, `UpdatePath`, `RemovePrefixFromPath`,
-  `RemovePathFromStoredList`, `ClearPaths`.
+  `RemovePathFromStoredList`, `ClearPaths`, `UpdatePathNote`.
 - `StagingData` - the **route-claim engine**. Models each path's progress as
   `PathStaging { blocks[], currentBlockIndex, lookAhead, status }` and keeps
   per-block queues (`_blockQueues`, pathId per block) plus `_activeBlocks`
@@ -347,12 +350,12 @@ and finally `main.js?v=...` (cache-busted with a date).
   the live graph and deleted along with the earlier J26 fix).
 
 ### Pathing UX (frontend)
-- Backed by `PathingController`. Selecting a block: start must be an *occupied*
-  block; destination is any block that is path-reachable. A* over the block
-  graph (built as "block nodes, edge via common junction/switch ports"). The
-  chosen path is converted to `{blocks, switchAssignments, signalIds,
-  blockSignals}` and POSTed to `/path`. The server assigns the path an id and
-  seeding; the frontend keeps server-side `blockStates` in sync via
+- Backed by `PathingController`. To create a new path: start must be an
+  *occupied* block; destination is any block that is path-reachable. A*
+  over the block graph (built as "block nodes, edge via common junction/switch
+  ports"). The chosen path is converted to `{blocks, switchAssignments,
+  signalIds, blockSignals}` and POSTed to `/path`. The server assigns the path
+  an id and seeding; the frontend keeps server-side `blockStates` in sync via
   `syncFromServer`, rendering colours via `TrackRenderer.resolveBlockColor`:
   each locked path has a stable random **blue-dominant** colour
   (`randomPathColor`); a block in one upcoming path shows that path's colour,
@@ -360,14 +363,38 @@ and finally `main.js?v=...` (cache-busted with a date).
   block shows the path colour boosted green (`claimColor`), and an **occupied**
   block is always red and wins over path colouring. Draft path-selection
   highlighting (start/dest hover) is transient UX with its own colours.
+- **Waypoints** (right-click on a segment/switch while drafting) force the
+  draft route through intermediate blocks: the draft is chained over
+  `[start, ...waypoints, dest]` (`computePathWithWaypoints`, merging boundary
+  blocks). Waypoints are draft-only - not sent to the server - and are cleared
+  when the path is confirmed. Right-click on empty map cancels the draft. The
+  path search behind this (`computeBlockPath` → `_ensurePathTree`) is a
+  per-source **memoized Dijkstra tree** that is invalidated whenever occupancy
+  changes (`invalidatePathTree`), so edge costs stay current.
+- **Extending a locked path** (⊕ button in the sidebar, `beginExtendPath`) is
+  the **favoured way to grow a route**: the path's last block becomes the
+  anchor, the same hover/A*/waypoint drafting draws a section from it, and
+  confirming PATCHes the merged route (`extendPath` → `PATCH /path/{id}`),
+  staying in extend mode so further sections chain on. Self-overlap is rejected
+  (`extendPath` refuses a section that loops back through an existing block
+  other than the anchor); staging conflicts with other paths are handled
+  server-side by the claim engine. Esc / right-click cancels extend mode.
+  Because extend keeps the route anchored and re-anchors at the new end each
+  time, it is intended to replace the waypoint-driven *new path* flow as the
+  primary routing UX.
+- **Path notes**: each locked path has a sidebar note field ("locomotive /
+  destination / note") saved via `PATCH /path/{id}/note`
+  (`PathingData.UpdatePathNote`), preserved across path updates, and echoed in
+  the console `_printPath` output.
 - `PathingController` is armed by the `enablePathing` flag via the `modconfig`
   tag (not by the view toggle). Activation (`POST /pathing/activate`) is only
   sent once a real switch→junction mapping exists; if the flag is on before the
   switchboard is ever opened, `enableFromMapping()` fires the activation as soon
   as the board builds its mapping.
-- The sidebar `#pathList` renders each locked path with block chips, a
-  print-to-console button, a delete button, and a ▶**advance** button (backed
-  by `/path/{id}/advance`).
+- The sidebar `#pathList` renders each locked path with block chips, a note
+  field, a ⊕ **extend** button, a print-to-console button, a delete button, and
+  a ▶**advance** button (backed by `/path/{id}/advance`). The row being extended
+  is highlighted with a green border.
 
 ### Switchboard performance notes
 - The switchboard map uses `preferCanvas: true` (§ "Switchboard view"), so all

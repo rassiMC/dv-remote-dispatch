@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   colour; upcoming blocks show the path colour (blended where paths overlap),
   claimed blocks show the path colour boosted green, and occupied blocks stay
   red. Sidebar path chips use the same colouring.
+- Draft route **waypoints**: right-clicking a segment/switch while drawing
+  forces the draft route through that block (`computePathWithWaypoints`), and
+  right-click empty map cancels. The path search between hops is a per-source
+  memoized Dijkstra tree that is invalidated on occupancy changes.
+- **Extend mode** (⊕ per locked path): anchors at the path's last block and
+  reuses the same hover/A*/waypoint drafting to append unclaimed sections via
+  `PATCH /path/{id}`, staying in extend mode for chained sections (self-overlap
+  rejected). Intended to become the primary way to grow routes, superseding the
+  waypoint-driven new-path flow.
+- **Path notes**: per-path free-text field (locomotive/destination/note) saved
+  via `PATCH /path/{id}/note`, preserved across path updates, and shown in the
+  console print output.
 
 ### Fixed
 

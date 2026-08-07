@@ -40,7 +40,11 @@ A dispatcher looking at the switchboard should be able to, at a glance:
   it, and click a switch to throw it (permission-gated).
 - **Route a train**: pick an occupied block as the start, pick a destination -
   the tool proposes a path through consecutive blocks/switches, with the
-  required switch alignments and the signals to clear.
+  required switch alignments and the signals to clear. Growing a route is
+  primarily done by **extending** an existing locked path (⊕ in the sidebar:
+  it anchors at the route's end and chains unclaimed sections through the same
+  drafting UI), which is the intended replacement for the waypoint-driven
+  new-path flow.
 - **Commit a route**: the route lives **server-side** (inside the mod), is
   ranked/queued, and the backend *stages* the path - clearing signals and
   aligning switches block-by-block as the train advances, holding a look-ahead

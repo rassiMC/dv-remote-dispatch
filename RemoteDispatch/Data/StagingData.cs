@@ -12,6 +12,7 @@ namespace DvMod.RemoteDispatch
         private static readonly object lockObj = new object();
 
         private const int DefaultLookAhead = 5;
+        private const int MaxAutoClaimAhead = 5;
 
         private class PathStaging
         {
@@ -618,7 +619,7 @@ namespace DvMod.RemoteDispatch
                     {
                         bool canTry = true;
 
-                        if (CountClaimedAhead(staging) >= 5)
+                        if (CountClaimedAhead(staging) >= MaxAutoClaimAhead)
                         {
                             canTry = false;
                         }
@@ -630,18 +631,14 @@ namespace DvMod.RemoteDispatch
 
                         if (canTry)
                         {
-                            int we = Math.Min(staging.currentBlockIndex + staging.lookAhead, staging.blocks.Length - 1);
-                            int maxBlocks = we - ws + 1;
+                            int maxBlocks = MaxAutoClaimAhead - CountClaimedAhead(staging);
 
                             var (claimed, _) = TryClaimFrom(staging, ws, maxBlocks, occupancy);
+                            _retryTimes[staging.pathId] = DateTime.UtcNow + RetryInterval;
+
                             if (claimed)
                             {
                                 changed = true;
-                                _retryTimes.Remove(staging.pathId);
-                            }
-                            else
-                            {
-                                _retryTimes[staging.pathId] = DateTime.UtcNow + RetryInterval;
                             }
                         }
                     }

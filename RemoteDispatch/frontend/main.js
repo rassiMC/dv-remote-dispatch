@@ -864,13 +864,10 @@ const switchboardRepaint = {
 			if (switchboardRenderer) switchboardRenderer.rerenderBlocks(blockIds);
 			return;
 		}
+		// Store block ids; rerenderBlocks resolves each block's segments
+		// (both regular and switch) in flush.
 		for (const blockId of blockIds) {
-			const block = TrackData.getBlock(blockId);
-			if (block && block.segmentIds) {
-				for (const segId of block.segmentIds) {
-					this._blocks.add(segId);
-				}
-			}
+			if (TrackData.getBlock(blockId)) this._blocks.add(blockId);
 		}
 		this._schedule();
 	},

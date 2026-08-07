@@ -34,6 +34,8 @@ namespace DvMod.RemoteDispatch
         private static Dictionary<string, PathStaging> _pathProgress = new Dictionary<string, PathStaging>();
         private static Dictionary<string, List<string>> _blockQueues = new Dictionary<string, List<string>>();
         private static Dictionary<string, string> _activeBlocks = new Dictionary<string, string>();
+        private static Dictionary<string, DateTime> _retryTimes = new Dictionary<string, DateTime>();
+        private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(20);
 
         private static List<string> GetQueue(string blockId)
         {
@@ -52,6 +54,7 @@ namespace DvMod.RemoteDispatch
                 _pathProgress.Clear();
                 _blockQueues.Clear();
                 _activeBlocks.Clear();
+                _retryTimes.Clear();
 
                 foreach (var path in paths)
                 {
@@ -108,6 +111,7 @@ namespace DvMod.RemoteDispatch
                 _pathProgress.Clear();
                 _blockQueues.Clear();
                 _activeBlocks.Clear();
+                _retryTimes.Clear();
             }
         }
 
@@ -120,27 +124,25 @@ namespace DvMod.RemoteDispatch
                 if (staging.status != "Active")
                     return false;
 
+                var (_, _, b2Index) = GetClaimWindowEnd(staging);
+                if (b2Index >= staging.blocks.Length)
+                    return false;
+
                 var occupancy = OccupancyData.GetOccupancyData();
-                int ws = staging.currentBlockIndex + 1;
-
-                for (int i = ws; i < staging.blocks.Length; i++)
+                var (ok, count) = TryClaimFrom(staging, b2Index, int.MaxValue, occupancy);
+                if (ok)
                 {
-                    var blockId = staging.blocks[i];
-                    if (_activeBlocks.ContainsKey(blockId))
-                        continue;
-                    if (occupancy.TryGetValue(blockId, out var occ) && occ == true)
-                        continue;
-
-                    int needed = i - staging.currentBlockIndex;
+                    int claimedEnd = b2Index + count - 1;
+                    int needed = claimedEnd - staging.currentBlockIndex;
                     if (needed > staging.lookAhead)
                         staging.lookAhead = needed;
 
-                    ActivateBlock(blockId, staging);
+                    _retryTimes.Remove(pathId);
                     Sessions.AddTag("paths");
-                    Sessions.AddTag("signals");
                     return true;
                 }
 
+                _retryTimes[pathId] = DateTime.UtcNow + RetryInterval;
                 return false;
             }
         }
@@ -165,6 +167,7 @@ namespace DvMod.RemoteDispatch
                         }
                     }
                     _pathProgress.Remove(pathId);
+                    _retryTimes.Remove(pathId);
                 }
             }
         }
@@ -175,6 +178,7 @@ namespace DvMod.RemoteDispatch
             {
                 if (!_pathProgress.TryGetValue(pathId, out var staging))
                     return;
+                _retryTimes.Remove(pathId);
 
                 var oldBlocks = staging.blocks;
                 foreach (var blockId in oldBlocks)
@@ -203,6 +207,81 @@ namespace DvMod.RemoteDispatch
                         queue.Add(pathId);
                 }
             }
+        }
+
+        /// Returns (b1Claimed, b1Index, b2Index): whether we hold a claim window,
+        /// the index of the furthest contiguous claim (B1), and the next index (B2).
+        /// If nothing is claimed, B1 is the current block (train location).
+        private static (bool, int, int) GetClaimWindowEnd(PathStaging staging)
+        {
+            int b1 = staging.currentBlockIndex;
+            bool claimed = false;
+
+            for (int i = staging.currentBlockIndex + 1; i < staging.blocks.Length; i++)
+            {
+                if (_activeBlocks.TryGetValue(staging.blocks[i], out var claimer) && claimer == staging.pathId)
+                {
+                    b1 = i;
+                    claimed = true;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            return (claimed, b1, b1 + 1);
+        }
+
+        private static List<string> GetPathsWithBlockUpcoming(string blockId, string excludePathId)
+        {
+            var result = new List<string>();
+
+            if (!_blockQueues.TryGetValue(blockId, out var queue))
+                return result;
+
+            foreach (var pathId in queue)
+            {
+                if (pathId == excludePathId)
+                    continue;
+                if (!_pathProgress.TryGetValue(pathId, out var other))
+                    continue;
+                if (other.status != "Active")
+                    continue;
+                if (_activeBlocks.TryGetValue(blockId, out var claimer) && claimer == pathId)
+                    continue;
+
+                bool upcoming = false;
+                for (int i = other.currentBlockIndex + 1; i < other.blocks.Length; i++)
+                {
+                    if (other.blocks[i] == blockId)
+                    {
+                        upcoming = true;
+                        break;
+                    }
+                }
+                if (upcoming)
+                    result.Add(pathId);
+            }
+            return result;
+        }
+
+        private static bool IsOpposing(PathStaging ours, PathStaging other, string b1BlockId, string b2BlockId)
+        {
+            int b1Idx = -1;
+            int b2Idx = -1;
+            for (int i = 0; i < other.blocks.Length; i++)
+            {
+                if (other.blocks[i] == b1BlockId) b1Idx = i;
+                if (other.blocks[i] == b2BlockId) b2Idx = i;
+            }
+
+            if (b1Idx < 0 || b2Idx < 0)
+                return false;
+
+            // Opposing: they encounter B2 before B1 (they travel the shared section
+            // in reverse order compared to us).
+            return b2Idx < b1Idx;
         }
 
         private static void PrunePastBlocks(PathStaging staging)
@@ -285,6 +364,178 @@ namespace DvMod.RemoteDispatch
             Sessions.AddTag("signals");
         }
 
+        /// <summary>
+        /// Recursively walks our route forward from startIndex and returns how many
+        /// blocks can be cleared before all conflicting paths have ended.
+        /// Returns 0 if a claimed section or the end of our route (with opposing
+        /// traffic still active) is hit before the conflicts resolve. An occupied
+        /// block advances the clearance by one and the walk continues (blocked
+        /// occupancy is not treated as a hard failure like a claimed one).
+        /// </summary>
+        private static int CalcRange(
+            HashSet<string> newPaths,
+            HashSet<string> opposingPaths,
+            int startIndex,
+            PathStaging staging,
+            Dictionary<string, bool?> occupancy)
+        {
+            int clearCount = 0;
+
+            for (int i = startIndex; i < staging.blocks.Length; i++)
+            {
+                var blockId = staging.blocks[i];
+
+                if (_activeBlocks.TryGetValue(blockId, out var claimer) && claimer != staging.pathId)
+                    return 0;
+
+                clearCount++;
+
+                var pathsHere = new HashSet<string>(GetPathsWithBlockUpcoming(blockId, staging.pathId));
+
+                newPaths.RemoveWhere(p => !pathsHere.Contains(p));
+                opposingPaths.RemoveWhere(p => !pathsHere.Contains(p));
+
+                foreach (var p in pathsHere)
+                {
+                    if (!newPaths.Contains(p) && !opposingPaths.Contains(p))
+                        newPaths.Add(p);
+                }
+
+                var ourNext = i + 1 < staging.blocks.Length ? staging.blocks[i + 1] : blockId;
+
+                foreach (var p in newPaths.ToList())
+                {
+                    if (!_pathProgress.TryGetValue(p, out var other))
+                    {
+                        newPaths.Remove(p);
+                        continue;
+                    }
+
+                    if (other.blocks[other.blocks.Length - 1] == blockId)
+                    {
+                        newPaths.Remove(p);
+                        continue;
+                    }
+
+                    if (IsOpposing(staging, other, blockId, ourNext))
+                    {
+                        newPaths.Remove(p);
+                        opposingPaths.Add(p);
+                    }
+                    else
+                    {
+                        newPaths.Remove(p);
+                    }
+                }
+
+                opposingPaths.RemoveWhere(p =>
+                {
+                    if (!_pathProgress.TryGetValue(p, out var other))
+                        return true;
+                    return other.blocks[other.blocks.Length - 1] == blockId;
+                });
+
+                if (newPaths.Count == 0 && opposingPaths.Count == 0)
+                    return clearCount;
+            }
+
+            return 0;
+        }
+
+        /// <summary>
+        /// Conflict-aware claim attempt. Tries to claim blocks starting at
+        /// startIndex, respecting opposing/upcoming paths and physical occupancy.
+        /// Returns (success, claimedCount); claimedCount == 0 means nothing claimed.
+        /// </summary>
+        private static (bool, int) TryClaimFrom(
+            PathStaging staging,
+            int startIndex,
+            int maxBlocks,
+            Dictionary<string, bool?> occupancy)
+        {
+            if (startIndex >= staging.blocks.Length)
+                return (false, 0);
+
+            var b1BlockId = staging.blocks[Math.Max(0, startIndex - 1)];
+            var b2BlockId = staging.blocks[startIndex];
+
+            var listA = new HashSet<string>(GetPathsWithBlockUpcoming(b1BlockId, staging.pathId));
+            var listB = new HashSet<string>(GetPathsWithBlockUpcoming(b2BlockId, staging.pathId));
+
+            var opposingPaths = new HashSet<string>();
+            foreach (var p in listA.Where(x => listB.Contains(x)))
+            {
+                if (!_pathProgress.TryGetValue(p, out var other))
+                    continue;
+                if (IsOpposing(staging, other, b1BlockId, b2BlockId))
+                    opposingPaths.Add(p);
+            }
+
+            var newPaths = new HashSet<string>(listB.Where(x => !listA.Contains(x)));
+
+            if (newPaths.Count > 0)
+            {
+                foreach (var p in newPaths)
+                {
+                    if (_activeBlocks.TryGetValue(b2BlockId, out var claimer) && claimer == p)
+                        return (false, 0);
+                }
+
+                int clearCount = CalcRange(
+                    new HashSet<string>(newPaths),
+                    new HashSet<string>(opposingPaths),
+                    startIndex,
+                    staging,
+                    occupancy);
+
+                if (clearCount == 0)
+                    return (false, 0);
+
+                int claimLimit = Math.Min(clearCount, maxBlocks);
+                int claimCount = 0;
+                for (int i = startIndex; i < startIndex + claimLimit && i < staging.blocks.Length; i++)
+                {
+                    var blockId = staging.blocks[i];
+                    if (_activeBlocks.TryGetValue(blockId, out var claimer) && claimer != staging.pathId)
+                        break;
+                    if (occupancy.TryGetValue(blockId, out var occ) && occ == true)
+                        break;
+                    ActivateBlock(blockId, staging);
+                    claimCount++;
+                }
+
+                if (claimCount == 0)
+                    return (false, 0);
+
+                return (true, claimCount);
+            }
+            else if (opposingPaths.Count > 0)
+            {
+                if (_activeBlocks.ContainsKey(b2BlockId))
+                    return (false, 0);
+                if (occupancy.TryGetValue(b2BlockId, out var occ) && occ == true)
+                    return (false, 0);
+
+                ActivateBlock(b2BlockId, staging);
+                return (true, 1);
+            }
+            else
+            {
+                int claimCount = 0;
+                for (int i = startIndex; i < staging.blocks.Length && i < startIndex + maxBlocks; i++)
+                {
+                    var blockId = staging.blocks[i];
+                    if (_activeBlocks.ContainsKey(blockId))
+                        break;
+                    if (occupancy.TryGetValue(blockId, out var occ) && occ == true)
+                        break;
+                    ActivateBlock(blockId, staging);
+                    claimCount++;
+                }
+                return (claimCount > 0, claimCount);
+            }
+        }
+
         private static void SetSignalToStop(string blockId, string pathId)
         {
             var paths = PathingData.GetPaths();
@@ -356,39 +607,32 @@ namespace DvMod.RemoteDispatch
                     if (staging.status != "Active")
                         continue;
 
-                    int ws = staging.currentBlockIndex + 1;
-                    int we = Math.Min(staging.currentBlockIndex + staging.lookAhead, staging.blocks.Length - 1);
+                    var (_, b1Index, b2Index) = GetClaimWindowEnd(staging);
+                    int ws = b1Index + 1;
 
-                    var claimedByUs = new HashSet<string>();
-                    foreach (var kvp2 in _activeBlocks)
+                    if (ws < staging.blocks.Length)
                     {
-                        if (kvp2.Value == staging.pathId)
-                            claimedByUs.Add(kvp2.Key);
-                    }
+                        bool tryNow = true;
+                        if (_retryTimes.TryGetValue(staging.pathId, out var retryTime)
+                            && DateTime.UtcNow < retryTime)
+                            tryNow = false;
 
-                    for (int i = ws; i <= we; i++)
-                    {
-                        var blockId = staging.blocks[i];
-                        if (claimedByUs.Contains(blockId))
+                        if (tryNow)
                         {
-                            claimedByUs.Remove(blockId);
-                            continue;
+                            int we = Math.Min(staging.currentBlockIndex + staging.lookAhead, staging.blocks.Length - 1);
+                            int maxBlocks = we - ws + 1;
+
+                            var (claimed, _) = TryClaimFrom(staging, ws, maxBlocks, occupancy);
+                            if (claimed)
+                            {
+                                changed = true;
+                                _retryTimes.Remove(staging.pathId);
+                            }
+                            else
+                            {
+                                _retryTimes[staging.pathId] = DateTime.UtcNow + RetryInterval;
+                            }
                         }
-                        if (_activeBlocks.ContainsKey(blockId))
-                            break;
-                        if (!_blockQueues.TryGetValue(blockId, out var queue) || queue.Count == 0 || queue[0] != staging.pathId)
-                            break;
-                        if (occupancy.TryGetValue(blockId, out var occ) && occ == true)
-                            break;
-
-                        ActivateBlock(blockId, staging);
-                        changed = true;
-                    }
-
-                    foreach (var staleId in claimedByUs)
-                    {
-                        ReleaseBlock(staleId);
-                        changed = true;
                     }
                 }
 

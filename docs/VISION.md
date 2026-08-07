@@ -65,19 +65,17 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 
 ### Done / considered complete for the release intent
 - Direct block occupancy.
-- Switch → in-game junction mapping (single-track and DoubleTrack), modulo the
-  known one-junction issue (see blockers).
+- Switch → in-game junction mapping (single-track and DoubleTrack).
 - Server-side path CRUD and the staging/claim engine.
 - Clean pathing enable/disable: toggling `enablePathing` off releases claims and
   reverts all guard signals to Automatic; the map ⇄ switchboard view toggle keeps
   active pathing running and server-synced in the background.
+- Block colouring unified: occupied always reads as occupied regardless of path
+  membership (single-source `resolveBlockColor` table; see §2a). The GF
+  mapping fix and the crossover leg-swap fixes are done too.
 
 ### Blockers - must be fixed before a widespread release
-1. The one in-game junction that breaks a station's mapping on **both** the
-   single-track and DoubleTrack layouts in GF. (Owner: maintainer.)
-2. **Block colouring** - occupied blocks should always be identifiable as
-   occupied. (currently paths just draw "over" blocks not checking that).
-3. **Path conflicts** between trains: no complete live-resolution exists yet.
+1. **Path conflicts** between trains: no complete live-resolution exists yet.
    For the upcoming release, **prevent conflicts entirely** (don't allow
    overlapping claims) rather than resolve them on the fly.
 

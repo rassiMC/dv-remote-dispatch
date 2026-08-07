@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer report a spurious fourth continuation, and `repairMapping()` runs
   after the parallel walk to correct any remaining swapped pairs. The switch
   mapping is now a clean 641/641 bijection with zero consistency violations.
+- Switchboard block colours unified into a single source of truth
+  (`TrackRenderer.resolveBlockColor`): gray clear, green claimed by an active
+  path, light blue in exactly one upcoming path, yellow in more than one path,
+  and red always wins for occupied blocks. Removed the per-file
+  `PathingController.getOverridesForSegment`/`getSwitchRimColor` override
+  path; switch segments now repaint correctly on path sync, and sidebar path
+  chips use the same palette.
 
 ## [1.6.1] - 2026-04-04
 

@@ -1065,7 +1065,7 @@ const PathingController = {
                         <button onclick="PathingController.beginExtendPath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#2fbf4f" title="Add unclaimed sections to this path">\u2295</button>
                     </div>
                     <input id="note-${pid}" type="text" placeholder="Locomotive / destination / note" value="${note}"
-                        style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:2px 5px;font-size:11px;background:#222;color:#ddd;border:1px solid #555;border-radius:3px;"
+                        style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:3px 6px;font-size:13px;background:#ddd;color:#000;border:1px solid #aaa;border-radius:3px;"
                         title="Note for this path"
                         onchange="PathingController._saveNote('${pid}')"/>
                     <div style="margin-top:4px;line-height:1.8">${blockChips}</div>

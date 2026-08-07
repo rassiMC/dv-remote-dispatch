@@ -76,8 +76,11 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 
 ### Blockers - must be fixed before a widespread release
 1. **Path conflicts** between trains: no complete live-resolution exists yet.
-   For the upcoming release, **prevent conflicts entirely** (don't allow
-   overlapping claims) rather than resolve them on the fly.
+   Conflict *prevention* is implemented in the claim engine (`StagingData`
+   `TryClaimFrom` / `CalcRange` / `IsOpposing`: a path refuses to claim past
+   opposing/upcoming traffic on a shared span, backing off and retrying).
+   Live *resolution* of conflicts remains on hold; validate the prevention
+   behaviour in real multi-train use before release.
 
 ### On hold / later
 - Full UI polish (WIP but not release-blocking).

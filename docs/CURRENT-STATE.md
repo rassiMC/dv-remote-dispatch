@@ -230,17 +230,26 @@ branch-entry ("In") signals can be attributed to a junction.
   `RemovePathFromStoredList`, `ClearPaths`.
 - `StagingData` - the **route-claim engine**. Models each path's progress as
   `PathStaging { blocks[], currentBlockIndex, lookAhead, status }` and keeps
-  per-block FIFO queues (`_blockQueues`) plus `_activeBlocks` (blockId →
-  claiming pathId). `Process()` runs every 0.5s while pathing is enabled:
+  per-block queues (`_blockQueues`, pathId per block) plus `_activeBlocks`
+  (blockId → claiming pathId) and per-path `_retryTimes`.
+  `Process()` runs every 0.5s while pathing is enabled:
   - advances the current block when the *next* block becomes occupied,
   - prunes already-traversed blocks (removing them from the stored path too),
-  - claims the lookahead window of unoccupied blocks for this path (block
-    arbitration: only the head of a block's queue may claim it),
-  - releases stale claims, cleans up completed paths.
+  - seeds a new path with only its start block claimed (from `_retryTimes`),
+    then claims the lookahead window **conflict-aware** via `TryClaimFrom`.
+  Claims are gated by `CalcRange`, which walks the route ahead and refuses to
+  claim more than the range until all **opposing / upcoming** paths share the
+  section have ended (`IsOpposing` detects reverse-direction travellers over a
+  shared span). Non-opposing paths dequeue as they pass through; physical
+  occupancy blocks a claim only for that block (walk continues past it).
+  Failed claims back off for **20s** (`_retryTimes`) before retrying; the
+  automatic window stops once **5** blocks are claimed ahead.
+  `ForceClaimNextBlock` backs the manual "advance" button
+  (`POST /path/{id}/advance`) - it claims the next single block when clear, or
+  the full cleared range when clearing through opposing traffic.
   Each `ActivateBlock` sets the block's guard signal to **Automatic** and throws
   its switch to the needed branch (`junction.Switch(REGULAR)`); releasing sets
-  the signal back to **Manual+S1**. `ForceClaimNextBlock` backs the manual
-  "advance" button (`POST /path/{id}/advance`).
+  the signal back to **Manual+S1**.
   States exposed per block: `occupied`, `claimed`, `waiting`, `unclaimed`,
   `completed`.
 - `PathingActivation` - `ActivatePathingMode()` sweeps all signals: any with a

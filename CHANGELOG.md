@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Switchboard block-level pathing/staging: server-side route claims, look-ahead
   windows, and per-block signal/switch control.
 - Direct block occupancy via the Signals API `IsTrackOccupied`.
+- Conflict-aware path claiming queue: `StagingData` now gates claims through
+  `TryClaimFrom`/`CalcRange`, refusing to claim past opposing or upcoming
+  traffic on a shared span (`IsOpposing`) and backing off with a 20s retry
+  timer; new paths seed with only their start block, auto-claiming stops
+  five blocks ahead. Manual "advance next" claims a single block when clear,
+  or the cleared range when passing opposing traffic.
 
 ### Fixed
 

@@ -485,6 +485,24 @@ Derived from reading the code; not a plan. The most fragile points:
 8. `OccupancyData` direct-mode caches track geometry once at startup
    (`EnsureTrackCache`) - if the world changes (scene load), stale cache can
    persist; `ClearMapping` exists on teardown only.
+9. **Route search can "win" with an invalid occupied route and then show no
+   path**: the switchboard search (`PathingController` `_edgeCost`) only adds a
+   cost penalty to occupied through-blocks instead of treating them as blocked.
+   An invalid route through an occupied block beats a valid longer detour on raw
+   cost, is drawn first, then discarded; the valid alternative is never
+   suggested, and gets dropped too when the detour is long enough (e.g. +25
+   nodes). (VISION blocker #2; fix intent: blocked, then penalised-cost fallback.)
+10. **Staging advances on occupancy before a block is claimed first**:
+    `StagingData.Process` treats a next-block occupancy read as `trainAdvanced`
+    even when the path never claimed that block (seed claims only block 0). The
+    path then jumps, prunes unclaimed blocks, and vacates its implicit window.
+    (VISION blocker #3; fix intent: require a claim before advancement.)
+11. **New-path seeding bypasses the claim engine**: `StagingData.AddPath` claims
+    the first block via a direct `ActivateBlock` call instead of the
+    conflict-aware `TryClaimFrom`/`CalcRange` path, so a newly created path's
+    seed claim skips the opposing/upcoming-traffic checks the rest of the engine
+    applies. (VISION blocker #4; fix intent: seed through the same claim entry
+    point the engine uses.)
 
 ### Release blockers (per maintainer, April 2026)
 

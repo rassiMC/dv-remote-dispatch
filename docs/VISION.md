@@ -85,6 +85,40 @@ A dispatcher looking at the switchboard should be able to, at a glance:
    opposing/upcoming traffic on a shared span, backing off and retrying).
    Live *resolution* of conflicts remains on hold; validate the prevention
    behaviour in real multi-train use before release.
+2. **Occupied-block shortcut path win** (route-seeking) - the switchboard route
+   search can end up showing **no path at all** where a valid one exists.
+   Occupancy only raises a block's step cost (`_edgeCost`, `OCCUPIED_PENALTY`),
+   so an invalid route through an occupied through-block can beat a valid longer
+   detour (e.g. +25 nodes) on raw cost. The invalid suggestion always "wins" the
+   draw, is shown first, and is only *discarded afterwards*; the valid alternative
+   is never suggested, and when the only valid route is long enough it is dropped
+   too, leaving the dispatcher with no path. Fix intent: have the search treat
+   occupied through-blocks as **blocked** (validate per-block, not by cost
+   penalty), and fall back to the penalised-cost route only when no valid route
+   exists, keeping the start/dest exemptions.
+3. **Occupancy is treated as "advance" before a block is ever claimed** - the
+   staging engine's `Process()` (StagingData.cs:585-614) advances a path's
+   `currentBlockIndex` whenever the *next* block reads occupied, regardless of
+   whether the path had claimed it. A path is seeded with only its start block
+   claimed (`AddPath` claims just the first block up front); if the train moves
+   into the next block before staging has claimed it (idle window, 20s retry
+   backoff, or a claim refused by conflict-aware gating), occupancy alone is
+   taken as `trainAdvanced` - the path jumps forward, prunes past blocks it never
+   claimed, and the implicit claim window abandons the unclaimed span. Fix intent:
+   only treat occupancy as advancement when the block was actually claimed by this
+   path first; an unclaimed-but-occupied next block should be a signal to claim
+   it, not to advance.
+4. **Path creation claims one block via an ad-hoc path** - `PathingData.AddPath`
+   seeds the new path by calling `StagingData.AddPath` (StagingData.cs:83-106),
+   which claims the first block directly through a private **direct** call to
+   `ActivateBlock`, bypassing the conflict-aware `TryClaimFrom` / `CalcRange`
+   machinery. (The comment in §4.4 says "seeds a new path with only its start
+   block claimed from `_retryTimes`" - the real code inlines that instead of
+   delegating to a seed/claim entry point.) Consequence: the claim happens without
+   the opposing/upcoming-traffic checks the rest of the engine applies. Fix intent:
+   have path creation route the first-block claim through the same function the
+   engine uses (`TryClaimFrom` with a "seed only" bound), so seeding gets the same
+   conflict-aware validation instead of an unguarded `ActivateBlock`.
 
 ### On hold / later
 - Full UI polish (WIP but not release-blocking).

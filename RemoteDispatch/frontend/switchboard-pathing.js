@@ -16,8 +16,8 @@ const PathingController = {
     _hoverTimer: null,
     _needsRerender: false,
     _serverActive: false,
-    _pathTreeCache: null,
-    _pathTreeKey: null,
+    _pathTreeValid: null,
+    _pathTreeSoft: null,
     _pathTreeCount: 0,
     _pathStatusTable: new Map(),
     _pathColors: new Map(),
@@ -82,8 +82,8 @@ const PathingController = {
         }
 
         this._blockGraph = graph;
-        this._pathTreeCache = null;
-        this._pathTreeKey = null;
+        this._pathTreeValid = null;
+        this._pathTreeSoft = null;
         this._pathTreeCount++;
         return graph;
     },
@@ -124,9 +124,23 @@ const PathingController = {
         const graph = this._blockGraph;
         if (!graph.has(fromBlockId) || !graph.has(toBlockId)) return null;
 
-        const tree = this._ensurePathTree(fromBlockId);
-        if (!tree.has(toBlockId)) return null;
+        // Valid tier first: a route avoiding occupied through-blocks always wins.
+        // The start block itself is exempt so a train can leave its own block.
+        const validTree = this._ensurePathTree(fromBlockId, 'valid');
+        const validPath = this._tracePath(validTree, toBlockId, fromBlockId);
+        if (validPath) return this._finalizePath(validPath);
 
+        // Soft tier: short occupied routes only when no clear route exists, so a
+        // dispatcher is never dead-ended but a clear detour still wins.
+        const softTree = this._ensurePathTree(fromBlockId, 'soft');
+        const softPath = this._tracePath(softTree, toBlockId, fromBlockId);
+        if (softPath) return this._finalizePath(softPath);
+
+        return null;
+    },
+
+    // Reconstructs the plain block sequence from a tree.
+    _tracePath(tree, toBlockId, fromBlockId) {
         const path = [];
         let node = toBlockId;
         while (node !== undefined) {
@@ -135,7 +149,12 @@ const PathingController = {
             node = tree.get(node);
         }
         if (path[0] !== fromBlockId) return null;
+        return path;
+    },
 
+    // Derives switch assignments for a plain block sequence, rejecting illegal
+    // (wrong-way) traversals. Returns null if the sequence is not drivable.
+    _finalizePath(path) {
         const switchAssignments = {};
         for (let i = 1; i < path.length - 1; i++) {
             const blockId = path[i];
@@ -185,16 +204,29 @@ const PathingController = {
         return { blocks, switchAssignments };
     },
 
-    // Per-hop memoized tree used for waypoint routing: one entry per source
-    // block and per occupancy invalidation (see invalidatePathTree).
-    _ensurePathTree(source) {
+    // Per-source, per-occupancy-generation shortest-path tree.
+    //   tier 'valid' - occupied through-blocks are hard-blocked (the source
+    //      block itself is exempt, so a train can leave its own block).
+    //   tier 'soft'  - occupied blocks are routable but penalised.
+    // Both tiers are memoized per (source, tier, occupancy generation) and are
+    // invalidated together on occupancy change (see invalidatePathTree).
+    _ensurePathTree(source, tier) {
         if (!this._blockGraph) this.buildBlockGraph();
         const graph = this._blockGraph;
 
-        const treeKey = `${source}#${this._pathTreeCount}`;
-        if (this._pathTreeCache && this._pathTreeKey === treeKey) {
-            return this._pathTreeCache;
+        const key = `${source}#${tier}#${this._pathTreeCount}`;
+        const cached = tier === 'valid' ? this._pathTreeValid : this._pathTreeSoft;
+        if (cached && cached.key === key) {
+            return cached.tree;
         }
+
+        const blocked = tier === 'valid'
+            ? blockId => {
+                if (blockId === source) return false;
+                const b = TrackData.getBlock(blockId);
+                return !!(b && b.occupancyState === 'occupied');
+            }
+            : () => false;
 
         const cameFrom = new Map();
         cameFrom.set(source, undefined);
@@ -246,7 +278,8 @@ const PathingController = {
             for (const neighbor of entry.neighbors) {
                 const nbrId = neighbor.blockId;
                 if (closed.has(nbrId)) continue;
-                const tentG = curG + this._edgeCost(nbrId);
+                if (blocked(nbrId)) continue;
+                const tentG = curG + this._edgeCost(nbrId, tier);
                 if (tentG < (gScore.get(nbrId) ?? Infinity)) {
                     gScore.set(nbrId, tentG);
                     cameFrom.set(nbrId, current);
@@ -255,16 +288,19 @@ const PathingController = {
             }
         }
 
-        this._pathTreeCache = cameFrom;
-        this._pathTreeKey = treeKey;
+        if (tier === 'valid')
+            this._pathTreeValid = { key, tree: cameFrom };
+        else
+            this._pathTreeSoft = { key, tree: cameFrom };
         return cameFrom;
     },
 
-    // Occupied blocks cost extra block-steps so routing prefers a detour around
-    // them, but still routes straight through when no detour exists. Only the
-    // destination itself is exempt: the tree is built from the start side, and
-    // every hop into another block pays for that block's occupancy.
-    _edgeCost(blockId) {
+    // Cost of entering a block. In the valid tier every step costs 1 (hard
+    // blockage is enforced in _ensurePathTree); in the soft tier occupied
+    // blocks are penalised so a clear detour still usually wins, but an
+    // occupied route remains usable when it is the only option.
+    _edgeCost(blockId, tier) {
+        if (tier === 'valid') return 1;
         const block = TrackData.getBlock(blockId);
         if (block && block.occupancyState === 'occupied') return 1 + this.OCCUPIED_PENALTY;
         return 1;
@@ -273,8 +309,8 @@ const PathingController = {
     // Occupancy changed, so edge costs may have changed too. Drop the memoized
     // per-source trees; they are recomputed lazily on the next hover query.
     invalidatePathTree() {
-        this._pathTreeCache = null;
-        this._pathTreeKey = null;
+        this._pathTreeValid = null;
+        this._pathTreeSoft = null;
         this._pathTreeCount++;
     },
 
@@ -335,8 +371,8 @@ const PathingController = {
         this.extendAnchorBlockId = null;
         this.currentPathBlocks = [];
         this.currentPathSwitchAssignments = {};
-        this._pathTreeCache = null;
-        this._pathTreeKey = null;
+        this._pathTreeValid = null;
+        this._pathTreeSoft = null;
         this._clearWaypointMarkers();
         this._clearExtendAnchorMarkers();
     },

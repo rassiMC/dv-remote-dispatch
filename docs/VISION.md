@@ -85,17 +85,22 @@ A dispatcher looking at the switchboard should be able to, at a glance:
    opposing/upcoming traffic on a shared span, backing off and retrying).
    Live *resolution* of conflicts remains on hold; validate the prevention
    behaviour in real multi-train use before release.
-2. **Occupied-block shortcut path win** (route-seeking) - the switchboard route
-   search can end up showing **no path at all** where a valid one exists.
-   Occupancy only raises a block's step cost (`_edgeCost`, `OCCUPIED_PENALTY`),
-   so an invalid route through an occupied through-block can beat a valid longer
-   detour (e.g. +25 nodes) on raw cost. The invalid suggestion always "wins" the
-   draw, is shown first, and is only *discarded afterwards*; the valid alternative
-   is never suggested, and when the only valid route is long enough it is dropped
-   too, leaving the dispatcher with no path. Fix intent: have the search treat
-   occupied through-blocks as **blocked** (validate per-block, not by cost
-   penalty), and fall back to the penalised-cost route only when no valid route
-   exists, keeping the start/dest exemptions.
+2. ~~**Occupied-block shortcut path win** (route-seeking)~~ - **resolved**: the
+   switchboard route search now uses a **two-tier Dijkstra** in
+   `PathingController.computeBlockPath` / `_ensurePathTree`:
+   - **Valid tier** - occupied through-blocks are **hard-blocked** (except the
+     source block itself) so a clear detour *always wins* over an occupied
+     shortcut, however long the detour is.
+   - **Soft tier** - same graph with the occupied-block penalty (extends the
+     old `OCCUPIED_PENALTY` cost), used only when the valid tier cannot reach
+     the destination (occupied destination, or genuinely no clear route), so a
+     dispatcher is never dead-ended.
+   The search still validates switch legality exactly as before (`_finalizePath`
+   rejects wrong-way traversals), so no new invalid paths are shown. Both tiers
+   share the per-source memoized cache and are invalidated together on
+   occupancy change (`invalidatePathTree`). Known residual: switch-port data is
+   incomplete for multi-switch blocks, so legibility enforcement is no worse
+   than before (see CURRENT-STATE corresponding note).
 3. **Occupancy is treated as "advance" before a block is ever claimed** - the
    staging engine's `Process()` (StagingData.cs:585-614) advances a path's
    `currentBlockIndex` whenever the *next* block reads occupied, regardless of

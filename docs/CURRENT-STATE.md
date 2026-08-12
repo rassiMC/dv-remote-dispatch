@@ -368,9 +368,14 @@ and finally `main.js?v=...` (cache-busted with a date).
   `[start, ...waypoints, dest]` (`computePathWithWaypoints`, merging boundary
   blocks). Waypoints are draft-only - not sent to the server - and are cleared
   when the path is confirmed. Right-click on empty map cancels the draft. The
-  path search behind this (`computeBlockPath` → `_ensurePathTree`) is a
-  per-source **memoized Dijkstra tree** that is invalidated whenever occupancy
-  changes (`invalidatePathTree`), so edge costs stay current.
+path search behind this (`computeBlockPath` → `_ensurePathTree`) is a
+   per-source **memoized Dijkstra tree** that is invalidated whenever occupancy
+   changes (`invalidatePathTree`), so edge costs stay current. The search is
+   **two-tier**: a **valid** tier hard-blocks occupied through-blocks (source
+   exempt) so a clear detour always wins over an occupied shortcut, and a
+   **soft** tier (occupied-block penalty) is used only when the valid tier
+   cannot reach the destination - so a dispatcher is never dead-ended while a
+   clear route is still preferred (see the VISION blocker note).
 - **Extending a locked path** (⊕ button in the sidebar, `beginExtendPath`) is
   the **favoured way to grow a route**: the path's last block becomes the
   anchor, the same hover/A*/waypoint drafting draws a section from it, and
@@ -485,13 +490,17 @@ Derived from reading the code; not a plan. The most fragile points:
 8. `OccupancyData` direct-mode caches track geometry once at startup
    (`EnsureTrackCache`) - if the world changes (scene load), stale cache can
    persist; `ClearMapping` exists on teardown only.
-9. **Route search can "win" with an invalid occupied route and then show no
-   path**: the switchboard search (`PathingController` `_edgeCost`) only adds a
-   cost penalty to occupied through-blocks instead of treating them as blocked.
-   An invalid route through an occupied block beats a valid longer detour on raw
-   cost, is drawn first, then discarded; the valid alternative is never
-   suggested, and gets dropped too when the detour is long enough (e.g. +25
-   nodes). (VISION blocker #2; fix intent: blocked, then penalised-cost fallback.)
+9. **Route search two-tier occupancy** (fix landed): the switchboard search
+   (`PathingController.computeBlockPath` / `_ensurePathTree`) now runs a
+   **valid** tier that hard-blocks occupied through-blocks (source exempt) so a
+   clear detour always wins over an occupied shortcut, falling back to a
+   **soft** tier (occupied-block penalty) only when the valid tier cannot reach
+   the destination - so a dispatcher is never dead-ended but a clear route is
+   still preferred. `_finalizePath` legality (wrong-way switch rejection) is
+   unchanged and identical to before, so no new invalid paths are shown and
+   reachability does not regress. Residual: switch-port data is incomplete for
+   multi-switch blocks, so legibility enforcement is no better than before
+   (see VISION blocker #2 "resolved" note).
 10. **Staging advances on occupancy before a block is claimed first**:
     `StagingData.Process` treats a next-block occupancy read as `trainAdvanced`
     even when the path never claimed that block (seed claims only block 0). The

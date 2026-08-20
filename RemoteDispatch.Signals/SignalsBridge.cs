@@ -27,6 +27,11 @@ namespace DvMod.RemoteDispatch.Signals
         // Track which signals we've subscribed to, so we can clean up.
         private readonly HashSet<SgSignal> _subscribedSignals = new HashSet<SgSignal>();
 
+        // The main thread (captured in Register, which runs during mod load on the
+        // Unity main thread). Signal.UpdateAspect touches Unity display objects and
+        // must only run there; GetAllSignals may be invoked from the HTTP thread.
+        private int _mainThreadId = -1;
+
         /// <summary>Constructor - inject callbacks for forward compat</summary>
         internal SignalsBridge(Action<string, string>? onAspectChanged = null, Action<string, string>? onModeChanged = null)
         {
@@ -42,6 +47,7 @@ namespace DvMod.RemoteDispatch.Signals
         /// registrations.</remarks>
         internal void Register()
         {
+            _mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
             SignalManager.AspectChanged += OnSignalAspectChanged;
             SignalManager.OperationModeChanged += OnSignalOperationModeChanged;
             SignalManager.OverrideChanged += OnSignalOverrideChanged;
@@ -174,11 +180,17 @@ namespace DvMod.RemoteDispatch.Signals
         internal Dictionary<string, object> GetAllSignals()
         {
             var result = new Dictionary<string, object>(StringComparer.Ordinal);
-            if (SignalManager.Instance == null) return result;
 
             try
             {
-                ForceUpdateAllSignalAspects();
+                if (SignalManager.Instance == null) return result;
+
+                // UpdateAspect touches Unity display objects and is main-thread-only.
+                // From the HTTP thread we skip the sweep; the new fork's own 1s update
+                // loop keeps aspects fresh, and SubscribeToExistingSignals (main thread)
+                // already opened the subscription map for event-driven pushes.
+                if (_mainThreadId == System.Threading.Thread.CurrentThread.ManagedThreadId)
+                    ForceUpdateAllSignalAspects();
 
                 foreach (var controller in SignalManager.Instance.AllControllers)
                 {

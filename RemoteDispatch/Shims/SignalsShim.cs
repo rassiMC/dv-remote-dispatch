@@ -200,11 +200,11 @@ namespace DvMod.RemoteDispatch
 				// presence of the Signals.API assembly if the version string is ambiguous.
 				bool usesApi = !string.IsNullOrEmpty(signalsMod.Info?.Version) &&
 							   signalsMod.Info.Version.IndexOf("-mp", StringComparison.OrdinalIgnoreCase) >= 0;
-				if (!usesApi && signalsAssembly == null)
-				{
-					Main.Warning("Signals mod is enabled but no compatible Signals integration was found.");
-					return;
-				}
+				// If the version string is ambiguous (no "-mp" marker) but a loaded
+				// Signals.API assembly exists, it's the old fork. Otherwise the new
+				// fork (Signals.Game, no API) is assumed and usesApi stays false.
+				if (!usesApi && signalsAssembly != null)
+					usesApi = true;
 				if (!usesApi)
 				{
 					Main.Log($"Signals mod version '{signalsMod.Info.Version}' detected, using Signals.Game bridge (RemoteDispatch.Signals.dll).");
@@ -308,47 +308,58 @@ namespace DvMod.RemoteDispatch
 		/// <returns></returns>
 		public static JToken? GetAllSignalsData()
 		{
-			var signalsData = _getAllSignalsMethod?.Invoke(null, null);
-
-			if (signalsData is Dictionary<string, object> data)
+			try
 			{
-				var minimalData = SignalsShimHelpers.MinimalSignalDataProjection.Create(data);
+				var signalsData = _getAllSignalsMethod?.Invoke(null, null);
 
-				// Assign junctionId and direction from signal ID suffix:
-				// Format: {junctionId}:F  -> Out signal
-				//         {junctionId}:B1 -> LeftIn signal
-				//         {junctionId}:B2 -> RightIn signal
-				// Out signals have no ':' suffix — they already have JunctionId and Direction from the API
-				int suffixMatched = 0;
-				int noColon = 0;
-				foreach (var kv in minimalData)
+				if (signalsData is Dictionary<string, object> data)
 				{
-					var sig = kv.Value;
-					var signalId = kv.Key;
-					var colonIdx = signalId.LastIndexOf(':');
-					if (colonIdx <= 0)
+					var minimalData = SignalsShimHelpers.MinimalSignalDataProjection.Create(data);
+
+					// Assign junctionId and direction from signal ID suffix:
+					// Format: {junctionId}:F  -> Out signal
+					//         {junctionId}:B1 -> LeftIn signal
+					//         {junctionId}:B2 -> RightIn signal
+					// Out signals have no ':' suffix — they already have JunctionId and Direction from the API
+					int suffixMatched = 0;
+					int noColon = 0;
+					foreach (var kv in minimalData)
 					{
-						noColon++;
-						continue;
+						var sig = kv.Value;
+						var signalId = kv.Key;
+						var colonIdx = signalId.LastIndexOf(':');
+						if (colonIdx <= 0)
+						{
+							noColon++;
+							continue;
+						}
+
+						var prefix = signalId.Substring(0, colonIdx);
+						var suffix = signalId.Substring(colonIdx + 1);
+
+						sig.JunctionId = prefix;
+						if (suffix == "F" || suffix == "T")
+							sig.Direction = "Out";
+						else if (suffix.StartsWith("B"))
+							sig.Direction = "In";
+						suffixMatched++;
 					}
 
-					var prefix = signalId.Substring(0, colonIdx);
-					var suffix = signalId.Substring(colonIdx + 1);
-
-					sig.JunctionId = prefix;
-					if (suffix == "F" || suffix == "T")
-						sig.Direction = "Out";
-					else if (suffix.StartsWith("B"))
-						sig.Direction = "In";
-					suffixMatched++;
+					var jMinimalData = JObject.FromObject(minimalData);
+					return jMinimalData;
 				}
 
-				var jMinimalData = JObject.FromObject(minimalData);
-				return jMinimalData;
+				Main.DebugLog("Signals mod not available or no signals data");
+				return new JObject();
 			}
-
-			Main.DebugLog("Signals mod not available or no signals data");
-			return new JObject();
+			catch (Exception ex)
+			{
+				// Never let a signal-data failure break the HTTP response: return an
+				// empty object (valid JSON) instead of an empty body, which the
+				// frontend would choke on with "Unexpected end of JSON input".
+				Main.Warning($"GetAllSignalsData failed: {ex.Message}\n{ex.StackTrace}");
+				return new JObject();
+			}
 		}
 
 		internal static string? GetSignalAspect(string signalId) =>

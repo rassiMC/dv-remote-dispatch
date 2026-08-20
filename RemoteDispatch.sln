@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RemoteDispatch", "RemoteDis
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RemoteDispatch.Signals", "RemoteDispatch.Signals/RemoteDispatch.Signals.csproj", "{96331027-9539-4bb8-8282-c58dc1c72825}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RemoteDispatch.SignalsMP", "RemoteDispatch.SignalsMP/RemoteDispatch.SignalsMP.csproj", "{5A1F2B6D-8C9E-4A57-9A03-2D7E6B8A4C91}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -22,6 +24,10 @@ Global
 		{96331027-9539-4bb8-8282-c58dc1c72825}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{96331027-9539-4bb8-8282-c58dc1c72825}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{96331027-9539-4bb8-8282-c58dc1c72825}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5A1F2B6D-8C9E-4A57-9A03-2D7E6B8A4C91}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5A1F2B6D-8C9E-4A57-9A03-2D7E6B8A4C91}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5A1F2B6D-8C9E-4A57-9A03-2D7E6B8A4C91}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5A1F2B6D-8C9E-4A57-9A03-2D7E6B8A4C91}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

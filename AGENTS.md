@@ -32,10 +32,11 @@ The local branch is ~51 commits ahead of upstream trunk (1.7.0); the added work 
 - `Server/HttpServer.cs` / `Server/Session.cs` - HTTP server and update-tag push
 
 ### Signals Module
-- `RemoteDispatch.Signals/Bootstrap.cs` - Signals integration initialization
-- `RemoteDispatch.Signals/SignalsBridge.cs` - Communication bridge with Signals API
-- `RemoteDispatch.Signals/LoggingReturn.cs` - Logging callbacks for signals module
-- Loaded at runtime via reflection from `Shims/SignalsShim.cs`; no compile-time dependency.
+- `RemoteDispatch.Signals/` - Signals integration for the **new Signals mod** (WhistleWiz/dv-signals, has no `Signals.API`; talks to `Signals.Game` public classes).
+- `RemoteDispatch.SignalsMP/` - Signals integration for the **old Signals mod** forks (`1.1.3-mp` / `1.1.4-mp`; links `Signals.API`).
+- Both ship `Bootstrap` / `SignalsBridge` / `LoggingReturn` with an identical static surface (`GetAllSignals`, `GetSignalAspect`, `SetSignalAspect`, `SetSignalMode`, `IsTrackOccupied`, `Initialize`, `Teardown`).
+- Loaded at runtime via reflection from `Shims/SignalsShim.cs`; no compile-time dependency. `SignalsShim.Initialize()` picks the DLL by the installed Signals mod's version (`-mp` suffix → `RemoteDispatch.SignalsMP.dll`, else → `RemoteDispatch.Signals.dll`).
+- Build dependencies for both bridges are pinned in `refs/` (old fork `Signals.API.dll`/`Signals.Common.dll`) and in the installed `DVSignals` mod folder (new fork `Signals.Game.dll`/`Signals.Common.dll`), or via `$(DvInstallDir)` in `Directory.Build.props`.
 
 > There are **no test files or test projects** in the repo.
 

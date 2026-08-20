@@ -49,7 +49,7 @@
 		<EmbeddedResource Include="frontend/signals/*.webp" />
 	</ItemGroup>
 
-	<Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(OS)' == 'Windows_NT'">
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
 		<!-- Drop the output DLL into the root build\ folder -->
 		<Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildThisFileDirectory)..\build\" />
 	</Target>

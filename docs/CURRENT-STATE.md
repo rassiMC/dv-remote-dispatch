@@ -29,7 +29,7 @@ Main.Load()                       # entry point (UnityModManager)
                                           default 7245)
   -> Updater.Create()             # coroutine-driven data loops
   -> CarUpdater.Start()           # train dirty-tracking + Harmony patches
-  -> SignalsShim.Initialize()     # reflectively load Signals API bridge
+  -> SignalsShim.Initialize()     # reflectively load Signals bridge (new or MP fork)
 ```
 
 On disable (`OnToggle(off)`): `CarUpdater.Stop()`, `Updater.Destroy()`,
@@ -87,7 +87,7 @@ RemoteDispatch/
 │   ├── HttpServer.cs     # all HTTP endpoints + resource renderer
 │   └── Session.cs        # Sessions + tag bookkeeping
 ├── Shims/
-│   └── SignalsShim.cs    # reflection bridge to RemoteDispatch.Signals.dll
+│   └── SignalsShim.cs    # reflection bridge to RemoteDispatch.Signals(.MP).dll
 └── frontend/             # embedded web assets (served from /res/)
     ├── main.js
     ├── index.html / style.css / icon.svg
@@ -95,8 +95,13 @@ RemoteDispatch/
     ├── switchboard-signals.js / switchboard-occupation.js / switchboard-pathing.js
     └── ST_2.1-hotfix.json / DT_2.1-hotfix.json # static switchboard layouts (single / DoubleTrack)
 
-RemoteDispatch.Signals/     # separate DLL loaded at runtime via reflection
+RemoteDispatch.Signals/      # separate DLL (NEW Signals mod: Signals.Game, no API)
 ├── Bootstrap.cs            # public static API surface (Initialize/Teardown/...)
+├── SignalsBridge.cs        # subscribes to SignalManager/Signal events, Signal.Name keys
+└── LoggingReturn.cs        # 3 logging callbacks forwarded from main mod
+
+RemoteDispatch.SignalsMP/   # separate DLL (OLD Signals mod forks: Signals.API)
+├── Bootstrap.cs            # identical public static API surface
 ├── SignalsBridge.cs        # subscribes to Signals.API events, force-update hacks
 └── LoggingReturn.cs        # 3 logging callbacks forwarded from main mod
 ```
@@ -175,26 +180,45 @@ Public members: `SetMode`, `SetBlockMapping`, `GetDetectedJunctionIds`,
 `GetOccupancyJSON`.
 
 ### 4.2 Signals integration
-Two-layer reflection chain (no compile-time dependency):
+Two-layer reflection chain (no compile-time dependency from the main mod):
 
 ```
 RemoteDispatch (Shims/SignalsShim)
-    --reflection--> RemoteDispatch.Signals.dll  (Bootstrap → SignalsBridge)
-    --reflection--> Signals.API (the DVSignals mod)
+    --reflection--> RemoteDispatch.Signals.dll  (new fork: Bootstrap → SignalsBridge → Signals.Game)
+    --reflection--> RemoteDispatch.SignalsMP.dll (old fork: Bootstrap → SignalsBridge → Signals.API)
 ```
 
-- `SignalsShim.Initialize()` finds the `DVSignals` UMM mod + `Signals.API`
-  assembly, loads `RemoteDispatch.Signals.dll` from the mod folder, and caches
-  MethodInfos for: `GetAllSignals`, `GetSignalAspect`, `SetSignalAspect`,
-  `SetSignalMode`, `IsTrackOccupied`, `Teardown`. It also registers event
-  callbacks that push `Sessions.AddTag("signals")` on aspect/mode changes.
-- `Bootstrap.cs` is the small static API surface; `SignalsBridge.cs` does the
-  real work: subscribe to `SignalsAPI.Loaded/Unloaded`, forward
-  `SignalAspectChanged`/`SignalModeChanged`, and - importantly - **force-update
-  all signal aspects** before every read (`ForceUpdateAllSignalAspects`,
-  throttled to 5s), so aspects are evaluated even far from the player. The
-  initial `ForceUpdateAllSignals(bool)` API is preferred; a reflection
-  `UpdateAspect` fallback over `Signals.Game` exists for older API versions.
+- `SignalsShim.Initialize()` finds the `DVSignals` UMM mod. Two Signals mods share
+  that Id, so it discriminates by **version string**: a `-mp` suffix
+  (`1.1.3-mp` / `1.1.4-mp`, old fork with `Signals.API.dll`) loads
+  `RemoteDispatch.SignalsMP.dll`; any other version (`1.0.0`, WhistleWiz rebuild
+  with no API) loads `RemoteDispatch.Signals.dll`. If `Signals.API` is still in
+  the AppDomain the API bridge is preferred as a fallback. It caches `MethodInfo`s
+  for: `GetAllSignals`, `GetSignalAspect`, `SetSignalAspect`, `SetSignalMode`,
+  `IsTrackOccupied`, `Teardown`.
+- Both bridge DLLs expose the **same static surface**
+  (`Bootstrap.Initialize/Teardown/GetAllSignals/GetSignalAspect/SetSignalAspect/
+  SetSignalMode/IsTrackOccupied`) and both project signal data into the identical
+  `Dictionary<string signalId, object>` shape (`Id`, `Type`, `Mode`,
+  `CurrentAspectId`, `IsOn`, `Direction`, `JunctionId`, `SelectedBranch`,
+  `YardId`, `TrackId`, `Position[x,z]`), so `SignalsShim` and the frontend are
+  backend-agnostic. Both register event callbacks that push
+  `Sessions.AddTag("signals")` on aspect/mode changes.
+- Old-fork `SignalsBridge.cs` subscribes to `SignalsAPI.Loaded/Unloaded` + instance
+  `SignalAspectChanged`/`SignalModeChanged`, and **force-updates** all signal
+  aspects before every read (`ForceUpdateAllSignalAspects`, throttled to 5s), with
+  a reflection `UpdateAspect` fallback over `Signals.Game` for API versions that
+  lack `ForceUpdateAllSignals(bool)`.
+- New-fork `SignalsBridge.cs` instead subscribes to the `SignalManager` static
+  events (`AspectChanged`, `OperationModeChanged`, `OverrideChanged`) plus per-`Signal`
+  events, and drives a throttled `Signal.UpdateAspect(false)` sweep for freshness.
+  Signal keys are `Signal.Name` (the new mod's `Signal.Id` is an int registry key,
+  not a stable public id). `SignalOperationMode` is folded back to the legacy
+  `Manual`/`Automatic` strings that the frontend and pathing code expect, and the
+  new richer `SignalType` is folded back to the old `Mainline/IntoYard/Shunting/
+  Distant/Other` names. Direct occupancy uses
+  `RailTrackOnTrackBogiesExtensions.BogiesOnTrack` (public Assembly-CSharp helper
+  the new mod's internal `HasBogies` wraps).
 
 ### 4.3 Junction graph (`Data/RailTracks.cs → Junctions`)
 `BuildTrackGraph()` derives a **junction graph** from `RailTrackRegistry` each
@@ -236,10 +260,16 @@ branch-entry ("In") signals can be attributed to a junction.
   per-block queues (`_blockQueues`, pathId per block) plus `_activeBlocks`
   (blockId → claiming pathId) and per-path `_retryTimes`.
   `Process()` runs every 0.5s while pathing is enabled:
-  - advances the current block when the *next* block becomes occupied,
+  - advances the current block when the *next* block is **claimed by this path**
+    **and** becomes occupied (an unclaimed-but-occupied next block is a hint to
+    claim it, not to advance),
   - prunes already-traversed blocks (removing them from the stored path too),
   - seeds a new path with only its start block claimed (from `_retryTimes`),
     then claims the lookahead window **conflict-aware** via `TryClaimFrom`.
+    Restoring existing paths (page reload / pathing re-activation via
+    `InitializeFromPaths`) mirrors that seed: it claims only the start block and
+    defers the first extension by the full 20s retry interval instead of
+    blasting the lookahead window on the next tick.
   Claims are gated by `CalcRange`, which walks the route ahead and refuses to
   claim more than the range until all **opposing / upcoming** paths share the
   section have ended (`IsOpposing` detects reverse-direction travellers over a
@@ -437,17 +467,31 @@ New users auto-provision from `defaultPermissions` on first session.
 
 ## 6. Signals module (separate DLL) detail
 
-- `RemoteDispatch.Signals.csproj` compiles to `RemoteDispatch.Signals.dll`,
-  **shipped inside the mod folder** and loaded at runtime by `SignalsShim`
-  (it is not a separate UMM mod). It depends on `Signals.API`.
-- `Bootstrap` exposes only the handful of static methods `SignalsShim` needs
-  (see §4.2), decoupling the main mod from a compile-time Signals dependency.
-- `SignalsBridge` is where the "hack"-ish bits live:
+Two separate bridge DLLs ship inside the mod folder (neither is a UMM mod), both
+loaded at runtime by `SignalsShim` (see §4.2) and exposing the same `Bootstrap`
+public surface:
+
+- `RemoteDispatch.SignalsMP.csproj` compiles to `RemoteDispatch.SignalsMP.dll`
+  and depends on the **old fork's `Signals.API`** (pinned in `refs/`). Its
+  `SignalsBridge`:
   - `ForceUpdateAllSignalAspects()` (5s throttle) so aspects update even when
     no player is near the signal.
   - Falls back from the preferred `SignalsAPI.ForceUpdateAllSignals(bool)` to a
     reflection walk over `Signals.Game.SignalManager` +
     `BasicSignalController.UpdateAspect`.
+- `RemoteDispatch.Signals.csproj` compiles to `RemoteDispatch.Signals.dll` and
+  depends on **the new fork's `Signals.Game`/`Signals.Common`** (from the
+  installed `DVSignals` mod folder). Its `SignalsBridge`:
+  - Subscribes to `SignalManager` static events (`AspectChanged`,
+    `OperationModeChanged`, `OverrideChanged`) and per-`Signal` events.
+  - Keys everything by `Signal.Name` (the new mod's `Signal.Id` is an int
+    registry key, not a string id).
+  - Folds `SignalOperationMode` back to `Manual`/`Automatic` and the richer
+    `SignalType` back to the legacy `Mainline/IntoYard/Shunting/Distant/Other`.
+  - Direct occupancy uses `RailTrackOnTrackBogiesExtensions.BogiesOnTrack`
+    (public Assembly-CSharp helper wrapping the new mod's internal `HasBogies`).
+  - `ForceUpdateAllSignalAspects()` runs a throttled `Signal.UpdateAspect(false)`
+    sweep over `SignalManager.AllControllers`.
 
 ---
 
@@ -501,12 +545,19 @@ Derived from reading the code; not a plan. The most fragile points:
    reachability does not regress. Residual: switch-port data is incomplete for
    multi-switch blocks, so legibility enforcement is no better than before
    (see VISION blocker #2 "resolved" note).
-10. **Staging advances on occupancy before a block is claimed first**:
-    `StagingData.Process` treats a next-block occupancy read as `trainAdvanced`
+10. **Restored paths claim the whole lookahead window at once** (fixed):
+    reloading the page / re-activating pathing rebuilds `PathStaging` via
+    `InitializeFromPaths`, which previously claimed nothing and cleared
+    `_retryTimes`, so the next 0.5s `Process()` tick claimed up to 5 blocks per
+    restored path instantly. It now seeds only the start block (mirroring
+    `AddPath`) and arms the full 20s retry interval before the first extension.
+11. **Staging advances on occupancy before a block is claimed first** (fixed):
+    `StagingData.Process` treated a next-block occupancy read as `trainAdvanced`
     even when the path never claimed that block (seed claims only block 0). The
-    path then jumps, prunes unclaimed blocks, and vacates its implicit window.
-    (VISION blocker #3; fix intent: require a claim before advancement.)
-11. **New-path seeding bypasses the claim engine**: `StagingData.AddPath` claims
+    path jumped, pruned unclaimed blocks, and vacated its implicit window.
+    Advancement is now gated on the next block being claimed by this path; an
+    unclaimed-but-occupied next block is a hint to claim it, not to advance.
+12. **New-path seeding bypasses the claim engine**: `StagingData.AddPath` claims
     the first block via a direct `ActivateBlock` call instead of the
     conflict-aware `TryClaimFrom`/`CalcRange` path, so a newly created path's
     seed claim skips the opposing/upcoming-traffic checks the rest of the engine

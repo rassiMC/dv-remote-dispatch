@@ -1,375 +1,421 @@
-	using System;
-	using System.Collections.Generic;
-	using System.Linq;
-	using System.Reflection;
-	using Signals.API;
-	using Newtonsoft.Json;
-	using UnityEngine;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Signals.Game;
+using Signals.Game.Aspects;
+using Signals.Game.Controllers;
+using Signals.Game.Railway;
+using UnityEngine;
+
+using SgSignal = Signals.Game.Signal;
 
 namespace DvMod.RemoteDispatch.Signals
 {
-	internal class SignalsBridge
-	{
-		/// <summary>Callbacks to invoke on event</summary>
-		private readonly Action<string, string>? _onAspectChanged;
-		private readonly Action<string, string>? _onModeChanged;
+    /// <summary>
+    /// Bridge to the new Signals mod (WhistleWiz/dv-signals, GUID "DVSignals", no Signals.API).
+    /// Talks to Signals.Game public classes directly: SignalManager, BasicSignalController,
+    /// Signal, JunctionSignalController, TrackBlock, TrackReserver.
+    /// Produces the same Dictionary&lt;string signalId, object&gt; projection that
+    /// RemoteDispatch.Shims.SignalsShim expects (see SignalsShimHelpers.MinimalSignalDataProjection).
+    /// </summary>
+    internal class SignalsBridge
+    {
+        /// <summary>Callbacks to invoke on event</summary>
+        private readonly Action<string, string>? _onAspectChanged;
+        private readonly Action<string, string>? _onModeChanged;
 
-		/// <summary>Constructor - inject callbacks for forward compat</summary>
-		internal SignalsBridge(Action<string, string>? onAspectChanged = null, Action<string, string>? onModeChanged = null)
-		{
-			_onAspectChanged = onAspectChanged;
-			_onModeChanged = onModeChanged;
-		}
+        // Track which signals we've subscribed to, so we can clean up.
+        private readonly HashSet<SgSignal> _subscribedSignals = new HashSet<SgSignal>();
 
-		/// <summary>
-		/// Registers event handlers for the SignalsAPI loaded and unloaded events.
-		/// </summary>
-		/// <remarks>Call this method to enable automatic handling of SignalsAPI lifecycle events within
-		/// the current context. This method should be called only once per instance to avoid multiple
-		/// registrations.</remarks>
-		internal void Register()
-		{
-			// When SignalsAPI is Loaded, run OnSignalsLoaded
-			SignalsAPI.Loaded += OnSignalsLoaded;
-			// When SignalsAPI is Unloaded, run OnSignalsUnloaded
-			SignalsAPI.Unloaded += OnSignalsUnloaded;
+        /// <summary>Constructor - inject callbacks for forward compat</summary>
+        internal SignalsBridge(Action<string, string>? onAspectChanged = null, Action<string, string>? onModeChanged = null)
+        {
+            _onAspectChanged = onAspectChanged;
+            _onModeChanged = onModeChanged;
+        }
 
-			// If SignalsAPI is already loaded before we registered, we missed the event.
-			// Subscribe to instance events directly now.
-			if (SignalsAPI.Instance != null)
-			{
-				OnSignalsLoaded();
-			}
-		}
+        /// <summary>
+        /// Registers event handlers on the SignalManager static events and subscribes to already-existing signals.
+        /// </summary>
+        /// <remarks>Call this method to enable automatic handling of Signals.Game lifecycle events within
+        /// the current context. This method should be called only once per instance to avoid multiple
+        /// registrations.</remarks>
+        internal void Register()
+        {
+            SignalManager.AspectChanged += OnSignalAspectChanged;
+            SignalManager.OperationModeChanged += OnSignalOperationModeChanged;
+            SignalManager.OverrideChanged += OnSignalOverrideChanged;
 
-		/// <summary>
-		/// Unregisters event handlers from the SignalsAPI to stop receiving signal-related notifications.
-		/// </summary>
-		/// <remarks>Call this method to detach previously registered event handlers and prevent further
-		/// callbacks from the SignalsAPI. This is typically used during cleanup to avoid memory leaks or unintended
-		/// behavior after the object is no longer needed.</remarks>
-		internal void Unregister()
-		{
-			// Make sure to undo everything we did in Register
-			SignalsAPI.Loaded -= OnSignalsLoaded;
-			SignalsAPI.Unloaded -= OnSignalsUnloaded;
-			if (SignalsAPI.Instance != null)
-			{
-				// Also remove the handlers if the API is still around
-				SignalsAPI.Instance.SignalAspectChanged -= OnAspectChanged;
-				SignalsAPI.Instance.SignalModeChanged -= OnModeChanged;
-			}
-		}
+            SubscribeToExistingSignals();
 
-		/// <summary>
-		/// Initializes event handlers for signal aspect and mode changes after the Signals API has been loaded.
-		/// </summary>
-		private void OnSignalsLoaded()
-		{
-			SignalsAPI.Instance!.SignalAspectChanged += OnAspectChanged;
-			SignalsAPI.Instance!.SignalModeChanged += OnModeChanged;
-			LoggingReturn.DebugLog?.Invoke("Signals API loaded, ready to interact with signals.");
-		}
+            LoggingReturn.DebugLog?.Invoke("Signals bridge registered.");
+        }
 
-		/// <summary>
-		/// Handles cleanup operations when the Signals API is unloaded.
-		/// </summary>
-		private void OnSignalsUnloaded()
-		{
-			LoggingReturn.DebugLog?.Invoke("Signals API unloaded, cleaned up handlers.");
-		}
+        /// <summary>
+        /// Unregisters event handlers from the SignalManager static events and unsubscribes from signals.
+        /// </summary>
+        /// <remarks>Call this method to detach previously registered event handlers and prevent further
+        /// callbacks from the SignalManager. This is typically used during cleanup to avoid memory leaks or unintended
+        /// behavior after the object is no longer needed.</remarks>
+        internal void Unregister()
+        {
+            SignalManager.AspectChanged -= OnSignalAspectChanged;
+            SignalManager.OperationModeChanged -= OnSignalOperationModeChanged;
+            SignalManager.OverrideChanged -= OnSignalOverrideChanged;
 
-		/// <summary>
-		/// Handles changes to the aspect of the specified signal state.
-		/// </summary>
-		/// <param name="state">The signal state whose aspect has changed. Contains information about the signal's current and previous
-		/// aspects.</param>
-		private void OnAspectChanged(SignalState state)
-		{
-			LoggingReturn.DebugLog?.Invoke($"Signals Action triggered: Aspect changed: {state.Id} -> {state.CurrentAspectId ?? "OFF"}");
-			_onAspectChanged?.Invoke(state.Id, state.CurrentAspectId ?? "OFF");
-		}
+            if (SignalManager.Instance != null)
+            {
+                foreach (var signal in _subscribedSignals)
+                {
+                    UnsubscribeFromSignal(signal);
+                }
+            }
 
-		/// <summary>
-		/// Handles changes to the mode of the specified signal.
-		/// </summary>
-		/// <param name="signalId"></param>
-		/// <param name="newMode"></param>
-		private void OnModeChanged(string signalId, SignalMode newMode)
-		{
-			LoggingReturn.DebugLog?.Invoke($"Signals Action triggered: Mode changed: {signalId} -> {newMode}");
-			_onModeChanged?.Invoke(signalId, newMode.ToString());
-		}
+            _subscribedSignals.Clear();
+        }
 
-		/// <summary>
-		/// Returns the current aspect of a signal by its ID, or null if not found.
-		/// </summary>
-		internal string? GetSignalAspect(string signalId)
-		{
-			try
-			{
-				return SignalsAPI.GetSignal(signalId)?.CurrentAspectId;
-			}
-			catch (Exception ex)
-			{
-				LoggingReturn.Warning?.Invoke($"GetSignalAspect({signalId}) failed: {ex.Message}");
-				return null;
-			}
-		}
+        private void SubscribeToExistingSignals()
+        {
+            if (SignalManager.Instance == null) return;
 
-		/// <summary>
-		/// Returns all signals with raw world coordinates (not yet converted to lat/lng).
-		/// </summary>
-		internal Dictionary<string, object> GetAllSignals()
-		{
-			var result = new Dictionary<string, object>();
-			try
-			{
-				LoggingReturn.DebugLog?.Invoke("GetAllSignals: calling ForceUpdateAllSignalAspects...");
-				ForceUpdateAllSignalAspects();
+            foreach (var controller in SignalManager.Instance.AllControllers)
+            {
+                foreach (var signal in controller.AllSignals)
+                {
+                    SubscribeToSignal(signal);
+                }
+            }
+        }
 
-				var signals = SignalsAPI.GetAllSignals();
-				if (signals == null)
-				{
-					LoggingReturn.DebugLog?.Invoke("GetAllSignals returned null.");
-					return result;
-				}
+        private void SubscribeToSignal(SgSignal signal)
+        {
+            if (!_subscribedSignals.Add(signal)) return;
 
-				foreach (var signal in signals)
-				{
-					var aspect = signal.CurrentAspectId ?? "OFF";
+            signal.AspectChanged += OnInstanceAspectChanged;
+            signal.OperationModeChanged += OnInstanceModeChanged;
+            signal.OverrideChanged += OnInstanceOverrideChanged;
+        }
 
-					result[signal.Id] = new
-					{
-						signal.Id,
-						signal.Type,
-						signal.Mode,
-						signal.CurrentAspectId,
-						signal.IsOn,
-						Direction = signal.Direction.ToString(),
-						signal.JunctionId,
-						signal.SelectedBranch,
-						signal.YardId,
-						signal.TrackId,
-						Position = new[] { signal.Position.x, signal.Position.z },
-					};
-				}
-			}
-			catch (Exception ex)
-			{
-				LoggingReturn.Warning?.Invoke($"GetAllSignals failed: {ex.Message}");
-				return result;
-			}
+        private void UnsubscribeFromSignal(SgSignal signal)
+        {
+            if (signal.Definition != null)
+            {
+                signal.AspectChanged -= OnInstanceAspectChanged;
+                signal.OperationModeChanged -= OnInstanceModeChanged;
+                signal.OverrideChanged -= OnInstanceOverrideChanged;
+            }
+        }
 
-			return result;
-		}
+        // Static (SignalManager-level) handlers.
+        private void OnSignalAspectChanged(SgSignal signal, IAspect? aspect)
+        {
+            if (signal.Definition == null) return;
+            _onAspectChanged?.Invoke(signal.Name, aspect?.Id ?? "OFF");
+        }
 
-		/// <summary>
-		/// Checks whether the given track has any trains physically on it.
-		/// </summary>
-		internal bool IsTrackOccupied(RailTrack track)
-		{
-			try
-			{
-				return SignalsAPI.IsTrackOccupied(track);
-			}
-			catch (Exception ex)
-			{
-				LoggingReturn.Warning?.Invoke($"IsTrackOccupied failed: {ex.Message}");
-				return false;
-			}
-		}
+        private void OnSignalOperationModeChanged(SgSignal signal, SignalOperationMode mode)
+        {
+            if (signal.Definition == null) return;
+            _onModeChanged?.Invoke(signal.Name, ModeToString(mode));
+        }
 
-		private static MethodInfo? _forceUpdateMethod;
-		private static Type? _signalManagerType;
-		private static PropertyInfo? _allSignalsProp;
-		private static PropertyInfo? _instanceProp;
-		private static bool _reflectionResolved;
+        private void OnSignalOverrideChanged(SgSignal signal, int _)
+        {
+            if (signal.Definition == null) return;
+            _onAspectChanged?.Invoke(signal.Name, signal.CurrentAspect?.Id ?? "OFF");
+        }
 
-		private static DateTime _lastForceUpdate = DateTime.MinValue;
-		private static readonly TimeSpan _forceUpdateInterval = TimeSpan.FromSeconds(5);
+        // Instance-level handlers.
+        private void OnInstanceAspectChanged(IAspect? _)
+        {
+            // The instance handlers only fire for the owning bridge instance; the static
+            // SignalManager handlers already cover the changes, so a direct callback is
+            // not needed here. The Signal is captured via the per-signal subscription.
+        }
 
-		/// <summary>
-		/// Forces all signals to evaluate their aspects regardless of player proximity.
-		/// Tries the new SignalsAPI.ForceUpdateAllSignals(bool) if available,
-		/// otherwise falls back to per-signal UpdateAspect via reflection.
-		/// Throttled to avoid feedback loops.
-		/// </summary>
-		private void ForceUpdateAllSignalAspects()
-		{
-			var now = DateTime.UtcNow;
-			if (now - _lastForceUpdate < _forceUpdateInterval) return;
-			_lastForceUpdate = now;
+        private void OnInstanceModeChanged(SignalOperationMode _)
+        {
+        }
 
-			if (TryForceUpdateViaAPI()) return;
-			ForceUpdateViaReflection();
-		}
+        private void OnInstanceOverrideChanged(int _)
+        {
+        }
 
-		private static MethodInfo? _apiForceUpdateMethod;
-		private static bool _apiForceUpdateChecked;
+        private static string ModeToString(SignalOperationMode mode)
+        {
+            // Old API surfaced SignalMode.Manual / SignalMode.Automatic. The new mod has four
+            // operation modes; any manual-ish mode is reported to the frontend as "Manual".
+            switch (mode)
+            {
+                case SignalOperationMode.Automatic:
+                    return "Automatic";
+                case SignalOperationMode.TempOverride:
+                case SignalOperationMode.SemiManual:
+                case SignalOperationMode.FullManual:
+                    return "Manual";
+                default:
+                    return "Automatic";
+            }
+        }
 
-		private bool TryForceUpdateViaAPI()
-		{
-			if (_apiForceUpdateChecked && _apiForceUpdateMethod == null) return false;
-			_apiForceUpdateChecked = true;
+        /// <summary>
+        /// Returns the current aspect ID of a signal by its display name, or null if not found.
+        /// </summary>
+        internal string? GetSignalAspect(string signalId)
+        {
+            var signal = FindSignalByName(signalId);
+            if (signal == null) return null;
+            return signal.CurrentAspect?.Id ?? "OFF";
+        }
 
-			try
-			{
-				if (_apiForceUpdateMethod == null)
-				{
-					// Use runtime type, not compile-time reference, since the installed
-					// Signals.API.dll may be newer than the one we compiled against.
-					var runtimeType = SignalsAPI.Instance?.GetType() ?? typeof(SignalsAPI);
-					_apiForceUpdateMethod = runtimeType.GetMethod("ForceUpdateAllSignals", BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance);
-					if (_apiForceUpdateMethod == null)
-					{
-						// Search all loaded assemblies for the method
-						foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-						{
-							var t = asm.GetType("Signals.API.SignalsAPI");
-							if (t != null)
-							{
-								_apiForceUpdateMethod = t.GetMethod("ForceUpdateAllSignals", BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance);
-								if (_apiForceUpdateMethod != null) break;
-							}
-						}
-					}
-					if (_apiForceUpdateMethod == null) return false;
-					LoggingReturn.DebugLog?.Invoke("ForceUpdate: found SignalsAPI.ForceUpdateAllSignals.");
-				}
+        /// <summary>
+        /// Returns all signals with raw world coordinates (not yet converted to lat/lng).
+        /// </summary>
+        internal Dictionary<string, object> GetAllSignals()
+        {
+            var result = new Dictionary<string, object>(StringComparer.Ordinal);
+            if (SignalManager.Instance == null) return result;
 
-				var obj = _apiForceUpdateMethod.IsStatic ? null : SignalsAPI.Instance;
-				_apiForceUpdateMethod.Invoke(obj, new object[] { false });
-				return true;
-			}
-			catch (Exception ex)
-			{
-				LoggingReturn.Warning?.Invoke($"ForceUpdate via API failed: {ex.Message}");
-				return false;
-			}
-		}
+            try
+            {
+                ForceUpdateAllSignalAspects();
 
-		private void ForceUpdateViaReflection()
-		{
-			try
-			{
-				if (!_reflectionResolved)
-				{
-					_reflectionResolved = true;
-					var signalsGameAsm = AppDomain.CurrentDomain.GetAssemblies()
-						.FirstOrDefault(a => a.GetName().Name == "Signals.Game");
-					if (signalsGameAsm == null)
-					{
-						LoggingReturn.DebugLog?.Invoke("ForceUpdate: Signals.Game assembly not found, skipping.");
-						return;
-					}
+                foreach (var controller in SignalManager.Instance.AllControllers)
+                {
+                    if (!controller.Exists) continue;
 
-					_signalManagerType = signalsGameAsm.GetType("Signals.Game.SignalManager");
-					if (_signalManagerType == null)
-					{
-						LoggingReturn.DebugLog?.Invoke("ForceUpdate: SignalManager type not found.");
-						return;
-					}
+                    var junctionController = controller as JunctionSignalController;
 
-					_allSignalsProp = _signalManagerType.GetProperty("AllSignals");
-					if (_allSignalsProp == null)
-					{
-						LoggingReturn.DebugLog?.Invoke("ForceUpdate: AllSignals property not found.");
-						return;
-					}
+                    foreach (var signal in controller.AllSignals)
+                    {
+                        if (signal.Definition == null) continue;
 
-					var baseType = _signalManagerType.BaseType;
-					while (baseType != null)
-					{
-						_instanceProp = baseType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
-						if (_instanceProp != null) break;
-						baseType = baseType.BaseType;
-					}
-					if (_instanceProp == null)
-					{
-						LoggingReturn.DebugLog?.Invoke("ForceUpdate: Instance property not found on any base type.");
-						return;
-					}
+                        // Keep an up-to-date subscription map open so event-driven
+                        // signals pushes keep working.
+                        SubscribeToSignal(signal);
 
-					var controllerType = signalsGameAsm.GetType("Signals.Game.Controllers.BasicSignalController");
-					if (controllerType == null)
-					{
-						LoggingReturn.DebugLog?.Invoke("ForceUpdate: BasicSignalController type not found.");
-						return;
-					}
+                        var block = signal.Block;
+                        var junctionId = junctionController?.Junction.junctionData.junctionIdLong;
+                        var direction = GetDirection(signal, junctionController);
+                        var type = TypeToString(controller.Type);
+                        var position = signal.Definition.transform.position;
 
-					_forceUpdateMethod = controllerType.GetMethod("UpdateAspect", new[] { typeof(bool) });
-					if (_forceUpdateMethod == null)
-					{
-						LoggingReturn.DebugLog?.Invoke("ForceUpdate: UpdateAspect method not found.");
-						return;
-					}
+                        result[signal.Name] = new
+                        {
+                            Id = signal.Name,
+                            Type = type,
+                            Mode = ModeToString(signal.Operation),
+                            CurrentAspectId = signal.CurrentAspect?.Id ?? "OFF",
+                            IsOn = signal.IsOn,
+                            Direction = direction,
+                            JunctionId = junctionId,
+                            SelectedBranch = junctionController?.Junction.selectedBranch,
+                            YardId = block?.Yard,
+                            TrackId = block?.TrackNumber,
+                            Position = new[] { position.x, position.z },
+                        };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.Warning?.Invoke($"GetAllSignals failed: {ex.Message}");
+            }
 
-					LoggingReturn.DebugLog?.Invoke("ForceUpdate: reflection resolved successfully.");
-				}
+            return result;
+        }
 
-				if (_forceUpdateMethod == null || _signalManagerType == null) return;
+        private static string GetDirection(SgSignal signal, JunctionSignalController? junctionController)
+        {
+            if (junctionController != null)
+            {
+                // Reflect the junction signal's facing. A junction signal protects the
+                // diverging (out) branches; branch signals protect the converging (in) track.
+                return signal.Controller == junctionController ? "Out" : "In";
+            }
 
-				var instance = _instanceProp?.GetValue(null);
-				if (instance == null) return;
+            // Heuristic fallback: match the old API suffix convention
+            // ({junctionId}:F = Out, {junctionId}:B{1,2} = In).
+            var pos = signal.Definition.transform.position;
+            var name = signal.Name;
+            var colonIdx = name.LastIndexOf(':');
+            if (colonIdx > 0 && colonIdx < name.Length - 1)
+            {
+                var suffix = name.Substring(colonIdx + 1);
+                if (suffix == "F" || suffix == "T") return "Out";
+                if (suffix.StartsWith("B")) return "In";
+            }
 
-				var allSignals = _allSignalsProp?.GetValue(instance) as System.Collections.IList;
-				if (allSignals == null) return;
+            return "Out";
+        }
 
-				int updated = 0;
-				foreach (var signal in allSignals)
-				{
-					var exists = signal.GetType().GetProperty("Exists")?.GetValue(signal) as bool?;
-					if (exists != true) continue;
-					_forceUpdateMethod.Invoke(signal, new object[] { false });
-					updated++;
-				}
-				LoggingReturn.DebugLog?.Invoke($"ForceUpdate: evaluated {updated} signals.");
-			}
-			catch (Exception ex)
-			{
-				LoggingReturn.Warning?.Invoke($"ForceUpdate failed: {ex.Message}");
-			}
-		}
+        private static string TypeToString(SignalType type)
+        {
+            // Old API SignalType values: NotSet, Mainline, IntoYard, Shunting, Distant, Other.
+            // The new mod's SignalType is richer; fold it back to the legacy names.
+            switch (type)
+            {
+                case SignalType.Mainline:
+                    return "Mainline";
+                case SignalType.Entry:
+                case SignalType.Exit:
+                case SignalType.ExitPax:
+                case SignalType.ExitMainline:
+                case SignalType.Spacing:
+                    return "IntoYard";
+                case SignalType.Shunting:
+                    return "Shunting";
+                case SignalType.Distant:
+                    return "Distant";
+                default:
+                    return "Other";
+            }
+        }
 
-		/// <summary>
-		/// Sets a signal to the specified aspect. Returns true on success.
-		/// </summary>
-		internal bool SetSignalAspect(string signalId, string aspect)
-		{
-			LoggingReturn.Log?.Invoke($"Attempting to set signal aspect: {signalId} -> {aspect}");
-			try
-			{
-				return SignalsAPI.SetSignalAspect(signalId, aspect);
-			}
-			catch (Exception ex)
-			{
-				LoggingReturn.Warning?.Invoke($"SetSignalAspect({signalId}, {aspect}) failed: {ex.Message}");
-				return false;
-			}
-		}
+        /// <summary>
+        /// Checks whether the given track has any trains physically on it.
+        /// </summary>
+        internal bool IsTrackOccupied(RailTrack track)
+        {
+            if (track == null) return false;
+            try
+            {
+                // Equivalent to the old API's IsTrackOccupied / the new mod's internal
+                // Extensions.HasBogies(). RailTrackOnTrackBogiesExtensions is a public
+                // static helper in Assembly-CSharp (global namespace).
+                return RailTrackOnTrackBogiesExtensions.BogiesOnTrack(track).Count > 0;
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.Warning?.Invoke($"IsTrackOccupied failed: {ex.Message}");
+                return false;
+            }
+        }
 
-		/// <summary>
-		/// Sets a signal to the specified mode. Returns true on success.
-		/// </summary>
-		/// <param name="signalId">The ID of the signal</param>
-		internal bool SetSignalMode(string signalId, string mode)
-		{
-			LoggingReturn.DebugLog?.Invoke($"Attempting to set signal mode: {signalId} -> {mode}");
-			try
-			{
-				if (!Enum.TryParse<SignalMode>(mode, true, out var parsed))
-				{
-					LoggingReturn.DebugLog?.Invoke($"Failed to parse signal mode: {signalId} -> {mode}");
-					return false;
-				}
-				return SignalsAPI.SetSignalMode(signalId, parsed);
-			}
-			catch (Exception ex)
-			{
-				LoggingReturn.Warning?.Invoke($"SetSignalMode({signalId}, {mode}) failed: {ex.Message}");
-				return false;
-			}
-		}
-	}
+        /// <summary>
+        /// Sets a signal to the specified aspect. Returns true on success.
+        /// </summary>
+        internal bool SetSignalAspect(string signalId, string aspect)
+        {
+            var signal = FindSignalByName(signalId);
+            if (signal == null) return false;
+
+            LoggingReturn.Log?.Invoke($"Attempting to set signal aspect: {signalId} -> {aspect}");
+
+            try
+            {
+                // Resolve the aspect index by ID, then set FullManual + override so the
+                // aspect sticks (mirrors old SetAspectById behaviour).
+                for (int i = 0; i < signal.AllAspects.Length; i++)
+                {
+                    if (string.Equals(signal.AllAspects[i].Id, aspect, StringComparison.OrdinalIgnoreCase))
+                    {
+                        signal.ChangeOperationMode(SignalOperationMode.FullManual);
+                        signal.SetAspectOverride(i);
+                        var changed = signal.ChangeAspect(i);
+                        signal.UpdateDisplays(changed);
+                        signal.UpdateIndicators();
+                        return true;
+                    }
+                }
+
+                LoggingReturn.Warning?.Invoke($"Aspect '{aspect}' not found on signal '{signalId}'.");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.Warning?.Invoke($"SetSignalAspect({signalId}, {aspect}) failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Sets a signal to the specified mode. Returns true on success.
+        /// </summary>
+        /// <param name="signalId">The ID of the signal</param>
+        internal bool SetSignalMode(string signalId, string mode)
+        {
+            var signal = FindSignalByName(signalId);
+            if (signal == null) return false;
+
+            LoggingReturn.DebugLog?.Invoke($"Attempting to set signal mode: {signalId} -> {mode}");
+
+            try
+            {
+                SignalOperationMode parsed;
+                switch (mode)
+                {
+                    case "Manual":
+                        parsed = SignalOperationMode.FullManual;
+                        break;
+                    case "Automatic":
+                        parsed = SignalOperationMode.Automatic;
+                        break;
+                    default:
+                        LoggingReturn.DebugLog?.Invoke($"Failed to parse signal mode: {signalId} -> {mode}");
+                        return false;
+                }
+
+                return signal.ChangeOperationMode(parsed);
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.Warning?.Invoke($"SetSignalMode({signalId}, {mode}) failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static SgSignal? FindSignalByName(string signalId)
+        {
+            if (string.IsNullOrEmpty(signalId) || SignalManager.Instance == null) return null;
+
+            foreach (var controller in SignalManager.Instance.AllControllers)
+            {
+                foreach (var signal in controller.AllSignals)
+                {
+                    if (string.Equals(signal.Name, signalId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return signal;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static DateTime _lastForceUpdate = DateTime.MinValue;
+        private static readonly TimeSpan _forceUpdateInterval = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// Forces all signals to evaluate their aspects regardless of player proximity.
+        /// The new Signals mod runs its own 1s update loop, but this keeps Dispatch's
+        /// aspect snapshot fresh even when a player is far from a signal. Throttled.
+        /// </summary>
+        private void ForceUpdateAllSignalAspects()
+        {
+            var now = DateTime.UtcNow;
+            if (now - _lastForceUpdate < _forceUpdateInterval) return;
+            _lastForceUpdate = now;
+
+            if (SignalManager.Instance == null) return;
+
+            try
+            {
+                foreach (var controller in SignalManager.Instance.AllControllers)
+                {
+                    if (!controller.Exists) continue;
+
+                    foreach (var signal in controller.AllSignals)
+                    {
+                        if (signal.Definition == null) continue;
+                        signal.UpdateAspect(false);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.DebugLog?.Invoke($"ForceUpdateAllSignalAspects failed: {ex.Message}");
+            }
+        }
+    }
 }

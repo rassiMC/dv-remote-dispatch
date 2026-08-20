@@ -76,7 +76,20 @@ namespace DvMod.RemoteDispatch
                         if (!queue.Contains(pathId))
                             queue.Add(pathId);
                     }
+
+                    // Restore only the start block claim (mirroring AddPath) and defer
+                    // the first automatic extension by the full retry interval so a
+                    // reload does not blast the entire lookahead window on the next tick.
+                    var occupancy = OccupancyData.GetOccupancyData();
+                    if (blocksArr.Length > 0 && occupancy.TryGetValue(blocksArr[0], out var occ) && occ == true)
+                    {
+                        ActivateBlock(blocksArr[0], staging);
+                    }
+                    _retryTimes[pathId] = DateTime.UtcNow + RetryInterval;
                 }
+
+                if (_pathProgress.Count > 0)
+                    Sessions.AddTag("paths");
             }
         }
 
@@ -586,7 +599,8 @@ namespace DvMod.RemoteDispatch
                     if (nextIdx < staging.blocks.Length)
                     {
                         var nextBlockId = staging.blocks[nextIdx];
-                        if (occupancy.TryGetValue(nextBlockId, out var occ) && occ == true)
+                        bool nextClaimedByUs = _activeBlocks.TryGetValue(nextBlockId, out var nextClaimer) && nextClaimer == staging.pathId;
+                        if (nextClaimedByUs && occupancy.TryGetValue(nextBlockId, out var occ) && occ == true)
                         {
                             var prevBlockId = staging.blocks[staging.currentBlockIndex];
 

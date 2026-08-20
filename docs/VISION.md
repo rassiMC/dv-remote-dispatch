@@ -101,18 +101,16 @@ A dispatcher looking at the switchboard should be able to, at a glance:
    occupancy change (`invalidatePathTree`). Known residual: switch-port data is
    incomplete for multi-switch blocks, so legibility enforcement is no worse
    than before (see CURRENT-STATE corresponding note).
-3. **Occupancy is treated as "advance" before a block is ever claimed** - the
-   staging engine's `Process()` (StagingData.cs:585-614) advances a path's
-   `currentBlockIndex` whenever the *next* block reads occupied, regardless of
-   whether the path had claimed it. A path is seeded with only its start block
-   claimed (`AddPath` claims just the first block up front); if the train moves
-   into the next block before staging has claimed it (idle window, 20s retry
-   backoff, or a claim refused by conflict-aware gating), occupancy alone is
-   taken as `trainAdvanced` - the path jumps forward, prunes past blocks it never
-   claimed, and the implicit claim window abandons the unclaimed span. Fix intent:
-   only treat occupancy as advancement when the block was actually claimed by this
-   path first; an unclaimed-but-occupied next block should be a signal to claim
-   it, not to advance.
+3. **Occupancy is treated as "advance" before a block is ever claimed** -
+   **fixed**: the staging engine's `Process()` now advances a path's
+   `currentBlockIndex` only when the *next* block was **claimed by this path**
+   and reads occupied; an unclaimed-but-occupied next block is treated as a hint
+   to claim it, not to advance. Related restore bug also fixed: reloading /
+   re-activating pathing (`InitializeFromPaths`) no longer blasts the whole
+   lookahead window on the next tick - it seeds only the start block and arms
+   the full 20s retry interval first. Residual: a train moving into a still-
+   unclaimed block (before the seed window extends) stalls the path
+   deliberately - the dispatcher can delete/recreate it.
 4. **Path creation claims one block via an ad-hoc path** - `PathingData.AddPath`
    seeds the new path by calling `StagingData.AddPath` (StagingData.cs:83-106),
    which claims the first block directly through a private **direct** call to

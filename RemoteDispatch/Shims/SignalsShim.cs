@@ -26,15 +26,20 @@ namespace DvMod.RemoteDispatch
 		private static PropertyInfo? _isLoadedProperty;
 
 		/// <summary>
-		/// Checks whether the Signals API has finished loading and is ready to serve requests.
+		/// Indicates whether the active Signals backend is loaded and ready to serve requests.
 		/// This is distinct from IsInitialized, which just means our shim has been set up.
+		/// For the new Signals.Game backend there is no Signals.API IsLoaded flag, so the
+		/// shim is considered ready once initialized and the Signals.Game manager exists.
 		/// </summary>
 		internal static bool IsAPILoaded
 		{
 			get
 			{
-				if (!IsInitialized || _isLoadedProperty == null)
-					return false;
+				if (!IsInitialized) return false;
+
+				// New-fork backend: no Signals.API IsLoaded property.
+				if (_isLoadedProperty == null) return true;
+
 				try
 				{
 					return _isLoadedProperty.GetValue(null) is true;
@@ -188,20 +193,36 @@ namespace DvMod.RemoteDispatch
 					return;
 				}
 
-				if (signalsAssembly == null)
+				// Two Signals mods share the "DVSignals" Id:
+				//  - old fork: version "1.1.3-mp"/"1.1.4-mp" ships Signals.API.dll -> RemoteDispatch.SignalsMP.dll
+				//  - new fork: version "1.0.0" (WhistleWiz/dv-signals, no API) -> RemoteDispatch.Signals.dll
+				// Discriminate by the "-mp" suffix on the installed mod version, falling back to
+				// presence of the Signals.API assembly if the version string is ambiguous.
+				bool usesApi = !string.IsNullOrEmpty(signalsMod.Info?.Version) &&
+							   signalsMod.Info.Version.IndexOf("-mp", StringComparison.OrdinalIgnoreCase) >= 0;
+				if (!usesApi && signalsAssembly == null)
 				{
-					Main.Warning("Signals mod is enabled but Signals.API assembly not loaded.");
+					Main.Warning("Signals mod is enabled but no compatible Signals integration was found.");
 					return;
 				}
-
-				_signalsApiType = signalsAssembly.GetType("Signals.API.SignalsAPI");
+				if (!usesApi)
+				{
+					Main.Log($"Signals mod version '{signalsMod.Info.Version}' detected, using Signals.Game bridge (RemoteDispatch.Signals.dll).");
+					_signalsApiType = null;
+				}
+				else
+				{
+					Main.Log($"Signals mod version '{signalsMod.Info.Version}' detected, using Signals.API bridge (RemoteDispatch.SignalsMP.dll).");
+					_signalsApiType = signalsAssembly?.GetType("Signals.API.SignalsAPI");
+				}
 				_isLoadedProperty = _signalsApiType?.GetProperty("IsLoaded", BindingFlags.Public | BindingFlags.Static);
 
-				var path = Path.Combine(Main.mod!.Path, "RemoteDispatch.Signals.dll");
+				var bridgeDll = usesApi ? "RemoteDispatch.SignalsMP.dll" : "RemoteDispatch.Signals.dll";
+				var path = Path.Combine(Main.mod!.Path, bridgeDll);
 
 				if (!File.Exists(path))
 				{
-					Main.Warning("RemoteDispatch.Signals.dll not found, signal integration disabled.");
+					Main.Warning($"{bridgeDll} not found, signal integration disabled.");
 					return;
 				}
 
@@ -210,7 +231,7 @@ namespace DvMod.RemoteDispatch
 
 				if (bootstrap == null)
 				{
-					Main.Warning("Failed to find DvMod.RemoteDispatch.Signals.Bootstrap, signal integration disabled.");
+					Main.Warning($"Failed to find DvMod.RemoteDispatch.Signals.Bootstrap, signal integration disabled.");
 					return;
 				}
 

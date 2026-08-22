@@ -20,6 +20,16 @@ namespace DvMod.RemoteDispatch.Signals
 		public static bool IsTrackOccupied(RailTrack track) => _bridge?.IsTrackOccupied(track) ?? false;
 
 		/// <summary>
+		/// Resolves the pack file key (always "DVSignalpack-mp" for the -mp backend).
+		/// </summary>
+		public static string? GetPackKey() => _bridge == null ? null : SignalsBridge.GetPackKey();
+
+		/// <summary>
+		/// Captures a signal's lamps and the currently-applied aspect's lamp usage. Main-thread only.
+		/// </summary>
+		public static object? CaptureSignal(string signalName) => _bridge?.CaptureSignal(signalName);
+
+		/// <summary>
 		/// Initialize the bridge and set up logging. This should be called by the main mod during its initialization.
 		/// </summary>
 		/// <param name="log"></param>

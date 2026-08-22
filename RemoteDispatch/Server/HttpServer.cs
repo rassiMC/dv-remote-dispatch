@@ -133,6 +133,10 @@ namespace DvMod.RemoteDispatch
 			string signalsJson = Main.settings.featureFlags.enableSignals ? JsonConvert.SerializeObject(SignalsShim.GetAllSignalsData()) : JsonConvert.SerializeObject(new JObject());
 			Render200(context, ContentTypes.Json, signalsJson);
 			break;
+		case "signalpack":
+			Main.DebugLog("/signalpack endpoint hit");
+			Render200(context, ContentTypes.Json, Main.settings.featureFlags.enableSignals ? SignalsShim.GetPackTableJson() : "{}");
+			break;
 		case "occupancy":
 			if (context.Request.HttpMethod == "POST")
 			{

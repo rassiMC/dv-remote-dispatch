@@ -35,15 +35,17 @@
 		<PackageReference Include="UnityModManager" Version="0.27.2" />
 	</ItemGroup>
 
-	<!-- Signals.Game (new fork): built DLLs shipped inside the DVSignals mod folder -->
+	<!-- Signals.Game (new fork): compile-time refs kept in refs/new/ so the project
+	     builds without the new DVSignals mod being installed. At runtime the mod's
+	     own Signals.Game.dll / Signals.Common.dll are used; these are not copied to output. -->
 	<ItemGroup>
 		<Reference Include="Signals.Game">
-			<HintPath>$(SignalsPath)/Signals.Game.dll</HintPath>
+			<HintPath>$(MSBuildThisFileDirectory)..\refs\new\Signals.Game.dll</HintPath>
 			<Private>false</Private>
 			<ExcludeAssets>runtime</ExcludeAssets>
 		</Reference>
 		<Reference Include="Signals.Common">
-			<HintPath>$(SignalsPath)/Signals.Common.dll</HintPath>
+			<HintPath>$(MSBuildThisFileDirectory)..\refs\new\Signals.Common.dll</HintPath>
 			<Private>false</Private>
 			<ExcludeAssets>runtime</ExcludeAssets>
 		</Reference>

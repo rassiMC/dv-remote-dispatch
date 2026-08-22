@@ -395,6 +395,132 @@ namespace DvMod.RemoteDispatch.Signals
             return null;
         }
 
+        /// <summary>
+        /// Resolves the pack file key for the current Signals.Game pack.
+        /// Returns "DVSignalpack-default" when no custom pack is enabled, or
+        /// "DVSignalpack-&lt;ModId&gt;" for an enabled custom pack.
+        /// </summary>
+        internal static string GetPackKey()
+        {
+            try
+            {
+                var pack = SignalManager.CurrentPack;
+                if (pack == null) return "DVSignalpack-default";
+
+                // A custom pack is enabled when the user selected one in the DVSignals settings.
+                var custom = SignalsMod.Settings.CustomPack;
+                if (string.IsNullOrEmpty(custom)) return "DVSignalpack-default";
+
+                var modId = pack.ModId;
+                if (string.IsNullOrEmpty(modId)) return "DVSignalpack-default";
+
+                var sanitized = Sanitize(modId);
+                return string.IsNullOrEmpty(sanitized) ? "DVSignalpack-default" : $"DVSignalpack-{sanitized}";
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.Warning?.Invoke($"GetPackKey failed: {ex.Message}");
+                return "DVSignalpack-default";
+            }
+        }
+
+        internal static string Sanitize(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+            var chars = value.ToCharArray();
+            for (int i = 0; i < chars.Length; i++)
+            {
+                char c = chars[i];
+                if (!char.IsLetterOrDigit(c) && c != '.' && c != '_' && c != '-')
+                    chars[i] = '_';
+            }
+            return new string(chars);
+        }
+
+        /// <summary>
+        /// Builds a capture snapshot for the given signal name. Must be called on the main thread.
+        /// Returns null if the signal could not be found.
+        /// The returned object serializes to:
+        /// { PackId, PackVersion, PackName, Lamps: [{Name,Colour,Position:[x,y,z]}], CurrentAspectId, DisallowPassing, Lit: [], Blinking: [] }
+        /// </summary>
+        internal object? CaptureSignal(string signalName)
+        {
+            var signal = FindSignalByName(signalName);
+            if (signal == null || signal.Definition == null) return null;
+
+            try
+            {
+                var pack = SignalManager.CurrentPack;
+                var packId = pack?.ModId ?? string.Empty;
+                var packVersion = pack?.Version ?? string.Empty;
+                var packName = pack?.ModName ?? string.Empty;
+
+                var lamps = new List<object>();
+                foreach (var light in signal.AllLights)
+                {
+                    var def = light.Definition;
+                    if (def == null) continue;
+
+                    var localPos = signal.Definition.transform.InverseTransformPoint(def.transform.position);
+                    lamps.Add(new
+                    {
+                        Name = def.gameObject.name,
+                        Colour = ColorUtility.ToHtmlStringRGBA(def.Colour),
+                        Position = new[] { localPos.x, localPos.y, localPos.z },
+                    });
+                }
+
+                var aspect = signal.CurrentAspect;
+                string aspectId = aspect?.Id ?? "OFF";
+                bool disallowPassing = false;
+                var lit = new List<string>();
+                var blinking = new List<string>();
+
+                if (aspect != null)
+                {
+                    var def = aspect.GetDefinition();
+                    disallowPassing = def.DisallowPassing;
+
+                    foreach (var on in def.OnLights)
+                    {
+                        if (on != null && !lit.Contains(on.gameObject.name)) lit.Add(on.gameObject.name);
+                    }
+                    foreach (var blink in def.BlinkingLights)
+                    {
+                        if (blink == null) continue;
+                        var name = blink.gameObject.name;
+                        if (!lit.Contains(name)) lit.Add(name);
+                        if (!blinking.Contains(name)) blinking.Add(name);
+                    }
+                    foreach (var seq in def.LightSequences)
+                    {
+                        if (seq == null || seq.Lights == null) continue;
+                        foreach (var light in seq.Lights)
+                        {
+                            if (light != null && !lit.Contains(light.gameObject.name)) lit.Add(light.gameObject.name);
+                        }
+                    }
+                }
+
+                return new
+                {
+                    PackId = packId,
+                    PackVersion = packVersion,
+                    PackName = packName,
+                    Lamps = lamps.ToArray(),
+                    CurrentAspectId = aspectId,
+                    DisallowPassing = disallowPassing,
+                    Lit = lit.ToArray(),
+                    Blinking = blinking.ToArray(),
+                };
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.Warning?.Invoke($"CaptureSignal({signalName}) failed: {ex.Message}");
+                return null;
+            }
+        }
+
         private static DateTime _lastForceUpdate = DateTime.MinValue;
         private static readonly TimeSpan _forceUpdateInterval = TimeSpan.FromSeconds(5);
 

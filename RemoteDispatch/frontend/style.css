@@ -366,3 +366,17 @@ body.switchboard-active #map {
 #pathingStatus {
 	min-height: 18px;
 }
+
+.signal-divicon {
+	background: transparent;
+	border: none;
+}
+
+@keyframes sigBlink {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.15; }
+}
+
+.sig-lamp-blinking {
+	animation: sigBlink 0.8s infinite;
+}

@@ -371,5 +371,295 @@ namespace DvMod.RemoteDispatch.Signals
 				return false;
 			}
 		}
+
+#region Pack table (reflection-based capture)
+
+		// The -mp fork ships its own Signals.Game.dll (same Signal/IAspect/SignalLight surface as
+		// the new fork) but also the old Signals.API. The two Signals.Common.dll builds collide by
+		// assembly name, so we reach the pack/lamp data via reflection at runtime instead of a
+		// compile-time reference. Kept in one place so the reflection surface is easy to audit.
+
+		private static bool s_packReflectionResolved;
+		private static Type? s_packType;
+		private static Type? s_signalManagerType;
+		private static Type? s_signalsModType;
+		private static PropertyInfo? s_signalManagerInstanceProp;
+		private static PropertyInfo? s_allControllersProp;
+		private static PropertyInfo? s_controllerSignalsProp;
+		private static PropertyInfo? s_controllerExistsProp;
+		private static PropertyInfo? s_currentPackProp;
+		private static PropertyInfo? s_packModIdProp;
+		private static PropertyInfo? s_packVersionProp;
+		private static PropertyInfo? s_packModNameProp;
+		private static FieldInfo? s_customPackField;
+		private static PropertyInfo? s_signalNameProp;
+		private static PropertyInfo? s_signalAllLightsProp;
+		private static PropertyInfo? s_signalCurrentAspectProp;
+		private static PropertyInfo? s_signalDefinitionProp;
+		private static PropertyInfo? s_lightDefinitionProp;
+		private static FieldInfo? s_lightDefinitionColourField;
+		private static PropertyInfo? s_aspectIdProp;
+		private static MethodInfo? s_aspectGetDefinitionMethod;
+		private static PropertyInfo? s_defDisallowPassingProp;
+		private static FieldInfo? s_defOnLightsField;
+		private static FieldInfo? s_defBlinkingLightsField;
+		private static FieldInfo? s_defLightSequencesField;
+		private static FieldInfo? s_seqLightsField;
+
+		private static void ResolvePackReflection()
+		{
+			if (s_packReflectionResolved) return;
+			s_packReflectionResolved = true;
+
+			try
+			{
+				var gameAsm = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "Signals.Game");
+				var commonAsm = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "Signals.Common");
+				if (gameAsm == null || commonAsm == null)
+				{
+					LoggingReturn.DebugLog?.Invoke("Pack capture: Signals.Game/Common assemblies not found.");
+					return;
+				}
+
+				s_signalManagerType = gameAsm.GetType("Signals.Game.SignalManager");
+				s_signalsModType = gameAsm.GetType("Signals.Game.SignalsMod");
+				s_packType = commonAsm.GetType("Signals.Common.SignalPack");
+				if (s_signalManagerType == null || s_packType == null) return;
+
+				s_currentPackProp = s_signalManagerType.GetProperty("CurrentPack");
+				s_packModIdProp = s_packType.GetProperty("ModId");
+				s_packVersionProp = s_packType.GetProperty("Version");
+				s_packModNameProp = s_packType.GetProperty("ModName");
+
+				// Settings.CustomPack: the field lives on Signals.Game.Settings (top-level) in this build.
+				var settingsType = gameAsm.GetType("Signals.Game.Settings") ?? s_signalsModType?.GetNestedType("Settings");
+				s_customPackField = settingsType?.GetField("CustomPack");
+
+				var instanceBase = s_signalManagerType.BaseType;
+				while (instanceBase != null)
+				{
+					s_signalManagerInstanceProp = instanceBase.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+					if (s_signalManagerInstanceProp != null) break;
+					instanceBase = instanceBase.BaseType;
+				}
+
+				s_allControllersProp = s_signalManagerType.GetProperty("AllControllers");
+				var controllerType = gameAsm.GetType("Signals.Game.Controllers.BasicSignalController");
+				if (controllerType != null)
+				{
+					s_controllerSignalsProp = controllerType.GetProperty("Signals");
+					s_controllerExistsProp = controllerType.GetProperty("Exists");
+				}
+
+				var signalType = gameAsm.GetType("Signals.Game.Signal");
+				if (signalType != null)
+				{
+					s_signalNameProp = signalType.GetProperty("Name");
+					s_signalAllLightsProp = signalType.GetProperty("AllLights");
+					s_signalCurrentAspectProp = signalType.GetProperty("CurrentAspect");
+					s_signalDefinitionProp = signalType.GetProperty("Definition");
+				}
+
+				var lightType = gameAsm.GetType("Signals.Game.Lights.SignalLight");
+				if (lightType != null) s_lightDefinitionProp = lightType.GetProperty("Definition");
+
+				var lightDefType = commonAsm.GetType("Signals.Common.SignalLightDefinition");
+				if (lightDefType != null) s_lightDefinitionColourField = lightDefType.GetField("Colour");
+
+				var aspectType = gameAsm.GetType("Signals.Game.Aspects.IAspect");
+				if (aspectType != null)
+				{
+					s_aspectIdProp = aspectType.GetProperty("Id");
+					s_aspectGetDefinitionMethod = aspectType.GetMethod("GetDefinition");
+				}
+
+				var aspectDefType = commonAsm.GetType("Signals.Common.Aspects.AspectBaseDefinition");
+				if (aspectDefType != null)
+				{
+					s_defDisallowPassingProp = aspectDefType.GetProperty("DisallowPassing");
+					s_defOnLightsField = aspectDefType.GetField("OnLights");
+					s_defBlinkingLightsField = aspectDefType.GetField("BlinkingLights");
+					s_defLightSequencesField = aspectDefType.GetField("LightSequences");
+				}
+
+				var seqDefType = commonAsm.GetType("Signals.Common.SignalLightSequenceDefinition");
+				if (seqDefType != null) s_seqLightsField = seqDefType.GetField("Lights");
+			}
+			catch (Exception ex)
+			{
+				LoggingReturn.Warning?.Invoke($"ResolvePackReflection failed: {ex.Message}");
+			}
+		}
+
+		/// <summary>
+		/// Resolves the pack file key. The -mp fork always uses "DVSignalpack-mp".
+		/// </summary>
+		internal static string GetPackKey() => "DVSignalpack-mp";
+
+		private static object? GetSignalManagerInstance()
+		{
+			if (s_signalManagerInstanceProp == null) return null;
+			try { return s_signalManagerInstanceProp.GetValue(null); }
+			catch { return null; }
+		}
+
+		private static IEnumerable<object> EnumerateSignals()
+		{
+			var instance = GetSignalManagerInstance();
+			if (instance == null) yield break;
+
+			var controllers = s_allControllersProp?.GetValue(instance) as System.Collections.IEnumerable;
+			if (controllers == null) yield break;
+
+			foreach (var controller in controllers)
+			{
+				if (s_controllerExistsProp != null)
+				{
+					var exists = s_controllerExistsProp.GetValue(controller) as bool?;
+					if (exists != true) continue;
+				}
+
+				var signals = s_controllerSignalsProp?.GetValue(controller) as System.Collections.IEnumerable;
+				if (signals == null) continue;
+
+				foreach (var signal in signals) yield return signal;
+			}
+		}
+
+		private static object? FindSignalReflection(string signalName)
+		{
+			foreach (var signal in EnumerateSignals())
+			{
+				var name = s_signalNameProp?.GetValue(signal) as string;
+				if (string.Equals(name, signalName, StringComparison.OrdinalIgnoreCase)) return signal;
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// Builds a capture snapshot for the given signal name via reflection. Main-thread only.
+		/// Returns null if the signal could not be found.
+		/// </summary>
+		internal object? CaptureSignal(string signalName)
+		{
+			ResolvePackReflection();
+			if (!s_packReflectionResolved) return null;
+
+			var signal = FindSignalReflection(signalName);
+			if (signal == null || s_signalDefinitionProp == null) return null;
+
+			try
+			{
+				var pack = s_currentPackProp?.GetValue(GetSignalManagerInstance());
+				var packId = pack != null && s_packModIdProp != null ? s_packModIdProp.GetValue(pack) as string ?? string.Empty : string.Empty;
+				var packVersion = pack != null && s_packVersionProp != null ? s_packVersionProp.GetValue(pack) as string ?? string.Empty : string.Empty;
+				var packName = pack != null && s_packModNameProp != null ? s_packModNameProp.GetValue(pack) as string ?? string.Empty : string.Empty;
+
+				var signalDef = s_signalDefinitionProp.GetValue(signal);
+				var signalTransform = signalDef != null ? GetTransform(signalDef) : null;
+
+				var lamps = new List<object>();
+				var allLights = s_signalAllLightsProp?.GetValue(signal) as System.Collections.IEnumerable;
+				if (allLights != null)
+				{
+					foreach (var light in allLights)
+					{
+						var lightDef = s_lightDefinitionProp?.GetValue(light);
+						if (lightDef == null) continue;
+
+						var name = GetObjectName(lightDef);
+						var colourObj = s_lightDefinitionColourField?.GetValue(lightDef);
+						var colourHex = colourObj is Color c ? ColorUtility.ToHtmlStringRGBA(c) : string.Empty;
+
+						double[] position = Array.Empty<double>();
+						var lightTransform = GetTransform(lightDef);
+						if (signalTransform != null && lightTransform != null)
+						{
+							var localPos = signalTransform.InverseTransformPoint(lightTransform.position);
+							position = new[] { (double)localPos.x, (double)localPos.y, (double)localPos.z };
+						}
+
+						lamps.Add(new { Name = name, Colour = colourHex, Position = position });
+					}
+				}
+
+				var currentAspect = s_signalCurrentAspectProp?.GetValue(signal);
+				string aspectId = "OFF";
+				bool disallowPassing = false;
+				var lit = new List<string>();
+				var blinking = new List<string>();
+
+				if (currentAspect != null)
+				{
+					aspectId = s_aspectIdProp?.GetValue(currentAspect) as string ?? "OFF";
+					var defObj = s_aspectGetDefinitionMethod?.Invoke(currentAspect, null);
+
+					if (defObj != null)
+					{
+						var disallow = s_defDisallowPassingProp?.GetValue(defObj);
+						disallowPassing = disallow is bool b && b;
+
+						AddLampNames(s_defOnLightsField?.GetValue(defObj), lit, null);
+						AddLampNames(s_defBlinkingLightsField?.GetValue(defObj), lit, blinking);
+
+						var sequences = s_defLightSequencesField?.GetValue(defObj) as System.Collections.IEnumerable;
+						if (sequences != null)
+						{
+							foreach (var seq in sequences)
+							{
+								if (seq == null) continue;
+								AddLampNames(s_seqLightsField?.GetValue(seq), lit, null);
+							}
+						}
+					}
+				}
+
+				return new
+				{
+					PackId = packId,
+					PackVersion = packVersion,
+					PackName = packName,
+					Lamps = lamps.ToArray(),
+					CurrentAspectId = aspectId,
+					DisallowPassing = disallowPassing,
+					Lit = lit.ToArray(),
+					Blinking = blinking.ToArray(),
+				};
+			}
+			catch (Exception ex)
+			{
+				LoggingReturn.Warning?.Invoke($"CaptureSignal({signalName}) failed: {ex.Message}");
+				return null;
+			}
+		}
+
+		private static void AddLampNames(object? lightsValue, List<string> lit, List<string>? blinking)
+		{
+			if (lightsValue == null) return;
+			if (lightsValue is not System.Collections.IEnumerable lights) return;
+
+			foreach (var lightDef in lights)
+			{
+				if (lightDef == null) continue;
+				var name = GetObjectName(lightDef);
+				if (string.IsNullOrEmpty(name)) continue;
+				if (!lit.Contains(name)) lit.Add(name);
+				if (blinking != null && !blinking.Contains(name)) blinking.Add(name);
+			}
+		}
+
+		private static string GetObjectName(object component)
+		{
+			if (component is UnityEngine.Object obj) return obj.name;
+			return string.Empty;
+		}
+
+		private static UnityEngine.Transform? GetTransform(object component)
+		{
+			if (component is UnityEngine.Component comp) return comp.transform;
+			return null;
+		}
+
+		#endregion Pack table
 	}
 }

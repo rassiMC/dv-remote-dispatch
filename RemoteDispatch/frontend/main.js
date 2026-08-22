@@ -543,6 +543,17 @@ function updateAllJunctions(states) {
 const signalMarkers = new Map();
 const signalIconAnchor = [12, 12];
 
+// Signal pack table (lamp/aspect layout), served via /signalpack.
+let packTable = { Signals: {} };
+
+function refreshPackTable(data) {
+	packTable = (data && data.Signals) ? data : { Signals: {} };
+	// Re-render all existing signal markers so newly-loaded pack entries show.
+	signalMarkers.forEach((entry, signalId) => {
+		entry.entry = packTable.Signals[signalId] || null;
+		entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, entry.type, entry.entry));
+	});
+}
 
 function makeSafeSignalId(id) {
 	if (!id) return '';
@@ -553,35 +564,57 @@ function makeSafeSignalId(id) {
 	return id.replace(/[\.\:\[\]\#\$%\{\}\(\)\*\+\>\s]+/g, '_');
 }
 
-function getSignalIconUrl(aspect, mode, type) {
-	if (loggingEnabled)
-		console.log(`Getting signal icon for aspect ${aspect} and mode ${mode}, of type ${type}`);
-	if (!aspect || aspect === 'OFF') {
-		if (type == "Distant") return 'res/signals.distant_off.webp';
-		return 'res/signals.off.webp';
-	}
+// Escapes a string for safe embedding in SVG/HTML.
+function escapeXml(s) {
+	return String(s).replace(/[&<>"']/g, c => ({
+		'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+	}[c]));
+}
 
-	if (type === "Distant") {
-		// Distant signals do not have a manual image
-		if (loggingEnabled)
-			console.log("Signal is of type 'distant'")
-		mode = "automatic";
-	}
-	const imageName = `${aspect.toLowerCase()}_${mode.toLowerCase()}`;
+// Lamp colours arrive as ColorUtility.ToHtmlStringRGBA() output: "RRGGBBAA" without '#',
+// e.g. "31F885FF". Normalize to "#RRGGBB" (drop the always-opaque alpha) for CSS/SVG.
+function normalizeLampColour(c) {
+	if (!c) return '#fff';
+	let s = c.charAt(0) === '#' ? c : '#' + c;
+	if (s.length === 9) s = s.slice(0, 7); // #RRGGBBAA -> #RRGGBB
+	return s;
+}
 
-	// Match all known aspects by lowercasing the input
-	const imageNames = [
-		's1_manual', 's1c_manual', 's2_manual', 's4_manual', 's6_manual',
-		's1_automatic', 's1c_automatic', 's2_automatic', 's4_automatic', 's6_automatic',
-		'ds1_automatic', 'ds2_automatic', 'ds3_automatic', 'ds4_automatic'
-	].map(x => x.toLowerCase());
+// Builds a generic lamp-based signal face as an SVG string.
+// Lamps are laid out vertically in the order they appear in the pack entry.
+// The SVG fills whatever box the caller (divIcon iconSize) gives it.
+function createSignalFaceSvg(entry, aspect) {
+	const aspectDef = (aspect && aspect !== 'OFF' && entry && entry.Aspects) ? entry.Aspects[aspect] : null;
+	const lit = aspectDef ? (aspectDef.Lit || []) : [];
+	const blinking = aspectDef ? (aspectDef.Blinking || []) : [];
+	const lamps = (entry && entry.Lamps) ? entry.Lamps : [];
 
-	if (!imageNames.includes(imageName)) {
-		console.log(`No valid image found for a signal with aspect ${aspect} and mode ${mode} of type ${type}. imageName var was ${imageName}`);
-		return 'res/signals.all.webp';
-	}
+	const w = 16, h = 80;
+	const pad = 3;
+	const lampR = 3.2;
+	const gap = lamps.length > 1 ? (h - 2 * pad) / lamps.length : 0;
 
-	return `res/signals.${imageName}.webp`;
+	let lampsSvg = '';
+	lamps.forEach((lamp, i) => {
+		const y = lamps.length > 1 ? pad + gap * i + gap / 2 : h / 2;
+		const isLit = lit.indexOf(lamp.Name) !== -1;
+		const isBlink = blinking.indexOf(lamp.Name) !== -1;
+		const fill = isLit ? normalizeLampColour(lamp.Colour) : '#2a2a2a';
+		const cls = isBlink ? 'sig-lamp sig-lamp-blinking' : 'sig-lamp';
+		lampsSvg += `<circle class="${cls}" cx="${w / 2}" cy="${y.toFixed(1)}" r="${lampR}" fill="${escapeXml(fill)}" stroke="#000" stroke-width="0.5"/>`;
+	});
+
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${w} ${h}">
+		<rect x="0" y="0" width="${w}" height="${h}" rx="3" fill="#1a1a1a" stroke="#444" stroke-width="1"/>
+		${lampsSvg}
+	</svg>`;
+}
+
+// Neutral fallback for signals whose pack entry isn't loaded yet.
+function createNeutralSignalSvg() {
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+		<circle cx="8" cy="8" r="6" fill="#3a3a3a" stroke="#555" stroke-width="1"/>
+	</svg>`;
 }
 
 const signalIconBaseSize = { normal: [16, 80], distant: [16, 32] };
@@ -596,11 +629,12 @@ function getSignalIconSize(type) {
 	return [Math.round(base[0] * s), Math.round(base[1] * s)];
 }
 
-function getSignalIcon(aspect, mode, type) {
-	const url = getSignalIconUrl(aspect, mode, type);
+function getSignalIcon(aspect, mode, type, entry) {
 	const iconSize = getSignalIconSize(type);
-	return L.icon({
-		iconUrl: url,
+	const html = entry ? createSignalFaceSvg(entry, aspect) : createNeutralSignalSvg();
+	return L.divIcon({
+		html: html,
+		className: 'signal-divicon',
 		iconSize: iconSize,
 		iconAnchor: signalIconAnchor,
 	});
@@ -611,9 +645,10 @@ function createSignalMarker(signalId, signalData) {
 	const mode = signalData.Mode || 'Automatic';
 	const signalType = signalData.Type
 	const position = signalData.Position;
+	const entry = packTable.Signals ? (packTable.Signals[signalId] || null) : null;
 
 	const marker = L.marker(position, {
-		icon: getSignalIcon(aspect, mode, signalType),
+		icon: getSignalIcon(aspect, mode, signalType, entry),
 		interactive: true,
 		title: signalId,
 		zIndexOffset: Math.floor(position[0] * 100000 + position[1] * 100000),
@@ -621,7 +656,7 @@ function createSignalMarker(signalId, signalData) {
 		.bindPopup(() => buildSignalPopup(signalId, signalType), { maxWidth: 260 })
 		.addTo(map);
 
-	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null });
+	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, entry, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null });
 }
 
 
@@ -656,14 +691,13 @@ function buildSignalPopup(signalId, signalType) {
 
 	// If mode is not known, assume manual
 	const isManual = state.mode === 'Manual';
-	// Get valid aspects
-	var validTypeAspects = [
-		{ "aspect": "S2", "name": "Clear" },
-		{ "aspect": "S4", "name": "Expect Caution" },
-		{ "aspect": "S6", "name": "Caution" },
-		{ "aspect": "S1", "name": "Stop" },
-		{ "aspect": "S1c", "name": "Stop, train crossing" }
-	]
+	// Aspects available on this signal come from the pack table (built at runtime by the backend).
+	// Each aspect has a raw id (e.g. "S10", "Ms2"); the pack provides no friendly names, so show the id.
+	var validTypeAspects = [];
+	if (state.entry && state.entry.Aspects) {
+		validTypeAspects = Object.keys(state.entry.Aspects).map(id => ({ aspect: id, name: id }));
+	}
+	const noAspectData = validTypeAspects.length === 0;
 
 	const container = document.createElement('div');
 	container.style.cssText = 'min-width:200px;font-family:sans-serif';
@@ -678,11 +712,13 @@ function buildSignalPopup(signalId, signalType) {
 			</label>
 			<div id="sig-aspect-row-${makeSafeSignalId(signalId)}" style="display:${isManual ? 'block' : 'none'}">
 				<div style="margin-bottom:4px">Set aspect:</div>
-				<select id="sig-aspect-select-${makeSafeSignalId(signalId)}" style="width:100%;margin-bottom:8px;max-height:120px;overflow-y:auto">
+				${noAspectData
+		? `<div style="font-size:0.85em;color:gray;margin-bottom:8px">Aspect data not loaded yet.</div>`
+		: `<select id="sig-aspect-select-${makeSafeSignalId(signalId)}" style="width:100%;margin-bottom:8px;max-height:120px;overflow-y:auto">
 					${validTypeAspects.map(a =>
 		`<option value="${a.aspect}" ${a.aspect === state.aspect ? 'selected' : ''}>${a.name}</option>`
 	).join('')}
-				</select>
+				</select>`}
 				<button id="sig-apply-${makeSafeSignalId(signalId)}"
 					style="width:100%;padding:4px;background:#2a6;color:#fff;border:none;border-radius:3px;cursor:pointer">
 					Apply aspect
@@ -702,7 +738,7 @@ function buildSignalPopup(signalId, signalType) {
 						const entry = signalMarkers.get(signalId);
 						if (entry) {
 							entry.mode = newMode;
-							entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType));
+							entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType, entry.entry));
 						}
 						const modeLabel = container.querySelector(`#sig-mode-label-${makeSafeSignalId(signalId)}`);
 						if (modeLabel) modeLabel.textContent = newMode;
@@ -731,7 +767,7 @@ function buildSignalPopup(signalId, signalType) {
 						const entry = signalMarkers.get(signalId);
 						if (entry) {
 							entry.aspect = aspect;
-							entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType));
+							entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, signalType, entry.entry));
 						}
 					}
 				});
@@ -789,13 +825,18 @@ function updateAllSignals(signalsData) {
 
 		if (aspectChanged || modeChanged) anyChanged = true;
 
+		// Refresh the pack entry in case a /signalpack refresh added this signal.
+		if (packTable.Signals && !existing.entry && packTable.Signals[signalId]) {
+			existing.entry = packTable.Signals[signalId];
+		}
+
 		// Update state first so setIcon uses the correct aspect+mode combination
 		if (aspectChanged) existing.aspect = aspect;
 		if (modeChanged) existing.mode = mode;
 
 		// Regenerate icon whenever aspect OR mode changes (both affect the icon URL)
-		if (aspectChanged || modeChanged) {
-			existing.marker.setIcon(getSignalIcon(existing.aspect, existing.mode, signalData.Type));
+		if (aspectChanged || modeChanged || !existing.entry) {
+			existing.marker.setIcon(getSignalIcon(existing.aspect, existing.mode, signalData.Type, existing.entry));
 		}
 
 		// If the popup is currently open, patch the DOM directly so it stays live
@@ -1614,8 +1655,8 @@ function updatescaleMarkerFactor() {
 	}
 
 	// Refresh signal icons so their size tracks the current zoom level
-	signalMarkers.forEach(({ marker, aspect, mode, type }) => {
-		marker.setIcon(getSignalIcon(aspect, mode, type));
+	signalMarkers.forEach(({ marker, aspect, mode, type, entry }) => {
+		marker.setIcon(getSignalIcon(aspect, mode, type, entry));
 	});
 }
 
@@ -1782,6 +1823,9 @@ function updateOnce() {
 				case 'signals':
 					updateAllSignals(data);
 					break;
+				case 'signalpack':
+					refreshPackTable(data);
+					break;
 		case 'occupancy':
 			updateBlockOccupancy(data);
 			break;
@@ -1937,6 +1981,15 @@ function buildSignalsSidebar(installed) {
 let signalsInstalled = false;
 
 const signalsReady = junctionsReady
+	.then(_ => fetch(new URL('/signalpack', location)))
+	.then(resp => (resp.ok ? resp.json() : {}))
+	.catch(err => {
+		console.error('Failed to load signal pack table:', err);
+		return {};
+	})
+	.then(tableData => {
+		refreshPackTable(tableData);
+	})
 	.then(_ => fetch(new URL('/signals', location)))
 	.then(resp => {
 		if (!resp.ok) throw new Error(`Signals endpoint failed: HTTP ${resp.status} ${resp.statusText}`);

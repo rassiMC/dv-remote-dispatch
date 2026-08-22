@@ -19,6 +19,8 @@ namespace DvMod.RemoteDispatch
 		// Cache reflection info to avoid recompiling every call
 		private static MethodInfo? _setSignalModeMethod;
 		private static MethodInfo? _isTrackOccupiedMethod;
+		private static MethodInfo? _getPackKeyMethod;
+		private static MethodInfo? _captureSignalMethod;
 
 		internal static bool IsInitialized { get; private set; }
 
@@ -248,6 +250,10 @@ namespace DvMod.RemoteDispatch
 			// Signals.API → RemoteDispatch.Signals (bridge logic) → RemoteDispatch.Shims (reflection wrapper)
 			_setSignalModeMethod = bootstrap.GetMethod("SetSignalMode", BindingFlags.Public | BindingFlags.Static);
 			_isTrackOccupiedMethod = bootstrap.GetMethod("IsTrackOccupied", BindingFlags.Public | BindingFlags.Static);
+			_getPackKeyMethod = bootstrap.GetMethod("GetPackKey", BindingFlags.Public | BindingFlags.Static);
+			_captureSignalMethod = bootstrap.GetMethod("CaptureSignal", BindingFlags.Public | BindingFlags.Static);
+
+				PackTableStore.TableDirectory = Path.Combine(Main.mod!.Path, "signalpacks");
 
 				initMethod?.Invoke(null, new object[]
 				{
@@ -263,6 +269,7 @@ namespace DvMod.RemoteDispatch
 						// follow-up push ever arriving. Schedule a second push so any cascaded Distant
 						// signal change always reaches connected clients.
 						System.Threading.Tasks.Task.Delay(200).ContinueWith(_ => Sessions.AddTag("signals"));
+						RecordPackAspect(signalId, aspect);
 					}),
 					new Action<string, string>((signalId, mode) => {
 						Main.DebugLog($"Signals Action triggered: Mode changed: {signalId} -> {mode}, pushing update");
@@ -270,6 +277,22 @@ namespace DvMod.RemoteDispatch
 					}),
 
 				});
+
+				// Load any persisted pack table so the frontend's initial /signalpack fetch has data.
+				// Must run AFTER initMethod: Bootstrap.GetPackKey() requires the bridge to exist.
+				try
+				{
+					var key = _getPackKeyMethod.Invoke(null, null) as string;
+					if (!string.IsNullOrEmpty(key))
+					{
+						PackTableStore.Load(key);
+						s_currentPackKey = key;
+					}
+				}
+				catch (Exception ex)
+				{
+					Main.Warning($"Failed to load pack table at startup: {ex.Message}");
+				}
 
 				IsInitialized = true;
 				Main.Log("Signals integration loaded.");
@@ -389,6 +412,97 @@ namespace DvMod.RemoteDispatch
 				Main.Warning($"IsTrackOccupied failed: {ex.Message}");
 				return false;
 			}
+		}
+
+		/// <summary>
+		/// Returns the current pack table JSON for the /signalpack endpoint, or "{}" if unavailable.
+		/// </summary>
+		internal static string GetPackTableJson()
+		{
+			return PackTableStore.GetCurrentJson() ?? "{}";
+		}
+
+		private static string? s_currentPackKey;
+
+		/// <summary>
+		/// Triggered on every signal aspect change (on the main thread). Captures the signal's
+		/// lamp geometry + the observed aspect into the persistent pack table, then pushes a
+		/// "signalpack" update to clients when the table grew.
+		/// </summary>
+		private static void RecordPackAspect(string signalId, string aspect)
+		{
+			if (!IsInitialized || _getPackKeyMethod == null || _captureSignalMethod == null) return;
+			if (string.IsNullOrEmpty(signalId) || string.IsNullOrEmpty(aspect) || aspect == "OFF") return;
+
+			// The bridge's AspectChanged event fires on the Unity main thread (both the new
+			// SignalManager.AspectChanged and the -mp SignalsAPI.SignalAspectChanged). CaptureSignal
+			// reads Unity objects (transforms, colors) so it must run there; call directly.
+			RecordPackAspectCore(signalId, aspect);
+		}
+
+		private static void RecordPackAspectCore(string signalId, string aspect)
+		{
+			try
+			{
+				if (_getPackKeyMethod == null || _captureSignalMethod == null) return;
+
+				var key = _getPackKeyMethod.Invoke(null, null) as string;
+				if (string.IsNullOrEmpty(key)) return;
+
+				// Pack switch (or first capture): swap to the new table.
+				if (s_currentPackKey != key)
+				{
+					PackTableStore.Flush();
+					PackTableStore.Load(key);
+					s_currentPackKey = key;
+				}
+
+				var capture = _captureSignalMethod.Invoke(null, new object[] { signalId });
+				if (capture == null) return;
+
+				var jobj = Newtonsoft.Json.Linq.JObject.FromObject(capture);
+				var lamps = ParseLamps(jobj["Lamps"]);
+				var lit = ParseNameArray(jobj["Lit"]);
+				var blinking = ParseNameArray(jobj["Blinking"]);
+				var disallowPassing = jobj["DisallowPassing"]?.Value<bool>() ?? false;
+
+				var changed = PackTableStore.Upsert(signalId, lamps, aspect, disallowPassing, lit, blinking);
+				if (!changed) return;
+
+				PackTableStore.Flush();
+				Sessions.AddTag("signalpack");
+			}
+			catch (Exception ex)
+			{
+				Main.Warning($"RecordPackAspect({signalId}, {aspect}) failed: {ex.Message}");
+			}
+		}
+
+		private static SignalLamp[]? ParseLamps(Newtonsoft.Json.Linq.JToken? lampsToken)
+		{
+			if (lampsToken == null || lampsToken is not Newtonsoft.Json.Linq.JArray array) return null;
+			if (array.Count == 0) return null;
+
+			var lamps = new SignalLamp[array.Count];
+			for (int i = 0; i < array.Count; i++)
+			{
+				var item = array[i];
+				lamps[i] = new SignalLamp
+				{
+					Name = item["Name"]?.ToString() ?? string.Empty,
+					Colour = item["Colour"]?.ToString() ?? string.Empty,
+					Position = item["Position"]?.ToObject<double[]>(),
+				};
+			}
+			return lamps;
+		}
+
+		private static string[] ParseNameArray(Newtonsoft.Json.Linq.JToken? token)
+		{
+			if (token == null || token is not Newtonsoft.Json.Linq.JArray array) return Array.Empty<string>();
+			var names = new string[array.Count];
+			for (int i = 0; i < array.Count; i++) names[i] = array[i].ToString();
+			return names;
 		}
 	}
 }

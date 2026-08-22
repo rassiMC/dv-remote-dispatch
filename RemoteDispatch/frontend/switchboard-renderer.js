@@ -370,10 +370,7 @@ const TrackRenderer = {
                 const aspect = signal.aspect;
                 if (aspect === null || aspect === undefined) continue;
 
-                let dotColor = '#666';
-                if (SwitchboardSignals.STOP_ASPECTS.has(aspect)) dotColor = '#ff4444';
-                else if (SwitchboardSignals.CAUTION_ASPECTS.has(aspect)) dotColor = '#eecc33';
-                else if (SwitchboardSignals.CLEAR_ASPECTS.has(aspect)) dotColor = '#44ff44';
+                const dotColor = SwitchboardSignals.signalDotColor(signal);
 
                 let dotX, dotY;
                 if (isHorizontal) {

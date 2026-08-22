@@ -162,6 +162,68 @@ const SwitchboardSignals = {
         if (hasClear) return 'clear';
         if (hasStop) return 'occupied';
         return null;
+    },
+
+    // Semantic colours a lit lamp can map to, in precedence order.
+    DOT_COLORS: {
+        red: '#ff4444',
+        blue: '#4488ff',
+        green: '#44ff44',
+        white: '#ffffff',
+        yellow: '#eecc33'
+    },
+
+    // Classifies an RGB hex string (with or without '#', 6 or 8 hex digits as
+    // produced by ColorUtility.ToHtmlStringRGBA) into a semantic colour using
+    // generous dominance thresholds. Anything that does not clearly read as
+    // red/blue/green/white is treated as yellow.
+    classifyLampColour(colourHex) {
+        if (typeof colourHex !== 'string') return 'yellow';
+        let s = colourHex.trim();
+        if (s.charAt(0) === '#') s = s.slice(1);
+        if (s.length < 6) return 'yellow';
+        const r = parseInt(s.substr(0, 2), 16);
+        const g = parseInt(s.substr(2, 2), 16);
+        const b = parseInt(s.substr(4, 2), 16);
+        if (isNaN(r) || isNaN(g) || isNaN(b)) return 'yellow';
+
+        if (r >= 180 && g >= 180 && b >= 180) return 'white';
+        if (r >= 150 && g <= 120 && b <= 120) return 'red';
+        if (b >= 150 && r <= 120 && g <= 120) return 'blue';
+        if (g >= 130 && r <= 140 && b <= 140) return 'green';
+        return 'yellow';
+    },
+
+    // Resolves the dot colour for one port signal from the lamps lit by its
+    // currently displayed aspect. Precedence across all lit lamps:
+    // red > blue > green > white > yellow. Falls back to the aspect-set
+    // mapping when no pack-table lamp data has been captured for the signal yet.
+    signalDotColor(signal) {
+        if (!signal) return '#666';
+
+        const aspect = signal.aspect;
+        const entry = signal.entry;
+        const aspectDef = (entry && entry.Aspects) ? entry.Aspects[aspect] : null;
+
+        if (aspectDef && aspectDef.Lit && entry.Lamps && entry.Lamps.length > 0) {
+            const litNames = new Set(aspectDef.Lit);
+            let found = {};
+            for (const lamp of entry.Lamps) {
+                if (!litNames.has(lamp.Name)) continue;
+                const semantic = this.classifyLampColour(lamp.Colour);
+                found[semantic] = true;
+            }
+            for (const semantic of ['red', 'blue', 'green', 'white', 'yellow']) {
+                if (found[semantic]) return this.DOT_COLORS[semantic];
+            }
+            return '#666';
+        }
+
+        if (aspect === null || aspect === undefined) return '#666';
+        if (this.STOP_ASPECTS.has(aspect)) return this.DOT_COLORS.red;
+        if (this.CAUTION_ASPECTS.has(aspect)) return this.DOT_COLORS.yellow;
+        if (this.CLEAR_ASPECTS.has(aspect)) return this.DOT_COLORS.green;
+        return '#666';
     }
 };
 

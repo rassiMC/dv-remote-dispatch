@@ -319,6 +319,12 @@ namespace DvMod.RemoteDispatch.Signals
         /// </summary>
         internal bool SetSignalAspect(string signalId, string aspect)
         {
+            if (!IsMainThread())
+            {
+                LoggingReturn.Warning?.Invoke($"SetSignalAspect({signalId}, {aspect}) called off the Unity main thread - signal mutations must run there.");
+                return false;
+            }
+
             var signal = FindSignalByName(signalId);
             if (signal == null) return false;
 
@@ -357,6 +363,12 @@ namespace DvMod.RemoteDispatch.Signals
         /// <param name="signalId">The ID of the signal</param>
         internal bool SetSignalMode(string signalId, string mode)
         {
+            if (!IsMainThread())
+            {
+                LoggingReturn.Warning?.Invoke($"SetSignalMode({signalId}, {mode}) called off the Unity main thread - signal mutations must run there.");
+                return false;
+            }
+
             var signal = FindSignalByName(signalId);
             if (signal == null) return false;
 
@@ -385,6 +397,11 @@ namespace DvMod.RemoteDispatch.Signals
                 LoggingReturn.Warning?.Invoke($"SetSignalMode({signalId}, {mode}) failed: {ex.Message}");
                 return false;
             }
+        }
+
+        private bool IsMainThread()
+        {
+            return _mainThreadId < 0 || System.Threading.Thread.CurrentThread.ManagedThreadId == _mainThreadId;
         }
 
         private static SgSignal? FindSignalByName(string signalId)

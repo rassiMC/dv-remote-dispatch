@@ -21,6 +21,9 @@ namespace DvMod.RemoteDispatch.Signals
 			_onModeChanged = onModeChanged;
 		}
 
+		/// <summary>The main thread, captured in Register (runs during mod load on the Unity main thread).</summary>
+		private int _mainThreadId = -1;
+
 		/// <summary>
 		/// Registers event handlers for the SignalsAPI loaded and unloaded events.
 		/// </summary>
@@ -29,6 +32,7 @@ namespace DvMod.RemoteDispatch.Signals
 		/// registrations.</remarks>
 		internal void Register()
 		{
+			_mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
 			// When SignalsAPI is Loaded, run OnSignalsLoaded
 			SignalsAPI.Loaded += OnSignalsLoaded;
 			// When SignalsAPI is Unloaded, run OnSignalsUnloaded
@@ -337,6 +341,12 @@ namespace DvMod.RemoteDispatch.Signals
 		/// </summary>
 		internal bool SetSignalAspect(string signalId, string aspect)
 		{
+			if (_mainThreadId >= 0 && System.Threading.Thread.CurrentThread.ManagedThreadId != _mainThreadId)
+			{
+				LoggingReturn.Warning?.Invoke($"SetSignalAspect({signalId}, {aspect}) called off the Unity main thread - signal mutations must run there.");
+				return false;
+			}
+
 			LoggingReturn.Log?.Invoke($"Attempting to set signal aspect: {signalId} -> {aspect}");
 			try
 			{
@@ -355,6 +365,12 @@ namespace DvMod.RemoteDispatch.Signals
 		/// <param name="signalId">The ID of the signal</param>
 		internal bool SetSignalMode(string signalId, string mode)
 		{
+			if (_mainThreadId >= 0 && System.Threading.Thread.CurrentThread.ManagedThreadId != _mainThreadId)
+			{
+				LoggingReturn.Warning?.Invoke($"SetSignalMode({signalId}, {mode}) called off the Unity main thread - signal mutations must run there.");
+				return false;
+			}
+
 			LoggingReturn.DebugLog?.Invoke($"Attempting to set signal mode: {signalId} -> {mode}");
 			try
 			{

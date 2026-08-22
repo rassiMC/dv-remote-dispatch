@@ -11,9 +11,13 @@ namespace DvMod.RemoteDispatch
 
         public static JArray GetPathsJson()
         {
+            // Snapshot the staging data BEFORE taking the paths lock. The staging
+            // loop on the main thread (StagingData.Process -> ActivateBlock ->
+            // PathingData.GetPaths) takes lockObj then paths, so taking paths then
+            // lockObj here inverts the lock order and can deadlock the two threads.
+            var stagingData = StagingData.GetStagingData();
             lock (paths)
             {
-                var stagingData = StagingData.GetStagingData();
                 var enriched = new JArray();
                 foreach (var p in paths)
                 {

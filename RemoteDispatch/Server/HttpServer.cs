@@ -149,7 +149,7 @@ namespace DvMod.RemoteDispatch
 			break;
 		case "path":
 			Main.DebugLog("/path endpoint hit");
-			HandlePathRequest(context);
+			await HandlePathRequest(context);
 			break;
 		case "staging":
 			Main.DebugLog("/staging endpoint hit");
@@ -296,7 +296,8 @@ namespace DvMod.RemoteDispatch
 				if (mode != null)
 				{
 					Main.DebugLog($"Setting signal {signalId} mode to {mode}");
-					bool result = SignalsShim.SetSignalMode(signalId!, mode!);
+					// Signal mutation must happen on the Unity main thread.
+					bool result = await Updater.RunOnMainThread(() => SignalsShim.SetSignalMode(signalId!, mode!)).ConfigureAwait(false);
 
 					if (!result && SignalsShim.IsInitialized == false)
 					{
@@ -314,7 +315,8 @@ namespace DvMod.RemoteDispatch
 				else if (aspect != null)
 				{
 					Main.DebugLog($"Setting signal {signalId} aspect to {aspect}");
-					bool result2 = SignalsShim.SetSignalAspect(signalId!, aspect!);
+					// Signal mutation must happen on the Unity main thread.
+					bool result2 = await Updater.RunOnMainThread(() => SignalsShim.SetSignalAspect(signalId!, aspect!)).ConfigureAwait(false);
 
 					if (!result2)
 					{
@@ -487,7 +489,7 @@ namespace DvMod.RemoteDispatch
 			RenderResource(context, $"frontend.{resourceName}");
 		}
 
-		private static void HandlePathRequest(HttpListenerContext context)
+		private static async Task HandlePathRequest(HttpListenerContext context)
 		{
 			var username = context.User?.Identity?.Name ?? "";
 			var segments = context.Request.Url.Segments;
@@ -528,7 +530,10 @@ namespace DvMod.RemoteDispatch
 						throw new Exception("Request body too large");
 					string bodyText = Encoding.UTF8.GetString(ms.ToArray());
 					var pathEntry = JObject.Parse(bodyText);
-					var id = PathingData.AddPath(pathEntry);
+					// AddPath -> StagingData.AddPath -> ActivateBlock mutates Unity
+					// objects (Junction.Switch, signal mode/aspect), so it must run
+					// on the main thread.
+					var id = await Updater.RunOnMainThread(() => PathingData.AddPath(pathEntry)).ConfigureAwait(false);
 
 					Render200(context, ContentTypes.Json, new JObject { ["id"] = id }.ToString());
 				}
@@ -577,7 +582,9 @@ namespace DvMod.RemoteDispatch
 					string bodyText = Encoding.UTF8.GetString(ms.ToArray());
 					var pathEntry = JObject.Parse(bodyText);
 					pathEntry["id"] = segments[2].TrimEnd('/');
-					PathingData.UpdatePath(pathEntry);
+					// UpdatePath -> StagingData.UpdatePath -> ReleaseBlock reverts
+					// signal aspects on the main thread.
+					await Updater.RunOnMainThread(() => PathingData.UpdatePath(pathEntry)).ConfigureAwait(false);
 					RenderEmpty(context, 204);
 				}
 				catch (Exception e)
@@ -596,7 +603,7 @@ namespace DvMod.RemoteDispatch
 					RenderEmpty(context, 403);
 					return;
 				}
-				bool ok = StagingData.ForceClaimNextBlock(pathId);
+				bool ok = await Updater.RunOnMainThread(() => StagingData.ForceClaimNextBlock(pathId)).ConfigureAwait(false);
 				if (ok)
 					Render200(context, ContentTypes.Json, new JObject { ["ok"] = true }.ToString());
 				else
@@ -609,16 +616,24 @@ namespace DvMod.RemoteDispatch
 				if (segments.Length == 2)
 				{
 					var storedIds = PathingData.GetAllBlockSignalIds();
-					PathingData.ClearPaths();
-					PathingActivation.RevertRouteSignals(storedIds);
+					// ClearPaths -> StagingData.ClearAll releases claimed blocks
+					// (reverting signal aspects); RevertRouteSignals mutates signals.
+					await Updater.RunOnMainThread(() =>
+					{
+						PathingData.ClearPaths();
+						PathingActivation.RevertRouteSignals(storedIds);
+					}).ConfigureAwait(false);
 					RenderEmpty(context, 204);
 				}
 				else if (segments.Length >= 3)
 				{
 					var pathId = segments[2].TrimEnd('/');
 					var storedIds = PathingData.GetBlockSignalIdsForPath(pathId);
-					PathingData.RemovePath(pathId);
-					PathingActivation.RevertRouteSignals(storedIds);
+					await Updater.RunOnMainThread(() =>
+					{
+						PathingData.RemovePath(pathId);
+						PathingActivation.RevertRouteSignals(storedIds);
+					}).ConfigureAwait(false);
 					RenderEmpty(context, 204);
 				}
 				else

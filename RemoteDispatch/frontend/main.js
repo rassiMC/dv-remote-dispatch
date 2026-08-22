@@ -656,7 +656,7 @@ function createSignalMarker(signalId, signalData) {
 		.bindPopup(() => buildSignalPopup(signalId, signalType), { maxWidth: 260 })
 		.addTo(map);
 
-	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, entry, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null });
+	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, entry, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null, RequiredBranch: (signalData.RequiredBranch !== null && signalData.RequiredBranch !== undefined) ? signalData.RequiredBranch : null });
 }
 
 

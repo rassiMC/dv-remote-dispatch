@@ -24,6 +24,7 @@ namespace DvMod.RemoteDispatch
 			public string? Direction { get; set; }
 			public JToken[]? Position { get; set; }
 			public string? JunctionId { get; set; }
+			public int? RequiredBranch { get; set; }
 		}
 
 		/// <summary>
@@ -164,7 +165,8 @@ namespace DvMod.RemoteDispatch
 					Position = position,
 					Type = type,
 					Direction = direction,
-					JunctionId = signalObject["JunctionId"]?.ToString()
+					JunctionId = signalObject["JunctionId"]?.ToString(),
+					RequiredBranch = signalObject["RequiredBranch"]?.Type == JTokenType.Integer ? signalObject["RequiredBranch"].Value<int>() : (int?)null
 				};
 			}
 		}

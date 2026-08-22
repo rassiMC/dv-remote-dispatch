@@ -57,13 +57,20 @@ const SwitchboardSignals = {
             const colonIdx = id.lastIndexOf(':');
             const suffix = colonIdx > 0 ? id.substring(colonIdx + 1) : '';
 
-            if (suffix === 'F' || suffix === 'T' || (colonIdx <= 0 && sig.direction === 'Out')) {
+            // The new Signals fork reports direction from the controller's placement
+            // info and the In branch (0=left, 1=right) from the junction group's
+            // branch-signal ordering. Old-fork names ({junctionId}:F/:B1/:B2) remain
+            // as a fallback for the -mp backend.
+            const direction = sig.direction || null;
+            const branch = (sig.RequiredBranch !== null && sig.RequiredBranch !== undefined) ? sig.RequiredBranch : null;
+
+            if (direction === 'Out' || suffix === 'F' || suffix === 'T' || (colonIdx <= 0 && sig.direction === 'Out')) {
                 graphEntry.signals.Out = sig;
                 graphEntry.rawSignals.Out = sig;
-            } else if (suffix === 'B1') {
+            } else if ((direction === 'In' && branch === 0) || suffix === 'B1') {
                 graphEntry.signals.LeftIn = sig;
                 graphEntry.rawSignals.LeftIn = sig;
-            } else if (suffix === 'B2') {
+            } else if ((direction === 'In' && branch === 1) || suffix === 'B2') {
                 graphEntry.signals.RightIn = sig;
                 graphEntry.rawSignals.RightIn = sig;
             }

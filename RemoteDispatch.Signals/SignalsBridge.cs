@@ -196,7 +196,18 @@ namespace DvMod.RemoteDispatch.Signals
                 {
                     if (!controller.Exists) continue;
 
-                    var junctionController = controller as JunctionSignalController;
+                    // A junction group's BranchSignals are created in outBranches order
+                    // (branch 0 = left, branch 1 = right), so the controller's index
+                    // inside its group's branch list is the left/right discriminator
+                    // for In (branch) signals.
+                    var group = controller.Group;
+                    int? branchIndex = null;
+                    if (group?.BranchSignals != null && controller is TrackSignalController trackController)
+                    {
+                        var idx = group.BranchSignals.IndexOf(trackController);
+                        if (idx >= 0)
+                            branchIndex = idx;
+                    }
 
                     foreach (var signal in controller.AllSignals)
                     {
@@ -207,8 +218,9 @@ namespace DvMod.RemoteDispatch.Signals
                         SubscribeToSignal(signal);
 
                         var block = signal.Block;
-                        var junctionId = junctionController?.Junction.junctionData.junctionIdLong;
-                        var direction = GetDirection(signal, junctionController);
+                        var junction = controller.GroupJunction;
+                        var junctionId = junction?.junctionData.junctionIdLong;
+                        var direction = GetDirection(controller);
                         var type = TypeToString(controller.Type);
                         var position = signal.Definition.transform.position;
 
@@ -221,7 +233,8 @@ namespace DvMod.RemoteDispatch.Signals
                             IsOn = signal.IsOn,
                             Direction = direction,
                             JunctionId = junctionId,
-                            SelectedBranch = junctionController?.Junction.selectedBranch,
+                            RequiredBranch = direction == "In" ? branchIndex : (int?)null,
+                            SelectedBranch = junction?.selectedBranch,
                             YardId = block?.Yard,
                             TrackId = block?.TrackNumber,
                             Position = new[] { position.x, position.z },
@@ -237,27 +250,24 @@ namespace DvMod.RemoteDispatch.Signals
             return result;
         }
 
-        private static string GetDirection(SgSignal signal, JunctionSignalController? junctionController)
+        private static string GetDirection(BasicSignalController controller)
         {
-            if (junctionController != null)
+            // TrackDirection.Out/In is assigned per controller at placement time
+            // (SignalPlacer), so it is the authoritative In/Out for every signal
+            // type - no name-suffix parsing needed.
+            if (controller.PlacementInfo is { } placement)
             {
-                // Reflect the junction signal's facing. A junction signal protects the
-                // diverging (out) branches; branch signals protect the converging (in) track.
-                return signal.Controller == junctionController ? "Out" : "In";
+                switch (placement.Direction)
+                {
+                    case TrackDirection.Out:
+                        return "Out";
+                    case TrackDirection.In:
+                        return "In";
+                }
             }
 
-            // Heuristic fallback: match the old API suffix convention
-            // ({junctionId}:F = Out, {junctionId}:B{1,2} = In).
-            var pos = signal.Definition.transform.position;
-            var name = signal.Name;
-            var colonIdx = name.LastIndexOf(':');
-            if (colonIdx > 0 && colonIdx < name.Length - 1)
-            {
-                var suffix = name.Substring(colonIdx + 1);
-                if (suffix == "F" || suffix == "T") return "Out";
-                if (suffix.StartsWith("B")) return "In";
-            }
-
+            // Signals placed on a junction's approach track are the Out (facing)
+            // signal; anything else with no placement data is treated as Out.
             return "Out";
         }
 

@@ -200,9 +200,9 @@ RemoteDispatch (Shims/SignalsShim)
   (`Bootstrap.Initialize/Teardown/GetAllSignals/GetSignalAspect/SetSignalAspect/
   SetSignalMode/IsTrackOccupied`) and both project signal data into the identical
   `Dictionary<string signalId, object>` shape (`Id`, `Type`, `Mode`,
-  `CurrentAspectId`, `IsOn`, `Direction`, `JunctionId`, `SelectedBranch`,
-  `YardId`, `TrackId`, `Position[x,z]`), so `SignalsShim` and the frontend are
-  backend-agnostic. Both register event callbacks that push
+  `CurrentAspectId`, `IsOn`, `Direction`, `JunctionId`, `RequiredBranch`,
+  `SelectedBranch`, `YardId`, `TrackId`, `Position[x,z]`), so `SignalsShim` and
+  the frontend are backend-agnostic. Both register event callbacks that push
   `Sessions.AddTag("signals")` on aspect/mode changes.
 - Old-fork `SignalsBridge.cs` subscribes to `SignalsAPI.Loaded/Unloaded` + instance
   `SignalAspectChanged`/`SignalModeChanged`, and **force-updates** all signal
@@ -219,6 +219,21 @@ RemoteDispatch (Shims/SignalsShim)
   Distant/Other` names. Direct occupancy uses
   `RailTrackOnTrackBogiesExtensions.BogiesOnTrack` (public Assembly-CSharp helper
   the new mod's internal `HasBogies` wraps).
+  - **Direction/junction are derived from controller data, not signal names.**
+    The old fork's names carried a `{junctionId}:F/:B1/:B2` suffix that encoded
+    junction + facing; the new fork's `Signal.Name` does not. The bridge therefore
+    reads `BasicSignalController.PlacementInfo.Direction` (`TrackDirection.Out/In`)
+    for direction and `BasicSignalController.GroupJunction` for the owning junction
+    on **every** controller (the junction's Out signal is a `JunctionSignalController`,
+    while the In/branch signals are plain `TrackSignalController`s in the group's
+    `BranchSignals` - the old `signal.Controller == junctionController` cast only
+    matched the Out one). For In signals the bridge additionally emits
+    `RequiredBranch` (0 = left, 1 = right) from the controller's index in
+    `JunctionSignalGroup.BranchSignals`, which the frontend uses to assign
+    `LeftIn`/`RightIn`.
+  - Both bridges guard `SetSignalAspect`/`SetSignalMode` with a **main-thread
+    check** (thread id captured in `Register`); off-thread calls warn and no-op
+    instead of touching Unity state.
 
 ### 4.3 Junction graph (`Data/RailTracks.cs → Junctions`)
 `BuildTrackGraph()` derives a **junction graph** from `RailTrackRegistry` each
@@ -289,6 +304,25 @@ branch-entry ("In") signals can be attributed to a junction.
   the signal back to **Manual+S1**.
   States exposed per block: `occupied`, `claimed`, `waiting`, `unclaimed`,
   `completed`.
+  - **All Unity-touching mutations run on the main thread.** `ActivateBlock`
+    mutates Unity objects (`junction.Switch`, DVSignals `ChangeOperationMode`/
+    `ChangeAspect`), so every HTTP-triggered entry point - `POST /path`
+    (`AddPath`), `PATCH /path/{id}` (`UpdatePath`), `POST /path/{id}/advance`
+    (`ForceClaimNextBlock`), `DELETE /path` (`ClearPaths`/`RemovePath` +
+    `RevertRouteSignals`) and `/signal/control` (`SetSignalMode`/
+    `SetSignalAspect`) - now `await Updater.RunOnMainThread(...)` before touching
+    the staging/pathing state (matching the activation endpoint). The `Process()`
+    staging loop already runs on the main thread via `CheckStagingCoro`. This
+    fixed a game freeze when setting a path: `AddPath` used to run `Junction.Switch`
+    from the HTTP threadpool thread while the main thread waited on the staging
+    lock.
+  - **Lock ordering is `lockObj` → `paths` (never the reverse).**
+    `PathingData.GetPathsJson` used to take the `paths` lock then
+    `StagingData.GetStagingData` (which takes `lockObj`), while the main-thread
+    `Process()` holds `lockObj` then takes `paths` via `PathingData.GetPaths` -
+    a classic deadlock pair. `GetPathsJson` now snapshots staging data *before*
+    acquiring the `paths` lock, so both threads acquire the locks in the same
+    order.
 - `PathingActivation` - `ActivatePathingMode()` sweeps all signals: any with a
   junction the pathing mapping detected go **Manual+S1** (so the dispatcher is
   in control), everything else (non-distant) returns to **Automatic**.
@@ -321,7 +355,7 @@ and finally `main.js?v=...` (cache-busted with a date).
 | `switchboard-data.js` | `TrackData` | nodes/segments/blocks data model, JSON load/save (localStorage), block grouping (flood fill), switch adjacency/graph building |
 | `switchboard-renderer.js` | `TrackRenderer` | Leaflet rendering of nodes, segments, switch blocks, signal dots; colouring by occupancy/pathing |
 | `switchboard-mapper.js` | `SwitchboardMapper` | fetch `/graph`, build switchboard graph, `runParallelWalk` to map switchboard switches → ingame junctions (strict port matching + reciprocal crossover eviction, no degree fallback) |
-| `switchboard-signals.js` | `SwitchboardSignals` | per-switch signal mapping, `VirtualSignal` forward/composition of aspects |
+| `switchboard-signals.js` | `SwitchboardSignals` | per-switch signal mapping, `VirtualSignal` forward/composition of aspects, lamp-based dot colouring |
 | `switchboard-occupation.js` | `SwitchboardOccupancy` | occupancy mode (direct/hardcore) → POST `/occupancy` |
 | `switchboard-pathing.js` | `PathingController` | interactive path select + A*-style block routing on frontend, then POST `/path`; displays locked paths, block chips, advance/delete; colours claimed/waiting blocks |
 | `main.js` | - | map set-up, sidebar tabs, jobs/cars tables, and switchboard bootstrap (`initSwitchboard`, `loadSampleTrackData`, `buildSwitchMapping`, `sendBlockOccupancyMapping`) |
@@ -378,6 +412,31 @@ and finally `main.js?v=...` (cache-busted with a date).
 - `GRAPH_OVERRIDES` is now **empty** (all hardcoded junction overrides removed:
   the old J539–J542, J404/J403/J18/J370, and J125 entries were redundant against
   the live graph and deleted along with the earlier J26 fix).
+
+### Switchboard signal dots
+- Each switch draws a dot per port signal that has a real signal mapped: the
+  inbound (common) port's `Out` signal plus the two branch ports' `LeftIn`/
+  `RightIn` signals (`rawSignals` in `switchboard-signals.js`). Ports without a
+  mapped signal fall back to neighbour-forwarding (`forwardMissingSignals`) and
+  virtual signals; virtuals (`In`/`LeftOut`/`RightOut`) compose aspects but are
+  not drawn as separate dots.
+- **Dot colour comes from the lit lamps, not the aspect id.** A single aspect can
+  light several lamps of different colours (e.g. a multi-aspect signal), so
+  `SwitchboardSignals.signalDotColor(signal)` classifies every lamp lit by the
+  signal's current aspect (from the `/signalpack` table: `entry.Aspects[aspect]
+  .Lit` names matched against `entry.Lamps[i].Colour`) and picks the highest-
+  precedence colour present: **red > blue > green > white > yellow**.
+  `classifyLampColour` uses generous RGB-dominance thresholds (white = all
+  channels ≥180; red = R≥150, G/B≤120; blue = B≥150, R/G≤120; green = G≥130,
+  R/B≤140; else yellow). Blinking lamps are included in `Lit` (the backend folds
+  `Blinking` into `Lit` at capture time), so a blinking green lamp still reads as
+  green. When no pack data has been captured for a signal yet, the dot falls back
+  to the old aspect-set mapping (S1/S1r/S1c → red, S6/S7 → yellow, S2/S4/S6 →
+  green).
+- Dots repaint through the coalesced repaint path: `updateAllSignals` calls
+  `switchboardRepaint.markAllSwitches()` when any signal's aspect/mode changes,
+  and `refreshPackTable` refreshes each marker's `.entry` reference when the pack
+  table grows.
 
 ### Pathing UX (frontend)
 - Backed by `PathingController`. To create a new path: start must be an
@@ -479,6 +538,7 @@ public surface:
   - Falls back from the preferred `SignalsAPI.ForceUpdateAllSignals(bool)` to a
     reflection walk over `Signals.Game.SignalManager` +
     `BasicSignalController.UpdateAspect`.
+  - Guards `SetSignalAspect`/`SetSignalMode` against off-main-thread calls.
 - `RemoteDispatch.Signals.csproj` compiles to `RemoteDispatch.Signals.dll` and
   depends on **the new fork's `Signals.Game`/`Signals.Common`** (from the
   installed `DVSignals` mod folder). Its `SignalsBridge`:
@@ -486,6 +546,11 @@ public surface:
     `OperationModeChanged`, `OverrideChanged`) and per-`Signal` events.
   - Keys everything by `Signal.Name` (the new mod's `Signal.Id` is an int
     registry key, not a string id).
+  - Derives direction/junction from the controller's placement data
+    (`PlacementInfo.Direction`, `GroupJunction`) and the In-signal branch from
+    the group's `BranchSignals` ordering (emitted as `RequiredBranch`) - no
+    name-suffix parsing. See §4.2.
+  - Guards `SetSignalAspect`/`SetSignalMode` against off-main-thread calls.
   - Folds `SignalOperationMode` back to `Manual`/`Automatic` and the richer
     `SignalType` back to the legacy `Mainline/IntoYard/Shunting/Distant/Other`.
   - Direct occupancy uses `RailTrackOnTrackBogiesExtensions.BogiesOnTrack`
@@ -530,7 +595,10 @@ Derived from reading the code; not a plan. The most fragile points:
    brittle across Signals versions.
 7. **Multi-threading**: `StagingData`/`OccupancyData` are touched from the HTTP
    thread and the main-thread coroutines; the code uses locks + `RunOnMainThread`
-   to stay safe, but the boundaries are easy to break.
+   to stay safe, but the boundaries are easy to break. The path-set freeze (see
+   below) was the main violation; all HTTP-triggered Unity mutations are now
+   marshalled to the main thread and the `paths`/`lockObj` lock order is
+   consistent (see §4.4).
 8. `OccupancyData` direct-mode caches track geometry once at startup
    (`EnsureTrackCache`) - if the world changes (scene load), stale cache can
    persist; `ClearMapping` exists on teardown only.
@@ -563,6 +631,14 @@ Derived from reading the code; not a plan. The most fragile points:
     seed claim skips the opposing/upcoming-traffic checks the rest of the engine
     applies. (VISION blocker #4; fix intent: seed through the same claim entry
     point the engine uses.)
+13. **Some signals are mapped to the wrong spot in the switchboard**: a small
+    number of signal dots land on the wrong switch/port. Direction + In-branch
+    come from the controller's placement data (`PlacementInfo.Direction`,
+    `GroupJunction`, `RequiredBranch` - see §4.2), but for a few signals the
+    branch/port attribution is off, so their dot appears on a neighbouring switch
+    or the wrong port. The `/signalpack` lamp table is built lazily from observed
+    aspects, so a dot whose aspect hasn't been captured yet falls back to the
+    aspect-set colouring, which can also make a mismatched signal harder to spot.
 
 ### Release blockers (per maintainer, April 2026)
 
@@ -612,6 +688,31 @@ they are fair game for agent help:
 > `repairMapping()` post-pass for residual leg-swaps (e.g. the MF J-632/J-546
 > and J-636/J-638 pairs). The mapping is now a clean 641/641 bijection with
 > zero consistency violations.
+>
+> Resolved: with the new Signals fork, signal names stopped carrying the old
+> `{junctionId}:F/:B1/:B2` suffix, so `createSwitchSignals` could no longer
+> attach most signals to their junction (direction/junction were parsed from the
+> name). The new-fork bridge now derives direction from
+> `BasicSignalController.PlacementInfo.Direction`, the owning junction from
+> `GroupJunction`, and the In-signal left/right port from `RequiredBranch` (the
+> controller's index in the group's `BranchSignals`), surfaced through
+> `MinimalSignalData.RequiredBranch`. The frontend keys off those fields with the
+> old name-suffix parse kept only as an `-mp` fallback. See §4.2.
+>
+> Resolved: setting a path in the switchboard froze the game. `POST /path`
+> mutated Unity objects (`Junction.Switch`, signal aspects) from the HTTP
+> threadpool thread while the main-thread staging loop held the staging lock, and
+> `GetPathsJson` took the `paths` lock then the staging lock (inverting the order
+> used by the main-thread `Process`). All HTTP-triggered path/signal mutations
+> are now routed through `Updater.RunOnMainThread`, `GetPathsJson` snapshots
+> staging data before taking the `paths` lock, and both bridges warn+no-op on
+> off-main-thread signal mutation. See §4.4.
+>
+> Resolved: switchboard signal dots are now coloured from the lamps actually lit
+> by the signal's current aspect (via the `/signalpack` table) instead of a
+> single-aspect stop/caution/clear mapping, so multi-lamp aspects show the
+> highest-precedence lit colour (red > blue > green > white > yellow). See the
+> "Switchboard signal dots" subsection in §5.
 
 Softer / held: full UI polish is WIP but not blocking; Hardcore occupancy is
 disabled and not blocking; everything else is on hold.

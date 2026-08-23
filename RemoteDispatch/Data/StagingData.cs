@@ -564,9 +564,8 @@ namespace DvMod.RemoteDispatch
             if (blockSignals != null && blockSignals[blockId] != null)
             {
                 var sigId = blockSignals[blockId].ToString();
-                Main.DebugLog($"StagingData: signal {sigId} -> Manual+S1 for path {pathId} on block {blockId}");
-                SignalsShim.SetSignalMode(sigId, "Manual");
-                SignalsShim.SetSignalAspect(sigId, "S1");
+                Main.DebugLog($"StagingData: signal {sigId} -> Manual+stop for path {pathId} on block {blockId}");
+                PathingActivation.SetSignalToStop(sigId);
             }
         }
 

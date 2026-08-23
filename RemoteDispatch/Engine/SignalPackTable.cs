@@ -2,6 +2,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace DvMod.RemoteDispatch
 {
@@ -43,6 +44,11 @@ namespace DvMod.RemoteDispatch
 		public string PackVersion { get; set; } = string.Empty;
 		public string PackName { get; set; } = string.Empty;
 		public Dictionary<string, SignalEntry> Signals { get; set; } = new Dictionary<string, SignalEntry>(StringComparer.Ordinal);
+		/// <summary>
+		/// Optional per-signal-type stop aspects (e.g. "Shunting" -> "Ms1"), used when
+		/// pathing mode blocks a signal. Additive: the base mod ignores this field.
+		/// </summary>
+		public Dictionary<string, string>? StopAspects { get; set; }
 	}
 
 	/// <summary>
@@ -146,6 +152,84 @@ namespace DvMod.RemoteDispatch
 				}
 
 				return changed;
+			}
+		}
+
+		/// <summary>
+		/// Returns the user-configured stop aspect for a signal type, or null if none is set.
+		/// </summary>
+		internal static string? GetConfiguredStopAspect(string signalType)
+		{
+			if (string.IsNullOrEmpty(signalType)) return null;
+			lock (s_lock)
+			{
+				if (s_table?.StopAspects == null) return null;
+				return s_table.StopAspects.TryGetValue(signalType, out var aspect) && !string.IsNullOrEmpty(aspect) ? aspect : null;
+			}
+		}
+
+		/// <summary>
+		/// Auto-detects a stop aspect for a signal from its pack entry: the first aspect
+		/// whose DisallowPassing flag is set. Returns null when the signal has no pack
+		/// entry or none of its observed aspects disallow passing.
+		/// </summary>
+		internal static string? DetectStopAspect(string signalId)
+		{
+			if (string.IsNullOrEmpty(signalId)) return null;
+			lock (s_lock)
+			{
+				if (s_table == null || !s_table.Signals.TryGetValue(signalId, out var entry))
+					return null;
+
+				foreach (var kvp in entry.Aspects)
+				{
+					if (kvp.Value.DisallowPassing)
+						return kvp.Key;
+				}
+				return null;
+			}
+		}
+
+		/// <summary>
+		/// Sets (or clears with null) the configured stop aspect for a signal type and
+		/// persists the table. Silently ignores calls when no table/key is loaded yet.
+		/// </summary>
+		internal static void SetStopAspect(string signalType, string? aspectId)
+		{
+			if (string.IsNullOrEmpty(signalType)) return;
+
+			lock (s_lock)
+			{
+				if (s_table == null || string.IsNullOrEmpty(s_key)) return;
+				if (s_table.StopAspects == null) s_table.StopAspects = new Dictionary<string, string>(StringComparer.Ordinal);
+
+				if (string.IsNullOrEmpty(aspectId))
+					s_table.StopAspects.Remove(signalType);
+				else
+					s_table.StopAspects[signalType] = aspectId;
+			}
+
+			Flush();
+		}
+
+		/// <summary>
+		/// Returns the sorted union of every aspect id observed in the current pack,
+		/// used to populate the stop-aspect dropdown in the settings UI.
+		/// </summary>
+		internal static string[] GetObservedAspects()
+		{
+			lock (s_lock)
+			{
+				if (s_table == null) return Array.Empty<string>();
+				var set = new HashSet<string>(StringComparer.Ordinal);
+				foreach (var entry in s_table.Signals.Values)
+				{
+					foreach (var aspectId in entry.Aspects.Keys)
+						set.Add(aspectId);
+				}
+				var result = set.ToArray();
+				Array.Sort(result, StringComparer.Ordinal);
+				return result;
 			}
 		}
 

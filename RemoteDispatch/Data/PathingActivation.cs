@@ -5,6 +5,47 @@ namespace DvMod.RemoteDispatch
 {
     public static class PathingActivation
     {
+        /// <summary>
+        /// Sets a signal to its blocking (stop) state. The aspect is resolved per signal:
+        /// the user-configured stop aspect for the signal's type, else the pack entry's
+        /// DisallowPassing aspect, else the classic "S1". Falls back through the list so a
+        /// configured aspect that isn't present on a particular signal never leaves it unblocked.
+        /// </summary>
+        public static void SetSignalToStop(string signalId, string? signalType = null)
+        {
+            if (string.IsNullOrEmpty(signalType))
+                signalType = GetSignalType(signalId);
+
+            var candidates = new List<string>();
+            var configured = PackTableStore.GetConfiguredStopAspect(signalType ?? "");
+            if (!string.IsNullOrEmpty(configured))
+                candidates.Add(configured);
+            var detected = PackTableStore.DetectStopAspect(signalId);
+            if (!string.IsNullOrEmpty(detected) && !candidates.Contains(detected))
+                candidates.Add(detected);
+            candidates.Add("S1");
+
+            SignalsShim.SetSignalMode(signalId, "Manual");
+            foreach (var aspect in candidates)
+            {
+                if (SignalsShim.SetSignalAspect(signalId, aspect))
+                    return;
+            }
+            Main.Warning($"PathingActivation: no stop aspect could be set on signal {signalId} (tried {string.Join(", ", candidates)})");
+        }
+
+        /// <summary>
+        /// Resolves a signal's type string from the current signals payload, or null if unknown.
+        /// </summary>
+        private static string? GetSignalType(string signalId)
+        {
+            var allSignalsData = SignalsShim.GetAllSignalsData() as JObject;
+            if (allSignalsData == null) return null;
+            if (allSignalsData[signalId] is JObject signalData)
+                return signalData["Type"]?.ToString();
+            return null;
+        }
+
         public static void ActivatePathingMode()
         {
             Main.Log("PathingActivation: Activating pathing mode...");
@@ -38,8 +79,7 @@ namespace DvMod.RemoteDispatch
                 if (!string.IsNullOrEmpty(junctionId) && detectedJunctionIds.Contains(junctionId))
                 {
                     Main.DebugLog($"PathingActivation: Detected signal {signalId} (junction {junctionId})");
-                    SignalsShim.SetSignalMode(signalId, "Manual");
-                    SignalsShim.SetSignalAspect(signalId, "S1");
+                    SetSignalToStop(signalId, type);
                     detectedCount++;
                 }
                 else if (hasMapping && !isDistant)
@@ -123,8 +163,7 @@ namespace DvMod.RemoteDispatch
             foreach (var signalId in signalIds)
             {
                 Main.DebugLog($"PathingActivation: Reverting signal {signalId}");
-                SignalsShim.SetSignalMode(signalId, "Manual");
-                SignalsShim.SetSignalAspect(signalId, "S1");
+                SetSignalToStop(signalId);
                 count++;
             }
             Main.Log($"PathingActivation: Reverted {count} signals along route");

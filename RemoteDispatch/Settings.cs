@@ -57,7 +57,57 @@ namespace DvMod.RemoteDispatch
 
             featureFlags.Draw();
 
+            DrawStopAspects();
+
             GUILayout.EndVertical();
+        }
+
+        private static readonly string[] SignalTypes = { "Mainline", "IntoYard", "Shunting", "Distant", "Other" };
+
+        /// <summary>
+        /// Draws one toolbar row per signal type letting the user pick which pack aspect
+        /// pathing mode uses to block signals of that type. Changes persist immediately
+        /// into the current pack table (signalpacks/*.json).
+        /// </summary>
+        private void DrawStopAspects()
+        {
+            GUILayout.Label("Signal stop aspects (pathing mode):");
+            GUILayout.BeginHorizontal("box", GUILayout.ExpandWidth(false));
+            GUILayout.BeginVertical();
+
+            var observed = PackTableStore.GetObservedAspects();
+            foreach (var type in SignalTypes)
+                DrawStopAspectRow(type, observed);
+
+            GUILayout.EndVertical();
+            GUILayout.EndHorizontal();
+        }
+
+        private void DrawStopAspectRow(string type, string[] observedAspects)
+        {
+            var options = new List<string> { "Auto" };
+            options.AddRange(observedAspects);
+
+            var configured = PackTableStore.GetConfiguredStopAspect(type);
+            int selected = 0;
+            if (!string.IsNullOrEmpty(configured))
+            {
+                var idx = options.IndexOf(configured);
+                if (idx < 0)
+                {
+                    options.Add(configured);
+                    idx = options.Count - 1;
+                }
+                selected = idx;
+            }
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(type, GUILayout.Width(90));
+            var chosen = GUILayout.Toolbar(selected, options.ToArray(), GUILayout.ExpandWidth(false));
+            GUILayout.EndHorizontal();
+
+            if (chosen != selected)
+                PackTableStore.SetStopAspect(type, chosen == 0 ? null : options[chosen]);
         }
 
         override public void Save(UnityModManager.ModEntry entry)

@@ -589,8 +589,8 @@ function createSignalFaceSvg(entry, aspect) {
 	const blinking = aspectDef ? (aspectDef.Blinking || []) : [];
 	const lamps = (entry && entry.Lamps) ? entry.Lamps : [];
 
-	const w = 16, h = 80;
-	const pad = 3;
+	const w = signalFaceWidth, h = signalFaceHeight(lamps);
+	const pad = signalFacePad;
 	const lampR = 3.2;
 	const gap = lamps.length > 1 ? (h - 2 * pad) / lamps.length : 0;
 
@@ -617,20 +617,34 @@ function createNeutralSignalSvg() {
 	</svg>`;
 }
 
-const signalIconBaseSize = { normal: [16, 80], distant: [16, 32] };
 const signalIconMaxScale = 3; // cap: icons won't grow beyond 3× their base size
+const signalRenderScale = 2; // CSS pixels per viewBox unit
+const signalTypeScale = { normal: 1, distant: 0.75 }; // distant renders at 75% of normal
+const signalFaceWidth = 16; // SVG viewBox width
+const signalFacePad = 3; // padding above/below the lamps
+const signalFaceSlot = 10; // vertical space allocated per lamp
 
-function getSignalIconSize(type) {
-	const base = type === "Distant" ? signalIconBaseSize.distant : signalIconBaseSize.normal;
+function signalFaceHeight(lamps) {
+	const count = (lamps && lamps.length) ? lamps.length : 5; // default to a 5-lamp face until pack data loads
+	return 2 * signalFacePad + signalFaceSlot * count;
+}
+
+function getSignalIconSize(type, lamps) {
+	const factor = signalTypeScale[type] || signalTypeScale.normal;
+	const h = signalFaceHeight(lamps);
 	const zoom = map.getZoom();
 	const scale = zoom < initialZoom - 4 ? 1 / (2 ** (initialZoom - 4 - zoom)) : 1;
 	const minScale = 1 / signalIconMaxScale; // floor so they don't vanish entirely
 	const s = Math.max(scale, minScale);
-	return [Math.round(base[0] * s), Math.round(base[1] * s)];
+	return [
+		Math.round(signalFaceWidth * signalRenderScale * factor * s),
+		Math.round(h * signalRenderScale * factor * s),
+	];
 }
 
 function getSignalIcon(aspect, mode, type, entry) {
-	const iconSize = getSignalIconSize(type);
+	const lamps = (entry && entry.Lamps) ? entry.Lamps : null;
+	const iconSize = getSignalIconSize(type, lamps);
 	const html = entry ? createSignalFaceSvg(entry, aspect) : createNeutralSignalSvg();
 	return L.divIcon({
 		html: html,
@@ -656,7 +670,7 @@ function createSignalMarker(signalId, signalData) {
 		.bindPopup(() => buildSignalPopup(signalId, signalType), { maxWidth: 260 })
 		.addTo(map);
 
-	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, entry, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null, RequiredBranch: (signalData.RequiredBranch !== null && signalData.RequiredBranch !== undefined) ? signalData.RequiredBranch : null });
+	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, entry, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null, RequiredBranch: (signalData.RequiredBranch !== null && signalData.RequiredBranch !== undefined) ? signalData.RequiredBranch : null, signalAspects: signalData.Aspects || null });
 }
 
 
@@ -691,10 +705,13 @@ function buildSignalPopup(signalId, signalType) {
 
 	// If mode is not known, assume manual
 	const isManual = state.mode === 'Manual';
-	// Aspects available on this signal come from the pack table (built at runtime by the backend).
+	// Aspects available on this signal come from the complete API list; fall back to
+	// the pack table (which only contains aspects observed so far).
 	// Each aspect has a raw id (e.g. "S10", "Ms2"); the pack provides no friendly names, so show the id.
 	var validTypeAspects = [];
-	if (state.entry && state.entry.Aspects) {
+	if (state.signalAspects && state.signalAspects.length) {
+		validTypeAspects = state.signalAspects.map(id => ({ aspect: id, name: id }));
+	} else if (state.entry && state.entry.Aspects) {
 		validTypeAspects = Object.keys(state.entry.Aspects).map(id => ({ aspect: id, name: id }));
 	}
 	const noAspectData = validTypeAspects.length === 0;
@@ -824,6 +841,9 @@ function updateAllSignals(signalsData) {
 		const modeChanged = existing.mode !== mode;
 
 		if (aspectChanged || modeChanged) anyChanged = true;
+
+		// Refresh the complete aspect list in case it arrived after the popup was built.
+		if (signalData.Aspects) existing.signalAspects = signalData.Aspects;
 
 		// Refresh the pack entry in case a /signalpack refresh added this signal.
 		if (packTable.Signals && !existing.entry && packTable.Signals[signalId]) {

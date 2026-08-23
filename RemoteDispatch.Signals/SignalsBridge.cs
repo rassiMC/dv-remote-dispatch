@@ -237,6 +237,7 @@ namespace DvMod.RemoteDispatch.Signals
                             SelectedBranch = junction?.selectedBranch,
                             YardId = block?.Yard,
                             TrackId = block?.TrackNumber,
+                            Aspects = signal.AllAspects?.Select(a => a.Id).ToArray() ?? Array.Empty<string>(),
                             Position = new[] { position.x, position.z },
                         };
                     }

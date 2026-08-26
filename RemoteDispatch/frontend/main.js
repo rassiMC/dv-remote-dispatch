@@ -553,6 +553,7 @@ function refreshPackTable(data) {
 		entry.entry = packTable.Signals[signalId] || null;
 		entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, entry.type, entry.entry));
 	});
+	renderSignalTypePreviews();
 }
 
 function makeSafeSignalId(id) {
@@ -583,11 +584,13 @@ function normalizeLampColour(c) {
 // Builds a generic lamp-based signal face as an SVG string.
 // Lamps are laid out vertically in the order they appear in the pack entry.
 // The SVG fills whatever box the caller (divIcon iconSize) gives it.
-function createSignalFaceSvg(entry, aspect) {
-	const aspectDef = (aspect && aspect !== 'OFF' && entry && entry.Aspects) ? entry.Aspects[aspect] : null;
-	const lit = aspectDef ? (aspectDef.Lit || []) : [];
-	const blinking = aspectDef ? (aspectDef.Blinking || []) : [];
+// When allLit is true, every lamp is shown in its own colour (used for the "none"
+// sidebar preview so lamp colours are visible without any aspect applied).
+function createSignalFaceSvg(entry, aspect, allLit = false) {
 	const lamps = (entry && entry.Lamps) ? entry.Lamps : [];
+	const aspectDef = (!allLit && aspect && aspect !== 'OFF' && entry && entry.Aspects) ? entry.Aspects[aspect] : null;
+	const lit = allLit ? lamps.map(lamp => lamp.Name) : (aspectDef ? (aspectDef.Lit || []) : []);
+	const blinking = allLit ? [] : (aspectDef ? (aspectDef.Blinking || []) : []);
 
 	const w = signalFaceWidth, h = signalFaceHeight(lamps);
 	const pad = signalFacePad;
@@ -597,9 +600,9 @@ function createSignalFaceSvg(entry, aspect) {
 	let lampsSvg = '';
 	lamps.forEach((lamp, i) => {
 		const y = lamps.length > 1 ? pad + gap * i + gap / 2 : h / 2;
-		const isLit = lit.indexOf(lamp.Name) !== -1;
-		const isBlink = blinking.indexOf(lamp.Name) !== -1;
-		const fill = isLit ? normalizeLampColour(lamp.Colour) : '#2a2a2a';
+		const isLampLit = allLit || lit.indexOf(lamp.Name) !== -1;
+		const isBlink = !allLit && blinking.indexOf(lamp.Name) !== -1;
+		const fill = isLampLit ? normalizeLampColour(lamp.Colour) : '#2a2a2a';
 		const cls = isBlink ? 'sig-lamp sig-lamp-blinking' : 'sig-lamp';
 		lampsSvg += `<circle class="${cls}" cx="${w / 2}" cy="${y.toFixed(1)}" r="${lampR}" fill="${escapeXml(fill)}" stroke="#000" stroke-width="0.5"/>`;
 	});
@@ -630,7 +633,7 @@ function signalFaceHeight(lamps) {
 }
 
 function getSignalIconSize(type, lamps) {
-	const factor = signalTypeScale[type] || signalTypeScale.normal;
+	const factor = signalTypeScale[String(type).toLowerCase()] || signalTypeScale.normal;
 	const h = signalFaceHeight(lamps);
 	const zoom = map.getZoom();
 	const scale = zoom < initialZoom - 4 ? 1 / (2 ** (initialZoom - 4 - zoom)) : 1;
@@ -827,6 +830,7 @@ function postSignalControl(signalId, params) {
 
 function updateAllSignals(signalsData) {
 	let anyChanged = false;
+	let aspectsChanged = false;
 	Object.entries(signalsData).forEach(([signalId, signalData]) => {
 		if (loggingEnabled)
 			console.log(`Updating signal ${signalId} with aspect ${signalData.CurrentAspectId} and mode ${signalData.Mode}`);
@@ -843,7 +847,14 @@ function updateAllSignals(signalsData) {
 		if (aspectChanged || modeChanged) anyChanged = true;
 
 		// Refresh the complete aspect list in case it arrived after the popup was built.
-		if (signalData.Aspects) existing.signalAspects = signalData.Aspects;
+		if (signalData.Aspects) {
+			if (!existing.signalAspects ||
+				existing.signalAspects.length !== signalData.Aspects.length ||
+				existing.signalAspects.some((a, i) => a !== signalData.Aspects[i])) {
+				aspectsChanged = true;
+			}
+			existing.signalAspects = signalData.Aspects;
+		}
 
 		// Refresh the pack entry in case a /signalpack refresh added this signal.
 		if (packTable.Signals && !existing.entry && packTable.Signals[signalId]) {
@@ -888,7 +899,7 @@ function updateAllSignals(signalsData) {
 	if (anyChanged && typeof switchboardRenderer !== 'undefined' && switchboardRenderer) {
 		switchboardRenderer.rerenderSwitches();
 	}
-
+	if (aspectsChanged) renderSignalTypePreviews();
 }
 
 /////////////////////
@@ -1933,6 +1944,156 @@ function applySignalVisibility() {
 	});
 }
 
+// Signature identifying a signal's lamp layout (ordered lamp names + colours).
+// Signals of the same RD type can have different layouts (e.g. 3-lamp vs 4-lamp
+// variants), so this is what distinguishes preview rows within a type.
+function layoutKey(entry) {
+	const lamps = (entry && entry.Lamps) ? entry.Lamps : [];
+	if (!lamps.length) return null;
+	return lamps.map(lamp => `${lamp.Name}|${normalizeLampColour(lamp.Colour)}`).join(';');
+}
+
+// Groups live signals by RD type. Each type holds its distinct lamp layouts side by side;
+// signals of the same type can differ (e.g. 3-lamp vs 4-lamp variants). Aspects are the
+// union across every layout of the type. Signals with no pack data yet fold into a single
+// placeholder layout that is only shown when the type has no data at all.
+function collectSignalTypes() {
+	const byType = new Map();
+
+	signalMarkers.forEach(({ type, entry, signalAspects }) => {
+		if (!type) return;
+		if (!byType.has(type)) byType.set(type, { layouts: new Map(), aspects: new Set() });
+		const group = byType.get(type);
+
+		const key = layoutKey(entry);
+		if (!group.layouts.has(key)) {
+			group.layouts.set(key, {
+				lamps: key ? entry.Lamps : null,
+				packAspects: {},
+				apiAspects: new Set(),
+				signals: 0,
+			});
+		}
+		const layout = group.layouts.get(key);
+		layout.signals += 1;
+
+		if (key && entry.Aspects) {
+			Object.entries(entry.Aspects).forEach(([aspectId, def]) => {
+				if (aspectId && !layout.packAspects[aspectId]) layout.packAspects[aspectId] = def;
+			});
+		}
+
+		const list = (signalAspects && signalAspects.length)
+			? signalAspects
+			: (entry && entry.Aspects ? Object.keys(entry.Aspects) : []);
+		list.forEach(aspectId => {
+			if (aspectId) {
+				layout.apiAspects.add(aspectId);
+				group.aspects.add(aspectId);
+			}
+		});
+	});
+
+	const result = [];
+	[...byType.keys()].sort().forEach(type => {
+		const { layouts, aspects } = byType.get(type);
+		const keys = [...layouts.keys()].sort((a, b) => (a === null ? 1 : 0) - (b === null ? 1 : 0));
+		const hasData = keys.some(key => key !== null);
+
+		const layoutList = [];
+		keys.forEach(key => {
+			if (key === null && hasData) return;
+			const layout = layouts.get(key);
+			layoutList.push({
+				hasFace: !!key,
+				entry: { Lamps: layout.lamps || [], Aspects: layout.packAspects },
+				aspects: [...layout.apiAspects]
+					.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })),
+				signals: layout.signals,
+			});
+		});
+
+		result.push({
+			type,
+			layouts: layoutList,
+			aspects: [...aspects]
+				.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })),
+		});
+	});
+	return result;
+}
+
+// Pixel dimensions for a sidebar preview face, matching the map-icon render scale.
+function previewFaceSize(type, lamps) {
+	const factor = signalTypeScale[String(type).toLowerCase()] || signalTypeScale.normal;
+	return [
+		Math.round(signalFaceWidth * signalRenderScale * factor),
+		Math.round(signalFaceHeight(lamps) * signalRenderScale * factor),
+	];
+}
+
+function renderSignalTypePreviews() {
+	const container = document.getElementById('sig-type-list');
+	if (!container) return;
+
+	const groups = collectSignalTypes();
+	if (groups.length === 0) {
+		container.innerHTML = '<div style="font-size:0.85em;color:#888;font-style:italic;">No signal types yet.</div>';
+		return;
+	}
+
+	container.innerHTML = groups.map((group, groupIndex) => {
+		const hasData = group.layouts.some(l => l.hasFace);
+		const options = hasData
+			? ['none', ...group.aspects].map(id => {
+				const label = id === 'none' ? 'none (all lamps lit)' : id;
+				return `<option value="${escapeXml(id)}"${id === 'none' ? ' selected' : ''}>${escapeXml(label)}</option>`;
+			}).join('')
+			: '';
+
+		const faces = group.layouts.map(layout => {
+			const [w, h] = layout.hasFace ? previewFaceSize(group.type, layout.entry.Lamps) : [0, 0];
+			const face = layout.hasFace
+				? createSignalFaceSvg(layout.entry, null, true) // "none": every lamp lit to show colours
+				: '<div class="sig-type-face-empty">No pack data yet.</div>';
+			const faceStyle = layout.hasFace ? `width:${w}px;height:${h}px` : '';
+			const sub = layout.hasFace ? String(layout.signals) : '';
+
+			return `
+				<div class="sig-type-item">
+					<div class="sig-type-face" style="${faceStyle}">${face}</div>
+					${sub ? `<div class="sig-type-sub" title="${layout.signals} signal${layout.signals === 1 ? '' : 's'} sharing this layout">${escapeXml(sub)}</div>` : ''}
+				</div>`;
+		}).join('');
+
+		return `
+			<div class="sig-type-group" data-group="${groupIndex}">
+				<div class="sig-type-header">
+					<span class="sig-type-name">${escapeXml(group.type)}</span>
+					${hasData ? `<select class="sig-type-select">${options}</select>` : ''}
+				</div>
+				<div class="sig-type-faces">${faces}</div>
+			</div>`;
+	}).join('');
+
+	container.querySelectorAll('.sig-type-select').forEach(select => {
+		select.addEventListener('change', () => {
+			const groupEl = select.closest('.sig-type-group');
+			if (!groupEl) return;
+			const group = groups[Number(groupEl.dataset.group)];
+			if (!group) return;
+			const isNone = select.value === 'none';
+			const aspect = isNone ? null : select.value;
+
+			groupEl.querySelectorAll('.sig-type-face').forEach((faceEl, i) => {
+				const layout = group.layouts[i];
+				if (!layout || !layout.hasFace) return;
+				faceEl.innerHTML = createSignalFaceSvg(layout.entry, aspect, isNone);
+			});
+		});
+	});
+}
+
 function buildSignalsSidebar(installed) {
 	const content = document.getElementById('signals-sidebar-content');
 	if (!content) return;
@@ -1970,7 +2131,13 @@ function buildSignalsSidebar(installed) {
 			<div class="sig-filter-yard-grid">
 				${yardCheckboxes}
 			</div>
+		</div>
+		<div class="sig-filter-section">
+			<div class="sig-filter-divider">Signal types</div>
+			<div id="sig-type-list"></div>
 		</div>`;
+
+	renderSignalTypePreviews();
 
 	const subSection = content.querySelector('#sig-filter-sub');
 	const allSubInputs = () => subSection.querySelectorAll('input');

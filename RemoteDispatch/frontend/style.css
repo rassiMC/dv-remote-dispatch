@@ -307,6 +307,79 @@ body {
 	transition: opacity 0.15s ease;
 }
 
+#sig-type-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+.sig-type-group {
+	padding: 6px;
+	border: 1px solid #ddd;
+	border-radius: 4px;
+	background: #fafafa;
+}
+
+.sig-type-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 6px;
+}
+
+.sig-type-faces {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: 10px;
+}
+
+.sig-type-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+	flex: 0 0 auto;
+}
+
+.sig-type-face {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+
+.sig-type-face-empty {
+	padding: 6px;
+	font-size: 0.72rem;
+	color: #888;
+	font-style: italic;
+	text-align: center;
+}
+
+.sig-type-name {
+	font-weight: 600;
+	font-size: 0.85rem;
+	color: #222;
+}
+
+.sig-type-sub {
+	font-size: 0.7rem;
+	color: #888;
+	white-space: nowrap;
+}
+
+.sig-type-select {
+	max-width: 45%;
+	font-size: 0.8rem;
+	padding: 2px 4px;
+	border: 1px solid #ccc;
+	border-radius: 3px;
+	background: #fff;
+}
+
 #switchboard-view {
 	position: absolute;
 	top: 0;

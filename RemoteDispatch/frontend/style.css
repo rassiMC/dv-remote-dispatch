@@ -578,3 +578,186 @@ body.switchboard-active #map {
 	min-height: 1em;
 }
 
+.sig-layout-lamp-bar {
+	border-radius: 4px;
+}
+
+/* palette strip above the editor grid */
+
+.sig-layout-palette {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 4px;
+}
+
+.sig-layout-palette-label {
+	font-size: 0.72rem;
+	color: #888;
+	margin-right: 2px;
+}
+
+.sig-layout-palette-item {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 24px;
+	border: 1px solid #ccc;
+	border-radius: 4px;
+	background: #fff;
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+}
+
+.sig-layout-palette-item:hover {
+	background: #f0f0f0;
+}
+
+.sig-layout-palette-item.dragging {
+	opacity: 0.4;
+}
+
+.sig-layout-palette-preview {
+	display: block;
+	background: #777;
+}
+
+.sig-layout-palette-preview-circle {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+}
+
+.sig-layout-palette-preview-bar {
+	width: 22px;
+	height: 6px;
+	border-radius: 3px;
+}
+
+.sig-layout-ghost {
+	position: fixed;
+	pointer-events: none;
+	z-index: 12000;
+	opacity: 0.9;
+	background: #fff;
+	border: 1.5px dashed #333;
+}
+
+.sig-ghost-circle {
+	border-radius: 50%;
+}
+
+.sig-ghost-bar {
+	border-radius: 4px;
+}
+
+/* aspect × lamp table below the editor grid */
+
+.sig-layout-matrix-wrap {
+	overflow-x: auto;
+	max-width: 100%;
+	margin-top: 8px;
+}
+
+.sig-layout-matrix-title {
+	font-size: 0.72rem;
+	color: #888;
+	margin-bottom: 3px;
+}
+
+.sig-layout-matrix {
+	border-collapse: collapse;
+	font-size: 0.72rem;
+}
+
+.sig-layout-matrix th,
+.sig-layout-matrix td {
+	border: 1px solid #ddd;
+	padding: 2px;
+}
+
+.sig-layout-matrix th {
+	color: #555;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.sig-layout-matrix .sig-lamp-col {
+	position: sticky;
+	left: 0;
+	background: #fafafa;
+	white-space: nowrap;
+	z-index: 1;
+}
+
+.sig-lamp-colour {
+	width: 22px;
+	height: 16px;
+	padding: 1px;
+	border: 1px solid #ccc;
+	border-radius: 3px;
+	background: #fff;
+	cursor: pointer;
+	vertical-align: middle;
+}
+
+.sig-lamp-name {
+	display: inline-block;
+	vertical-align: middle;
+	margin: 0 3px;
+	max-width: 80px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.sig-lamp-shape {
+	vertical-align: middle;
+	color: #888;
+}
+
+.sig-lamp-remove {
+	border: none;
+	background: none;
+	color: #c0392b;
+	font-size: 0.9rem;
+	line-height: 1;
+	cursor: pointer;
+	padding: 0 2px;
+	vertical-align: middle;
+}
+
+.sig-lamp-remove:hover {
+	color: #7a1f14;
+}
+
+.sig-aspect-cell {
+	display: block;
+	width: 26px;
+	height: 18px;
+	padding: 0;
+	background: #2a2a2a;
+	border: 1px solid #555;
+	border-radius: 2px;
+	cursor: pointer;
+}
+
+.sig-aspect-on {
+	border-color: #777;
+}
+
+.sig-aspect-blink {
+	animation: sigBlink 0.8s infinite;
+	border-style: dashed;
+}
+
+@keyframes sigLampRowPulse {
+	0%, 100% { background: transparent; }
+	50% { background: #fff3b0; }
+}
+
+.sig-lamp-row-new {
+	animation: sigLampRowPulse 0.9s ease 2;
+}
+

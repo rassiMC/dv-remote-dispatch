@@ -588,6 +588,16 @@ function lampGridPos(lamp, index) {
 	return [0, index];
 }
 
+// The lamp's shape ("bar" lamps render as a thin rectangle two cells wide).
+function lampShape(lamp) {
+	return (lamp && lamp.Shape === 'bar') ? 'bar' : 'circle';
+}
+
+// How many grid cells the lamp occupies horizontally (bars span two).
+function lampSpan(lamp) {
+	return lampShape(lamp) === 'bar' ? 2 : 1;
+}
+
 // Min-rect face dimensions (viewBox units) around the lamps' grid positions.
 function signalFaceDimensions(lamps) {
 	if (!lamps || !lamps.length) {
@@ -601,7 +611,7 @@ function signalFaceDimensions(lamps) {
 	let cols = 0, rows = 0;
 	lamps.forEach((lamp, i) => {
 		const [x, y] = lampGridPos(lamp, i);
-		if (x + 1 > cols) cols = x + 1;
+		if (x + lampSpan(lamp) > cols) cols = x + lampSpan(lamp);
 		if (y + 1 > rows) rows = y + 1;
 	});
 	return {
@@ -662,13 +672,20 @@ function createSignalFaceSvg(entry, aspect, allLit = false) {
 	let lampsSvg = '';
 	lamps.forEach((lamp, i) => {
 		const [gx, gy] = lampGridPos(lamp, i);
-		const cx = slot * gx + slot / 2;
 		const cy = pad + slot * gy + slot / 2;
 		const isLampLit = allLit || lit.indexOf(lamp.Name) !== -1;
 		const isBlink = !allLit && blinking.indexOf(lamp.Name) !== -1;
 		const fill = isLampLit ? normalizeLampColour(lamp.Colour) : '#2a2a2a';
 		const cls = isBlink ? 'sig-lamp sig-lamp-blinking' : 'sig-lamp';
-		lampsSvg += `<circle class="${cls}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${lampR}" fill="${escapeXml(fill)}" stroke="#000" stroke-width="0.5"/>`;
+		if (lampShape(lamp) === 'bar') {
+			// Thin rounded rectangle spanning the lamp cell and the one to its right.
+			const bx = slot * gx + 1;
+			const bh = slot * 0.35;
+			lampsSvg += `<rect class="${cls}" x="${bx.toFixed(1)}" y="${(cy - bh / 2).toFixed(1)}" width="${slot * 2 - 2}" height="${bh.toFixed(1)}" rx="${(bh / 2).toFixed(1)}" fill="${escapeXml(fill)}" stroke="#000" stroke-width="0.5"/>`;
+		} else {
+			const cx = slot * gx + slot / 2;
+			lampsSvg += `<circle class="${cls}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${lampR}" fill="${escapeXml(fill)}" stroke="#000" stroke-width="0.5"/>`;
+		}
 	});
 
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${w} ${h}">
@@ -1984,8 +2001,8 @@ function applySignalVisibility() {
 	});
 }
 
-// Signature identifying a signal's lamp layout (ordered lamp names + colours + grid
-// positions). Signals of the same RD type can have different layouts (e.g. 3-lamp vs
+// Signature identifying a signal's lamp layout (ordered lamp names + colours + shapes +
+// grid positions). Signals of the same RD type can have different layouts (e.g. 3-lamp vs
 // 4-lamp variants, or the same lamps arranged differently), so this is what
 // distinguishes preview rows within a type.
 function layoutKey(entry) {
@@ -1993,21 +2010,21 @@ function layoutKey(entry) {
 	if (!lamps.length) return null;
 	return lamps.map((lamp, i) => {
 		const grid = lampGridPos(lamp, i);
-		return `${lamp.Name}|${normalizeLampColour(lamp.Colour)}|${grid[0]},${grid[1]}`;
+		return `${lamp.Name}|${normalizeLampColour(lamp.Colour)}|${lampShape(lamp)}|${grid[0]},${grid[1]}`;
 	}).join(';');
 }
 
 // layoutKey of the face whose layout editor is open (null = closed).
 let layoutEditorKey = null;
 
-// Lamp positions of the open editor's group as of when it was opened; the "Cancel
-// edit" button restores this snapshot (and re-saves it if the session changed it).
+// The open editor's group entry (lamps + aspects) as of when it was opened;
+// the "Cancel edit" button restores this snapshot locally.
 let layoutEditorSnapshot = null;
 
 function snapshotLayout(layout) {
 	return {
 		signalIds: layout.signalIds.slice(),
-		map: layoutMapOf(layout.entry.Lamps),
+		entry: JSON.parse(JSON.stringify(layout.entry)), // deep copy of Lamps + Aspects
 	};
 }
 
@@ -2200,13 +2217,15 @@ function renderSignalTypePreviews() {
 		gridEl.querySelectorAll('.sig-layout-lamp').forEach(lampEl => {
 			wireLampDrag(layout, gridEl, lampEl);
 		});
+		editorEl.querySelectorAll('.sig-layout-palette-item').forEach(itemEl => {
+			wirePaletteDrag(layout, itemEl, gridEl, itemEl.dataset.shape);
+		});
 		editorEl.querySelector('.sig-layout-done').addEventListener('click', e => {
 			e.stopPropagation();
 			// Done = save any unsaved changes, then close.
-			const map = layoutMapOf(layout.entry.Lamps);
-			const dirty = !layoutEditorSnapshot || !layoutMapsEqual(layoutEditorSnapshot.map, map);
+			const dirty = !layoutEditorSnapshot || !entriesEqual(layoutEditorSnapshot.entry, layout.entry);
 			closeLayoutEditor();
-			if (dirty && !layoutSaveInFlight) persistSignalLayout(layout.signalIds, map);
+			if (dirty && !layoutSaveInFlight) persistSignalEntry(layout.signalIds, layout.entry);
 		});
 		editorEl.querySelector('.sig-layout-save').addEventListener('click', e => {
 			e.stopPropagation();
@@ -2216,6 +2235,32 @@ function renderSignalTypePreviews() {
 			e.stopPropagation();
 			resetSignalLayout(layout);
 		});
+		const matrixEl = editorEl.querySelector('.sig-layout-matrix');
+		if (matrixEl) {
+			matrixEl.querySelectorAll('.sig-aspect-cell').forEach(cellEl => {
+				cellEl.addEventListener('click', ev => {
+					ev.stopPropagation();
+					const lamp = layout.entry.Lamps[Number(cellEl.dataset.lamp)];
+					if (!lamp) return;
+					const aspectDef = (layout.entry.Aspects && cellEl.dataset.aspect != null)
+						? layout.entry.Aspects[cellEl.dataset.aspect] : null;
+					const cycle = { off: 'on', on: 'blink', blink: 'off' };
+					setAspectLampState(layout, cellEl.dataset.aspect, lamp, cycle[lampAspectState(lamp, aspectDef)]);
+				});
+			});
+			matrixEl.querySelectorAll('.sig-lamp-colour').forEach(input => {
+				const idx = Number(input.dataset.lamp);
+				// Live repaint while the picker is open; full re-render once it commits.
+				input.addEventListener('input', e => setLampColour(layout, idx, e.target.value, false));
+				input.addEventListener('change', e => setLampColour(layout, idx, e.target.value, true));
+			});
+			matrixEl.querySelectorAll('.sig-lamp-remove').forEach(btn => {
+				btn.addEventListener('click', e => {
+					e.stopPropagation();
+					removeLampFromGroup(layout, Number(btn.dataset.lamp));
+				});
+			});
+		}
 	});
 }
 
@@ -2229,7 +2274,7 @@ function renderSignalLayoutEditor(layout) {
 	let cols = 0, rows = 0;
 	lamps.forEach((lamp, i) => {
 		const [x, y] = lampGridPos(lamp, i);
-		if (x + 1 > cols) cols = x + 1;
+		if (x + lampSpan(lamp) > cols) cols = x + lampSpan(lamp);
 		if (y + 1 > rows) rows = y + 1;
 	});
 	if (!cols) cols = 1;
@@ -2238,6 +2283,9 @@ function renderSignalLayoutEditor(layout) {
 	const cell = signalLayoutEditorCell;
 	const gap = signalLayoutEditorGap;
 	const pitch = cell + gap;
+	const barW = 2 * cell + gap; // a bar lamp spans two cells (incl. the gap between them)
+	const barH = 10;
+	const dotSize = 14;
 	const gridWidth = cols * pitch - gap;
 	const gridHeight = rows * pitch - gap;
 
@@ -2248,14 +2296,29 @@ function renderSignalLayoutEditor(layout) {
 		}
 	}
 
-	const lampSize = 14;
 	const lampsHtml = lamps.map((lamp, i) => {
 		const [x, y] = lampGridPos(lamp, i);
-		const left = x * pitch + (cell - lampSize) / 2;
-		const top = y * pitch + (cell - lampSize) / 2;
-		return `<div class="sig-layout-lamp" data-index="${i}" title="${escapeXml(lamp.Name)}" `
-			+ `style="left:${left}px;top:${top}px;width:${lampSize}px;height:${lampSize}px;background:${escapeXml(normalizeLampColour(lamp.Colour))};"></div>`;
+		const isBar = lampShape(lamp) === 'bar';
+		const w = isBar ? barW : dotSize;
+		const h = isBar ? barH : dotSize;
+		const left = x * pitch + (isBar ? 1 : (cell - dotSize) / 2);
+		const top = y * pitch + (cell - h) / 2;
+		return `<div class="sig-layout-lamp${isBar ? ' sig-layout-lamp-bar' : ''}" data-index="${i}" title="${escapeXml(lamp.Name)}" `
+			+ `style="left:${left}px;top:${top}px;width:${w}px;height:${h}px;background:${escapeXml(normalizeLampColour(lamp.Colour))};"></div>`;
 	}).join('');
+
+	const paletteHtml = `
+		<div class="sig-layout-palette">
+			<span class="sig-layout-palette-label">add lamp:</span>
+			<div class="sig-layout-palette-item" data-shape="circle" title="Pull a round lamp onto the grid">
+				<span class="sig-layout-palette-preview sig-layout-palette-preview-circle"></span>
+			</div>
+			<div class="sig-layout-palette-item" data-shape="bar" title="Pull a bar lamp (two cells wide) onto the grid">
+				<span class="sig-layout-palette-preview sig-layout-palette-preview-bar"></span>
+			</div>
+		</div>`;
+
+	const matrixHtml = renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize);
 
 	return `
 		<div class="sig-layout-editor" data-layout="${escapeXml(key)}">
@@ -2267,11 +2330,62 @@ function renderSignalLayoutEditor(layout) {
 				</span>
 				<button type="button" class="sig-layout-done">Done</button>
 			</div>
+			${paletteHtml}
 			<div class="sig-layout-grid" data-cols="${cols}" data-rows="${rows}" style="width:${gridWidth}px;height:${gridHeight}px;">
 				${cellsHtml}
 				${lampsHtml}
 			</div>
+			${matrixHtml}
 			<div class="sig-layout-status"></div>
+		</div>`;
+}
+
+// The aspect × lamp table: aspects across the top, lamps down the side. Each row has a
+// colour swatch and a remove button; each cell is the lamp's state in that aspect
+// (off / on / blinking, cycled by clicking). Rendered below the editor grid.
+function renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize) {
+	const lamps = layout.entry.Lamps;
+	if (!lamps.length) return '';
+	const aspects = (layout.aspects || []).filter(id => id && id !== 'OFF');
+	if (!aspects.length) return '';
+
+	const headHtml = aspects.map(id =>
+		`<th title="${escapeXml(id)}">${escapeXml(id)}</th>`
+	).join('');
+
+	const rowsHtml = lamps.map((lamp, i) => {
+		const isBar = lampShape(lamp) === 'bar';
+		const swatch = normalizeLampColour(lamp.Colour);
+		const cellsHtml = aspects.map(id => {
+			const aspectDef = layout.entry.Aspects ? layout.entry.Aspects[id] : null;
+			const state = lampAspectState(lamp, aspectDef);
+			const bg = state === 'off' ? '' : `style="background:${escapeXml(swatch)};"`;
+			return `<td><button type="button" class="sig-aspect-cell sig-aspect-${state}" data-aspect="${escapeXml(id)}" data-lamp="${i}" ${bg} title="${escapeXml(lamp.Name)} in ${escapeXml(id)}: ${state}; click to change"></button></td>`;
+		}).join('');
+
+		const shapeMark = isBar
+			? `<span class="sig-lamp-shape" title="bar (2 cells wide)">▬</span>`
+			: '';
+		const newRow = lamp.Name === lastAddedLampName ? ' sig-lamp-row-new' : '';
+		return `
+			<tr class="sig-lamp-row${newRow}">
+				<td class="sig-lamp-col">
+					<input type="color" class="sig-lamp-colour" value="${escapeXml(swatch)}" data-lamp="${i}" title="colour of ${escapeXml(lamp.Name)}">
+					<span class="sig-lamp-name" title="${escapeXml(lamp.Name)}">${escapeXml(lamp.Name)}</span>
+					${shapeMark}
+					<button type="button" class="sig-lamp-remove" data-lamp="${i}" title="remove ${escapeXml(lamp.Name)}">×</button>
+				</td>
+				${cellsHtml}
+			</tr>`;
+	}).join('');
+
+	return `
+		<div class="sig-layout-matrix-wrap">
+			<div class="sig-layout-matrix-title">aspects × lamps (click a cell: off → on → blink)</div>
+			<table class="sig-layout-matrix">
+				<thead><tr><th class="sig-lamp-col">lamp</th>${headHtml}</tr></thead>
+				<tbody>${rowsHtml}</tbody>
+			</table>
 		</div>`;
 }
 
@@ -2283,10 +2397,10 @@ function renderSignalLayoutEditor(layout) {
 // so no mix of layout and viewport coordinates can offset the snap.
 function wireLampDrag(layout, gridEl, lampEl) {
 	const lampIndex = Number(lampEl.dataset.index);
+	const span = lampSpan(layout.entry.Lamps[lampIndex]) || 1; // bars occupy two cells
 	const cell = signalLayoutEditorCell;
 	const gap = signalLayoutEditorGap;
 	const pitch = cell + gap;
-	const halfCell = cell / 2;
 
 	let curCols = Number(gridEl.dataset.cols) || 1;
 	let curRows = Number(gridEl.dataset.rows) || 1;
@@ -2349,16 +2463,16 @@ function wireLampDrag(layout, gridEl, lampEl) {
 		const pointerX = (e.clientX - rect.left) - grabDx; // lamp centre, in grid px
 		const pointerY = (e.clientY - rect.top) - grabDy;
 
-		// Extend the grid by one cell when the lamp centre passes the last cell's
-		// centre (up to signalLayoutMaxGrid + 1 cells per axis).
-		if (pointerX >= (curCols - 1) * pitch + halfCell && curCols <= signalLayoutMaxGrid)
+		// Extend the grid by one cell when the lamp no longer fully fits (its edge
+		// passed the grid edge; up to signalLayoutMaxGrid + 1 cells per axis).
+		if (pointerX + lampEl.offsetWidth / 2 >= curCols * pitch - gap && curCols <= signalLayoutMaxGrid)
 			growTo(curCols + 1, curRows);
-		if (pointerY >= (curRows - 1) * pitch + halfCell && curRows <= signalLayoutMaxGrid)
+		if (pointerY + lampEl.offsetHeight / 2 >= curRows * pitch - gap && curRows <= signalLayoutMaxGrid)
 			growTo(curCols, curRows + 1);
 
 		// Keep the lamp fully inside the grid so it is never hidden behind the map.
-		lampEl.style.left = clampInt(pointerX - halfCell, 0, curCols * pitch - gap - lampEl.offsetWidth) + 'px';
-		lampEl.style.top = clampInt(pointerY - halfCell, 0, curRows * pitch - gap - lampEl.offsetHeight) + 'px';
+		lampEl.style.left = clampInt(pointerX - lampEl.offsetWidth / 2, 0, Math.max(0, curCols * pitch - gap - lampEl.offsetWidth)) + 'px';
+		lampEl.style.top = clampInt(pointerY - lampEl.offsetHeight / 2, 0, Math.max(0, curRows * pitch - gap - lampEl.offsetHeight)) + 'px';
 	});
 
 	const finish = e => {
@@ -2366,19 +2480,30 @@ function wireLampDrag(layout, gridEl, lampEl) {
 		dragging = false;
 		lampEl.classList.remove('dragging');
 		const rect = gridEl.getBoundingClientRect();
-		const gx = clampInt(Math.round((((e.clientX - rect.left) - grabDx - halfCell)) / pitch), 0, curCols - 1);
-		const gy = clampInt(Math.round((((e.clientY - rect.top) - grabDy - halfCell)) / pitch), 0, curRows - 1);
+		// The lamp's final (clamped) position, snapped to the nearest cell.
+		const left = clampInt((e.clientX - rect.left) - grabDx - lampEl.offsetWidth / 2,
+			0, Math.max(0, curCols * pitch - gap - lampEl.offsetWidth));
+		const top = clampInt((e.clientY - rect.top) - grabDy - lampEl.offsetHeight / 2,
+			0, Math.max(0, curRows * pitch - gap - lampEl.offsetHeight));
+		const gx = clampInt(Math.round(left / pitch), 0, Math.max(0, curCols - span));
+		const gy = clampInt(Math.round(top / pitch), 0, curRows - 1);
 
-		const [curX, curY] = lampGridPos(layout.entry.Lamps[lampIndex], lampIndex);
+		const lamps = layout.entry.Lamps;
+		const [curX, curY] = lampGridPos(lamps[lampIndex], lampIndex);
 		if (gx === curX && gy === curY) {
 			// No-op drop: re-render to realign the lamp without bothering the server.
 			renderSignalTypePreviews();
 			return;
 		}
-		for (let i = 0; i < layout.entry.Lamps.length; i++) {
+		// Cells the lamp would occupy after the move (a bar takes two).
+		const occupied = new Set();
+		for (let i = 0; i < lamps.length; i++) {
 			if (i === lampIndex) continue;
-			const [ox, oy] = lampGridPos(layout.entry.Lamps[i], i);
-			if (ox === gx && oy === gy) {
+			const [ox, oy] = lampGridPos(lamps[i], i);
+			for (let c = ox; c < ox + lampSpan(lamps[i]); c++) occupied.add(c + ',' + oy);
+		}
+		for (let c = gx; c < gx + span; c++) {
+			if (occupied.has(c + ',' + gy)) {
 				// Occupied cell: bounce the lamp back to its saved position.
 				renderSignalTypePreviews();
 				showOccupiedHint();
@@ -2402,16 +2527,142 @@ function wireLampDrag(layout, gridEl, lampEl) {
 	});
 }
 
+// Drag a new lamp from the palette strip into the grid. A ghost follows the pointer;
+// on release inside the grid the lamp is added at the snapped cell (grid grows on
+// request, occupied cells are rejected). The colour is chosen via the new lamp's
+// matrix swatch right after the add.
+function wirePaletteDrag(layout, itemEl, gridEl, shape) {
+	const cell = signalLayoutEditorCell;
+	const gap = signalLayoutEditorGap;
+	const pitch = cell + gap;
+	const span = (shape === 'bar') ? 2 : 1;
+	const lampW = span === 2 ? 2 * cell + gap : 14;
+	const lampH = span === 2 ? 10 : 14;
+
+	let curCols = Number(gridEl.dataset.cols) || 1;
+	let curRows = Number(gridEl.dataset.rows) || 1;
+	const builtCells = new Set();
+	gridEl.querySelectorAll('.sig-layout-cell').forEach(c => {
+		if (c.dataset.cell) builtCells.add(c.dataset.cell);
+	});
+
+	const growTo = (newCols, newRows) => {
+		curCols = newCols;
+		curRows = newRows;
+		gridEl.dataset.cols = newCols;
+		gridEl.dataset.rows = newRows;
+		gridEl.style.width = (newCols * pitch - gap) + 'px';
+		gridEl.style.height = (newRows * pitch - gap) + 'px';
+		for (let y = 0; y < newRows; y++) {
+			for (let x = 0; x < newCols; x++) {
+				const tag = x + '-' + y;
+				if (builtCells.has(tag)) continue;
+				builtCells.add(tag);
+				const cEl = document.createElement('div');
+				cEl.className = 'sig-layout-cell';
+				cEl.dataset.cell = tag;
+				cEl.style.left = x * pitch + 'px';
+				cEl.style.top = y * pitch + 'px';
+				cEl.style.width = cell + 'px';
+				cEl.style.height = cell + 'px';
+				gridEl.appendChild(cEl);
+			}
+		}
+	};
+
+	const clampInt = (v, min, max) => (max < min ? min : Math.max(min, Math.min(v, max)));
+
+	let ghost = null;
+
+	itemEl.addEventListener('pointerdown', e => {
+		e.preventDefault();
+		e.stopPropagation();
+		itemEl.setPointerCapture(e.pointerId);
+		itemEl.classList.add('dragging');
+		ghost = document.createElement('div');
+		ghost.className = 'sig-layout-ghost ' + (span === 2 ? 'sig-ghost-bar' : 'sig-ghost-circle');
+		ghost.style.width = lampW + 'px';
+		ghost.style.height = lampH + 'px';
+		document.body.appendChild(ghost);
+		moveGhost(e);
+	});
+
+	const moveGhost = e => {
+		if (!ghost) return;
+		const rect = gridEl.getBoundingClientRect();
+		const uLeft = (e.clientX - rect.left) - lampW / 2;
+		const uTop = (e.clientY - rect.top) - lampH / 2;
+		// Extend the grid while the ghost is pushed past the current bounds.
+		if (uLeft > curCols * pitch - gap && curCols <= signalLayoutMaxGrid)
+			growTo(curCols + 1, curRows);
+		if (uTop > curRows * pitch - gap && curRows <= signalLayoutMaxGrid)
+			growTo(curCols, curRows + 1);
+		const rawLeft = clampInt(uLeft, 0, Math.max(0, curCols * pitch - gap - lampW));
+		const rawTop = clampInt(uTop, 0, Math.max(0, curRows * pitch - gap - lampH));
+		ghost.style.left = (rect.left + rawLeft) + 'px';
+		ghost.style.top = (rect.top + rawTop) + 'px';
+	};
+
+	const endDrag = e => {
+		if (!ghost) return;
+		const rect = gridEl.getBoundingClientRect();
+		ghost.remove();
+		ghost = null;
+		itemEl.classList.remove('dragging');
+
+		// Drops must land inside the grid rectangle (a little margin).
+		const px = e.clientX - rect.left;
+		const py = e.clientY - rect.top;
+		const margin = cell / 2;
+		if (px < -margin || py < -margin || px > curCols * pitch - gap + margin || py > curRows * pitch - gap + margin)
+			return;
+
+		const rawLeft = clampInt(px - lampW / 2, 0, Math.max(0, curCols * pitch - gap - lampW));
+		const rawTop = clampInt(py - lampH / 2, 0, Math.max(0, curRows * pitch - gap - lampH));
+		const gx = clampInt(Math.round(rawLeft / pitch), 0, Math.max(0, curCols - span));
+		const gy = clampInt(Math.round(rawTop / pitch), 0, curRows - 1);
+
+		// The target cell(s) must be free.
+		const lamps = layout.entry.Lamps;
+		const targets = new Set();
+		for (let c = gx; c < gx + span; c++) targets.add(c + ',' + gy);
+		for (let i = 0; i < lamps.length; i++) {
+			const [ox, oy] = lampGridPos(lamps[i], i);
+			for (let c = ox; c < ox + lampSpan(lamps[i]); c++) {
+				if (targets.has(c + ',' + oy)) {
+					flashLayoutStatus('cell already occupied');
+					return;
+				}
+			}
+		}
+		addLampToGroup(layout, shape, gx, gy);
+	};
+
+	itemEl.addEventListener('pointermove', moveGhost);
+	itemEl.addEventListener('pointerup', endDrag);
+	itemEl.addEventListener('pointercancel', () => {
+		if (ghost) {
+			ghost.remove();
+			ghost = null;
+		}
+		itemEl.classList.remove('dragging');
+	});
+	itemEl.addEventListener('lostpointercapture', () => {
+		if (ghost) {
+			ghost.remove();
+			ghost = null;
+		}
+		itemEl.classList.remove('dragging');
+	});
+}
+
 // Moves a lamp's grid cell: updates every signal sharing this layout in the local
 // packTable, refreshes the sidebar and map icons. Not saved until Save/Done.
 function commitLampMove(layout, lampIndex, gx, gy) {
 	gx = Math.max(0, Math.min(gx, signalLayoutMaxGrid));
 	gy = Math.max(0, Math.min(gy, signalLayoutMaxGrid));
 
-	const map = layoutMapOf(layout.entry.Lamps);
-	map[lampIndex] = [gx, gy];
-
-	applyLayoutToPackTable(layout, map);
+	setLampGrid(layout, lampIndex, [gx, gy]);
 	layoutEditorKey = layoutKey(layout.entry); // the layout signature changes with it
 	renderSignalTypePreviews();
 	updateSignalIcons(layout.signalIds);
@@ -2420,26 +2671,19 @@ function commitLampMove(layout, lampIndex, gx, gy) {
 // Clears the custom layout of a whole group (back to the default single column),
 // locally. Not saved until Save/Done.
 function resetSignalLayout(layout) {
-	const map = {};
-	layout.entry.Lamps.forEach((lamp, i) => { map[i] = null; });
-
-	applyLayoutToPackTable(layout, map);
+	layout.entry.Lamps.forEach((lamp, i) => setLampGrid(layout, i, null));
 	layoutEditorKey = layoutKey(layout.entry);
 	renderSignalTypePreviews();
 	updateSignalIcons(layout.signalIds);
 }
 
-// Applies an index-keyed lamp position map (values [x, y] or null) to every signal
-// entry sharing the given layout. Group members are guaranteed to share lamp order.
-function applyLayoutToPackTable(layout, layoutMap) {
+// Sets one lamp's grid position on every group member (group members share lamp order).
+function setLampGrid(layout, lampIndex, grid) {
 	layout.signalIds.forEach(signalId => {
 		const entry = packTable.Signals[signalId];
 		if (!entry || !Array.isArray(entry.Lamps)) return;
-		Object.keys(layoutMap).forEach(key => {
-			const i = Number(key);
-			if (i >= entry.Lamps.length) return;
-			entry.Lamps[i].Grid = layoutMap[i];
-		});
+		const lamp = entry.Lamps[lampIndex];
+		if (lamp) lamp.Grid = grid;
 	});
 }
 
@@ -2451,41 +2695,177 @@ function updateSignalIcons(signalIds) {
 	});
 }
 
-const sameGridValue = (a, b) => {
-	a = Array.isArray(a) ? a : null;
-	b = Array.isArray(b) ? b : null;
-	return (a === null && b === null) || (a !== null && b !== null && a[0] === b[0] && a[1] === b[1]);
-};
+// Stable JSON-ish serialization (object keys sorted) for value-comparing entries.
+function stableStringify(value) {
+	if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
+	if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+	return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + stableStringify(value[k])).join(',') + '}';
+}
 
-// Full index -> [x, y] | null map from a lamp list (null = default column).
-function layoutMapOf(lamps) {
-	const map = {};
-	lamps.forEach((lamp, i) => {
-		map[i] = (lamp.Grid && lamp.Grid.length === 2) ? [lamp.Grid[0], lamp.Grid[1]] : null;
+// True if two group entries ({Lamps, Aspects}) hold the same values.
+function entriesEqual(a, b) {
+	return a && b && stableStringify(a) === stableStringify(b);
+}
+
+// Writes a group's edited entry (lamps + aspects) to every listed signal, cloned per
+// entry so members don't alias each other's arrays.
+function applyEntryToMembers(signalIds, entry) {
+	signalIds.forEach(signalId => {
+		const target = packTable.Signals[signalId];
+		if (!target) return;
+		const clone = JSON.parse(JSON.stringify(entry));
+		target.Lamps = clone.Lamps;
+		target.Aspects = clone.Aspects;
 	});
-	return map;
 }
 
-// True if two index -> position maps hold the same values.
-function layoutMapsEqual(a, b) {
-	const keys = Object.keys(a);
-	if (keys.length !== Object.keys(b).length) return false;
-	return keys.every(i => sameGridValue(a[i], b[i]));
+// 'blink' / 'on' / 'off' for a lamp within an aspect definition.
+function lampAspectState(lamp, aspectDef) {
+	if (!aspectDef) return 'off';
+	const lit = aspectDef.Lit || [];
+	const blinking = aspectDef.Blinking || [];
+	if (blinking.indexOf(lamp.Name) !== -1) return 'blink';
+	return lit.indexOf(lamp.Name) !== -1 ? 'on' : 'off';
 }
 
-// A save request is in flight (POST /signal/layout).
+// Sets a lamp's aspect state (off/on/blink) for every group member, then re-renders.
+function setAspectLampState(layout, aspectId, lamp, state) {
+	const lit = state === 'blink' || state === 'on';
+	const blink = state === 'blink';
+	layout.signalIds.forEach(signalId => {
+		const entry = packTable.Signals[signalId];
+		if (!entry) return;
+		if (!entry.Aspects[aspectId]) entry.Aspects[aspectId] = { DisallowPassing: false, Lit: [], Blinking: [] };
+		const aspect = entry.Aspects[aspectId];
+		if (!Array.isArray(aspect.Lit)) aspect.Lit = [];
+		if (!Array.isArray(aspect.Blinking)) aspect.Blinking = [];
+		if (lit && aspect.Lit.indexOf(lamp.Name) === -1) aspect.Lit.push(lamp.Name);
+		if (!lit) {
+			const at = aspect.Lit.indexOf(lamp.Name);
+			if (at !== -1) aspect.Lit.splice(at, 1);
+		}
+		if (blink && aspect.Blinking.indexOf(lamp.Name) === -1) aspect.Blinking.push(lamp.Name);
+		if (!blink) {
+			const at = aspect.Blinking.indexOf(lamp.Name);
+			if (at !== -1) aspect.Blinking.splice(at, 1);
+		}
+	});
+	renderSignalTypePreviews();
+}
+
+// Sets a lamp's colour on every group member. With fullRender it re-keys the open
+// editor (colour is part of layoutKey) and re-renders; without, it repaints only the
+// visuals so a colour-picker stays open while the user is dragging inside it.
+function setLampColour(layout, lampIndex, hex, fullRender) {
+	const h = String(hex).replace('#', '').toUpperCase();
+	const colour = (h.length === 6 || h.length === 8) ? h : null;
+	if (!colour) return;
+
+	layout.signalIds.forEach(signalId => {
+		const entry = packTable.Signals[signalId];
+		if (!entry || !Array.isArray(entry.Lamps)) return;
+		const lamp = entry.Lamps[lampIndex];
+		if (lamp) lamp.Colour = colour;
+	});
+
+	if (fullRender) {
+		layoutEditorKey = layoutKey(layout.entry);
+		renderSignalTypePreviews();
+		updateSignalIcons(layout.signalIds);
+		return;
+	}
+
+	const css = normalizeLampColour(colour);
+	const gridLamp = document.querySelector('#sig-type-list .sig-layout-grid .sig-layout-lamp[data-index="' + lampIndex + '"]');
+	if (gridLamp) gridLamp.style.background = css;
+	document.querySelectorAll('#sig-type-list .sig-aspect-cell[data-lamp="' + lampIndex + '"]').forEach(cellEl => {
+		if (cellEl.classList.contains('sig-aspect-on') || cellEl.classList.contains('sig-aspect-blink'))
+			cellEl.style.background = css;
+	});
+	updateSignalIcons(layout.signalIds);
+}
+
+// A unique name for a user-added lamp: custom_<n>, continuing the group's existing sequence.
+function nextCustomLampName(layout) {
+	const names = new Set();
+	layout.signalIds.forEach(signalId => {
+		const entry = packTable.Signals[signalId];
+		if (entry && Array.isArray(entry.Lamps))
+			entry.Lamps.forEach(lamp => { if (lamp && lamp.Name) names.add(lamp.Name); });
+	});
+	let n = 1;
+	while (names.has('custom_' + n)) n++;
+	return 'custom_' + n;
+}
+
+// Name of the most recently added custom lamp (its matrix row pulses to hint at the colour picker).
+let lastAddedLampName = null;
+
+// Appends a new user lamp of the given shape at (gx, gy) to every group member.
+function addLampToGroup(layout, shape, gx, gy) {
+	const proto = {
+		Name: nextCustomLampName(layout),
+		Colour: 'FFFFFFFF',
+		Shape: shape,
+		Grid: [gx, gy],
+	};
+	layout.signalIds.forEach(signalId => {
+		const entry = packTable.Signals[signalId];
+		if (!entry) return;
+		if (!Array.isArray(entry.Lamps)) entry.Lamps = [];
+		entry.Lamps.push(JSON.parse(JSON.stringify(proto)));
+	});
+
+	lastAddedLampName = proto.Name;
+	layoutEditorKey = layoutKey(layout.entry); // the layout signature changes with a new lamp
+	renderSignalTypePreviews();
+	updateSignalIcons(layout.signalIds);
+
+	// Ask for a colour: try to open the picker on the new lamp's swatch.
+	const idx = layout.entry.Lamps.length - 1;
+	const swatch = document.querySelector('#sig-type-list .sig-lamp-colour[data-lamp="' + idx + '"]');
+	if (swatch && typeof swatch.showPicker === 'function') {
+		try { swatch.showPicker(); } catch (e) { /* pickers must open from a user gesture; the row pulses instead */ }
+	}
+}
+
+// Removes a lamp from every group member and strips it from all of their aspect patterns.
+function removeLampFromGroup(layout, lampIndex) {
+	const lamp = layout.entry.Lamps[lampIndex];
+	if (!lamp) return;
+	const name = lamp.Name;
+
+	layout.signalIds.forEach(signalId => {
+		const entry = packTable.Signals[signalId];
+		if (!entry || !Array.isArray(entry.Lamps)) return;
+		entry.Lamps.splice(lampIndex, 1);
+		Object.keys(entry.Aspects || {}).forEach(aspectId => {
+			const aspect = entry.Aspects[aspectId];
+			['Lit', 'Blinking'].forEach(field => {
+				if (!aspect || !Array.isArray(aspect[field])) return;
+				const at = aspect[field].indexOf(name);
+				if (at !== -1) aspect[field].splice(at, 1);
+			});
+		});
+	});
+
+	layoutEditorKey = layoutKey(layout.entry); // lamp removed from the signature
+	renderSignalTypePreviews();
+	updateSignalIcons(layout.signalIds);
+}
+
+// A save request is in flight (POST /signal/entry).
 let layoutSaveInFlight = false;
 
-// Saves the session's current positions to the server and moves the "last saved"
+// Saves the session's current group entry to the server and moves the "last saved"
 // baseline forward. Stays open; shows a short status hint.
 function saveLayoutSession(layout) {
 	if (layoutSaveInFlight) return;
-	const map = layoutMapOf(layout.entry.Lamps);
-	if (layoutEditorSnapshot && layoutMapsEqual(layoutEditorSnapshot.map, map)) {
+	if (layoutEditorSnapshot && entriesEqual(layoutEditorSnapshot.entry, layout.entry)) {
 		flashLayoutStatus('everything saved');
 		return;
 	}
-	persistSignalLayout(layout.signalIds, map, () => {
+	persistSignalEntry(layout.signalIds, layout.entry, () => {
 		layoutEditorSnapshot = snapshotLayout(layout);
 		flashLayoutStatus('saved');
 	});
@@ -2495,6 +2875,7 @@ function saveLayoutSession(layout) {
 function closeLayoutEditor() {
 	layoutEditorKey = null;
 	layoutEditorSnapshot = null;
+	lastAddedLampName = null;
 	renderSignalTypePreviews();
 }
 
@@ -2503,20 +2884,16 @@ function flashLayoutStatus(msg) {
 	if (statusEl) statusEl.textContent = msg;
 }
 
-// Cancels the current edit session: restores the lamp positions from the last save
-// (or from when the editor was opened). No POST — the server already holds that
-// state, because edits only leave the editor through Save/Done.
+// Cancels the current edit session: restores the group's lamps + aspects from the
+// last save (or from when the editor was opened). No POST — the server already
+// holds that state, because edits only leave the editor through Save/Done.
 function cancelSignalLayoutEdit() {
 	if (layoutEditorKey === null) return;
 
 	const snapshot = layoutEditorSnapshot;
 	if (snapshot && !layoutSaveInFlight) {
-		const firstEntry = packTable.Signals[snapshot.signalIds[0]];
-		const current = (firstEntry && Array.isArray(firstEntry.Lamps)) ? layoutMapOf(firstEntry.Lamps) : null;
-		if (current && !layoutMapsEqual(snapshot.map, current)) {
-			applyLayoutToPackTable({ signalIds: snapshot.signalIds }, snapshot.map);
-			updateSignalIcons(snapshot.signalIds);
-		}
+		applyEntryToMembers(snapshot.signalIds, snapshot.entry);
+		updateSignalIcons(snapshot.signalIds);
 	}
 
 	closeLayoutEditor();
@@ -2557,32 +2934,45 @@ function normalizeSignalLayouts() {
 	renderSignalTypePreviews();
 	updateSignalIcons(fixed);
 	fixed.forEach(signalId => {
-		const lamps = packTable.Signals[signalId].Lamps;
-		const map = {};
-		lamps.forEach((lamp, i) => { map[i] = lamp.Grid || null; });
-		persistSignalLayout([signalId], map);
+		const entry = packTable.Signals[signalId];
+		persistSignalEntry([signalId], { Lamps: entry.Lamps, Aspects: entry.Aspects });
 	});
 }
 
 // Periodic layout normalization (see normalizeSignalLayouts).
 setInterval(normalizeSignalLayouts, 10000);
 
-// POSTs the layout to the server. On failure the table is re-synced from /signalpack,
-// which re-renders the previews (the editor closes if the saved layout no longer matches).
+// Saves a group's edited entry (lamps + aspects) to the server via POST /signal/entry.
 // onSuccess runs only for accepted saves; layoutSaveInFlight guards double-saves.
-function persistSignalLayout(signalIds, layoutMap, onSuccess) {
+// On failure the table is re-synced from /signalpack, which re-renders the previews
+// (the editor closes if the saved layout no longer matches).
+function persistSignalEntry(signalIds, entry, onSuccess) {
 	layoutSaveInFlight = true;
-	fetch(new URL('/signal/layout', location), {
+	const lamps = (entry.Lamps || []).map(lamp => {
+		const payload = {
+			Name: lamp.Name,
+			Colour: lamp.Colour,
+			Shape: lampShape(lamp),
+			Grid: (lamp.Grid && lamp.Grid.length === 2) ? [lamp.Grid[0], lamp.Grid[1]] : null,
+		};
+		if (lamp.Position && lamp.Position.length === 3)
+			payload.Position = [lamp.Position[0], lamp.Position[1], lamp.Position[2]];
+		return payload;
+	});
+	fetch(new URL('/signal/entry', location), {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ signals: signalIds, layout: layoutMap }),
+		body: JSON.stringify({
+			signals: signalIds,
+			entry: { Lamps: lamps, Aspects: entry.Aspects || {} },
+		}),
 	}).then(resp => {
 		if (!resp.ok) throw new Error('HTTP ' + resp.status);
 		layoutSaveInFlight = false;
-		if (onSuccess) onSuccess();
+		if (typeof onSuccess === 'function') onSuccess();
 	}).catch(err => {
 		layoutSaveInFlight = false;
-		console.warn('Failed to save signal layout:', err);
+		console.warn('Failed to save signal entry:', err);
 		const statusEl = document.querySelector('#sig-type-list .sig-layout-status');
 		if (statusEl) statusEl.textContent = 'Save failed (' + err.message + ') — reloading from server';
 		fetch(new URL('/signalpack', location))

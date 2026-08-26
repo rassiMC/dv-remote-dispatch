@@ -20,6 +20,12 @@ namespace DvMod.RemoteDispatch
 		/// Null means the lamp uses the default single-column layout (array order).
 		/// </summary>
 		public int[]? Grid { get; set; }
+
+		/// <summary>
+		/// Lamp shape in the frontend rendering: "circle" (default) or "bar" (a thin rectangle
+		/// spanning two grid cells horizontally). Null means circle.
+		/// </summary>
+		public string? Shape { get; set; }
 	}
 
 	/// <summary>
@@ -247,13 +253,13 @@ namespace DvMod.RemoteDispatch
 		}
 
 		/// <summary>
-		/// Applies user-edited grid positions to the lamps of the listed signals. Layout keys are
-		/// lamp array indices; a null value clears the lamp's position (back to the default column).
-		/// Returns true if the table changed.
+		/// Replaces the lamps and aspects of the listed signals with user-edited definitions from
+		/// the frontend signal editor. Returns true if the table changed (resaving an identical
+		/// definition is a no-op).
 		/// </summary>
-		internal static bool UpdateLayout(IReadOnlyList<string> signalIds, IReadOnlyDictionary<string, int[]?> layout)
+		internal static bool ApplyDefinitions(IReadOnlyList<string> signalIds, SignalLamp[] lamps, IDictionary<string, SignalAspect> aspects)
 		{
-			if (signalIds == null || signalIds.Count == 0 || layout == null) return false;
+			if (signalIds == null || signalIds.Count == 0 || lamps == null || aspects == null) return false;
 
 			lock (s_lock)
 			{
@@ -263,31 +269,68 @@ namespace DvMod.RemoteDispatch
 				foreach (var id in signalIds)
 				{
 					if (string.IsNullOrEmpty(id) || !s_table.Signals.TryGetValue(id, out var entry)) continue;
-					if (entry.Lamps == null) continue;
+					if (AreSameDefinitions(entry.Lamps, entry.Aspects, lamps, aspects)) continue;
 
-					foreach (var kvp in layout)
-					{
-						if (!int.TryParse(kvp.Key, out int index) || index < 0 || index >= entry.Lamps.Length) continue;
-						var grid = kvp.Value;
-						if (grid != null && (grid.Length != 2 || grid[0] < 0 || grid[1] < 0)) continue;
-
-						var lamp = entry.Lamps[index];
-						if (lamp == null) continue;
-						if (AreSameGrid(lamp.Grid, grid)) continue;
-
-						lamp.Grid = grid;
-						changed = true;
-					}
+					entry.Lamps = lamps;
+					entry.Aspects = new Dictionary<string, SignalAspect>(aspects, StringComparer.Ordinal);
+					changed = true;
 				}
 
 				return changed;
 			}
 		}
 
+		private static bool AreSameDefinitions(SignalLamp[]? aLamps, IDictionary<string, SignalAspect>? aAspects, SignalLamp[] bLamps, IDictionary<string, SignalAspect> bAspects)
+		{
+			if (!AreSameLamps(aLamps, bLamps)) return false;
+			if (aAspects == null || aAspects.Count != bAspects.Count) return false;
+			foreach (var kvp in bAspects)
+			{
+				if (!aAspects.TryGetValue(kvp.Key, out var aAspect) || aAspect == null || kvp.Value == null) return false;
+				if (aAspect.DisallowPassing != kvp.Value.DisallowPassing) return false;
+				if (!AreSameNameArrays(aAspect.Lit, kvp.Value.Lit) || !AreSameNameArrays(aAspect.Blinking, kvp.Value.Blinking)) return false;
+			}
+			return true;
+		}
+
+		private static bool AreSameLamps(SignalLamp[]? a, SignalLamp[]? b)
+		{
+			if (a == null || b == null || a.Length != b.Length) return false;
+			for (int i = 0; i < a.Length; i++)
+			{
+				var la = a[i];
+				var lb = b[i];
+				if (la == null || lb == null) continue;
+				if (la != (object)lb && (
+					!string.Equals(la.Name, lb.Name, StringComparison.Ordinal)
+					|| !string.Equals(la.Colour ?? "", lb.Colour ?? "", StringComparison.Ordinal)
+					|| !string.Equals(la.Shape ?? "", lb.Shape ?? "", StringComparison.Ordinal)
+					|| !AreSameGrid(la.Grid, lb.Grid)
+					|| !AreSameOptionals(la.Position, lb.Position))) return false;
+			}
+			return true;
+		}
+
 		private static bool AreSameGrid(int[]? a, int[]? b)
 		{
 			if (a == null || b == null) return a == null && b == null;
 			return a.Length == b.Length && a[0] == b[0] && a[1] == b[1];
+		}
+
+		private static bool AreSameOptionals(double[]? a, double[]? b)
+		{
+			if (a == null || b == null) return a == null && b == null;
+			if (a.Length != b.Length) return false;
+			for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+			return true;
+		}
+
+		private static bool AreSameNameArrays(string[]? a, string[]? b)
+		{
+			if (a == null || b == null) return a == null && b == null;
+			if (a.Length != b.Length) return false;
+			for (int i = 0; i < a.Length; i++) if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
+			return true;
 		}
 
 		/// <summary>

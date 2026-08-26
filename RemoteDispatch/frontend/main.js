@@ -2054,6 +2054,30 @@ function setLayoutCancelVisible() {
 	document.body.classList.toggle('sig-layout-editing', layoutEditorKey !== null);
 }
 
+// While an editor is open, the slim sidebar is unusable for wide content — extend
+// it over the map so the grid and the aspect table fit without scrolling.
+// Pass null (no editor rendered) to restore the normal width.
+function setSidebarWidthForEditing(editorEl) {
+	const sidebarEl = document.getElementById('sidebar');
+	if (!sidebarEl) return;
+	if (!editorEl) {
+		sidebarEl.style.width = '';
+		return;
+	}
+
+	let w = 300;
+	editorEl.querySelectorAll('.sig-layout-grid, table').forEach(el => {
+		if (el.offsetWidth > w) w = el.offsetWidth;
+	});
+	w += 80; // pane + group padding and slack
+
+	const cap = Math.round(window.innerWidth * 0.9);
+	const current = sidebarEl.getBoundingClientRect().width || 460;
+	w = Math.min(w, cap);
+	if (w < current) w = current; // only grow while editing, never shrink below the normal width
+	sidebarEl.style.width = w + 'px';
+}
+
 // Groups live signals by RD type. Each type holds its distinct lamp layouts side by side;
 // signals of the same type can differ (e.g. 3-lamp vs 4-lamp variants). Aspects are the
 // union across every layout of the type. Signals with no pack data yet fold into a single
@@ -2140,11 +2164,15 @@ function previewFaceSize(type, lamps) {
 function renderSignalTypePreviews() {
 	setLayoutCancelVisible();
 	const container = document.getElementById('sig-type-list');
-	if (!container) return;
+	if (!container) {
+		setSidebarWidthForEditing(null);
+		return;
+	}
 
 	const groups = collectSignalTypes();
 	if (groups.length === 0) {
 		container.innerHTML = '<div style="font-size:0.85em;color:#888;font-style:italic;">No signal types yet.</div>';
+		setSidebarWidthForEditing(null);
 		return;
 	}
 
@@ -2283,6 +2311,9 @@ function renderSignalTypePreviews() {
 			});
 		}
 	});
+
+	// Extend the sidebar over the map while the editor is open; restore when closed.
+	setSidebarWidthForEditing(container.querySelector('.sig-layout-editor'));
 }
 
 // Interactive layout editor for a signal face: a min-rect grid of cells (one per integer

@@ -655,10 +655,18 @@ body.switchboard-active #map {
 
 /* aspect × lamp table below the editor grid */
 
+/* The aspect × lamp table floats in its own window over the map (centered by
+   positionFloatingMatrix), clear of the sidebar. */
 .sig-layout-matrix-wrap {
-	overflow-x: auto;
-	max-width: 100%;
-	margin-top: 8px;
+	position: fixed;
+	z-index: 13000;
+	max-width: 50vw;
+	background: #fff;
+	border: 1px solid #ccc;
+	border-radius: 6px;
+	box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+	padding: 8px;
+	overflow: auto;
 }
 
 .sig-layout-matrix-title {
@@ -670,10 +678,16 @@ body.switchboard-active #map {
 .sig-layout-matrix {
 	border-collapse: collapse;
 	font-size: 0.72rem;
-	/* Content width, never stretched into the (old, narrow) wrap: the sidebar sizes
-	   itself to this in setSidebarWidthForEditing. */
+	/* Content width so the floating window is only as wide as the table needs. */
 	width: fit-content;
 	max-width: none;
+}
+
+.sig-layout-matrix-hint {
+	font-size: 0.72rem;
+	color: #888;
+	font-style: italic;
+	margin-top: 6px;
 }
 
 .sig-layout-matrix th,
@@ -773,17 +787,7 @@ body.switchboard-active #map {
 	animation: sigLampRowPulse 0.9s ease 2;
 }
 
-/* The sidebar itself (z-index 2000 from the leaflet-sidebar css) is already above
-   the map — but the root and content elements clip overflow. While an editor is
-   open, drop the clipping so any content that spills past the pane paints over
-   the map instead of disappearing behind it. */
-body.sig-layout-editing #sidebar {
-	overflow: visible;
-}
 
-body.sig-layout-editing .leaflet-sidebar-content {
-	overflow-x: visible;
-}
 
 .sig-layout-scroll {
 	overflow-x: auto;

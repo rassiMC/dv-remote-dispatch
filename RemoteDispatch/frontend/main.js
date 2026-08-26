@@ -2046,22 +2046,27 @@ function snapshotLayout(layout) {
 }
 
 // The "Cancel edit" button (next to the "Signal types" header) only shows while
-// the layout editor is open. The body class keeps the whole sidebar above the
-// Leaflet map panes while editor content overflows the side pane.
+// the layout editor is open.
 function setLayoutCancelVisible() {
 	const btn = document.getElementById('sig-layout-cancel');
 	if (btn) btn.hidden = layoutEditorKey === null;
-	document.body.classList.toggle('sig-layout-editing', layoutEditorKey !== null);
 }
 
-// While an editor is open, the slim sidebar is unusable for the wide aspect
-// table — widen it to half the screen (floored so small windows stay usable) so
-// most of the table shows over the map; anything wider still scrolls inside.
-// Pass null (no editor rendered) to restore the normal width.
-function setSidebarWidthForEditing(editorEl) {
-	const sidebarEl = document.getElementById('sidebar');
-	if (!sidebarEl) return;
-	sidebarEl.style.width = editorEl ? 'max(520px, 50vw)' : '';
+// The aspect × lamp table lives in a floating window centred in the space between
+// the sidebar and the right screen edge, so it never touches the sidebar.
+function positionFloatingMatrix(el) {
+	const side = document.getElementById('sidebar');
+	const sideRight = side ? side.getBoundingClientRect().right : 0;
+	const areaW = Math.max(200, window.innerWidth - sideRight);
+
+	el.style.maxWidth = (areaW - 32) + 'px';
+	el.style.maxHeight = (window.innerHeight - 32) + 'px';
+
+	const w = Math.min(el.scrollWidth, areaW - 32);
+	const left = sideRight + Math.max(16, (areaW - w) / 2);
+	const top = Math.max(16, (window.innerHeight - el.offsetHeight) / 2);
+	el.style.left = Math.round(left) + 'px';
+	el.style.top = Math.round(top) + 'px';
 }
 
 // Groups live signals by RD type. Each type holds its distinct lamp layouts side by side;
@@ -2150,15 +2155,11 @@ function previewFaceSize(type, lamps) {
 function renderSignalTypePreviews() {
 	setLayoutCancelVisible();
 	const container = document.getElementById('sig-type-list');
-	if (!container) {
-		setSidebarWidthForEditing(null);
-		return;
-	}
+	if (!container) return;
 
 	const groups = collectSignalTypes();
 	if (groups.length === 0) {
 		container.innerHTML = '<div style="font-size:0.85em;color:#888;font-style:italic;">No signal types yet.</div>';
-		setSidebarWidthForEditing(null);
 		return;
 	}
 
@@ -2294,8 +2295,16 @@ function renderSignalTypePreviews() {
 		}
 	});
 
-	// Extend the sidebar over the map while the editor is open; restore when closed.
-	setSidebarWidthForEditing(container.querySelector('.sig-layout-editor'));
+	// The aspect × lamp table floats in its own window (centered over the map,
+	// clear of the sidebar). All but the first are hidden (two editors only
+	// co-occur when two types share an identical layout).
+	container.querySelectorAll('.sig-layout-matrix-wrap').forEach((el, i) => {
+		if (i > 0) {
+			el.style.display = 'none';
+			return;
+		}
+		positionFloatingMatrix(el);
+	});
 }
 
 // Interactive layout editor for a signal face: a min-rect grid of cells (one per integer
@@ -2371,6 +2380,7 @@ function renderSignalLayoutEditor(layout) {
 					${lampsHtml}
 				</div>
 			</div>
+			<div class="sig-layout-matrix-hint">aspect × lamps table → floating window</div>
 			${matrixHtml}
 			<div class="sig-layout-status"></div>
 		</div>`;

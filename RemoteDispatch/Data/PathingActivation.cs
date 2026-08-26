@@ -1,4 +1,5 @@
 using Newtonsoft.Json.Linq;
+using System;
 using System.Collections.Generic;
 
 namespace DvMod.RemoteDispatch
@@ -15,6 +16,14 @@ namespace DvMod.RemoteDispatch
         {
             if (string.IsNullOrEmpty(signalType))
                 signalType = GetSignalType(signalId);
+
+            // Distant signals cannot be forced to a stop aspect; a sweep or a
+            // future call site must never put one under Manual control.
+            if (signalType == "Distant")
+            {
+                Main.Warning($"PathingActivation: refusing to set stop aspect on distant signal {signalId}");
+                return;
+            }
 
             var candidates = new List<string>();
             var configured = PackTableStore.GetConfiguredStopAspect(signalType ?? "");
@@ -61,6 +70,7 @@ namespace DvMod.RemoteDispatch
             if (signalsObj == null)
                 return;
 
+            var mutations = new List<Action>();
             int detectedCount = 0;
             int undetectedCount = 0;
             int distantSkipped = 0;
@@ -78,14 +88,14 @@ namespace DvMod.RemoteDispatch
 
                 if (!string.IsNullOrEmpty(junctionId) && detectedJunctionIds.Contains(junctionId))
                 {
-                    Main.DebugLog($"PathingActivation: Detected signal {signalId} (junction {junctionId})");
-                    SetSignalToStop(signalId, type);
+                    // Pass the type so SetSignalToStop skips its per-signal
+                    // GetAllSignalsData() type lookup.
+                    mutations.Add(() => SetSignalToStop(signalId, type));
                     detectedCount++;
                 }
                 else if (hasMapping && !isDistant)
                 {
-                    Main.DebugLog($"PathingActivation: Undetected signal {signalId} - releasing to automatic");
-                    SignalsShim.SetSignalMode(signalId, "Automatic");
+                    mutations.Add(() => SignalsShim.SetSignalMode(signalId, "Automatic"));
                     undetectedCount++;
                 }
                 else
@@ -94,8 +104,8 @@ namespace DvMod.RemoteDispatch
                 }
             }
 
-            Main.Log($"PathingActivation: {detectedCount} detected -> Manual+S1, {undetectedCount} undetected -> Automatic, {distantSkipped} distant skipped");
-            Sessions.AddTag("signals");
+            Main.Log($"PathingActivation: pacing {mutations.Count} mutations ({detectedCount} detected -> Manual+S1, {undetectedCount} undetected -> Automatic, {distantSkipped} distant skipped)");
+            PacedSignalSweep.Run(mutations, () => Sessions.AddTag("signals"));
         }
 
         public static void DeactivatePathingMode()
@@ -111,20 +121,15 @@ namespace DvMod.RemoteDispatch
 
         private static void SweepSignalsToAutomatic()
         {
-            var allSignalsData = SignalsShim.GetAllSignalsData();
-            if (allSignalsData == null)
-                return;
-
-            var signalsObj = allSignalsData as JObject;
+            var signalsObj = SignalsShim.GetAllSignalsData() as JObject;
             if (signalsObj == null)
                 return;
 
-            int restoredCount = 0;
+            var mutations = new List<Action>();
             int distantSkipped = 0;
 
             foreach (var prop in signalsObj.Properties())
             {
-                var signalId = prop.Name;
                 var signalData = prop.Value as JObject;
                 if (signalData == null) continue;
 
@@ -135,13 +140,18 @@ namespace DvMod.RemoteDispatch
                     continue;
                 }
 
-                Main.DebugLog($"PathingActivation: Restoring signal {signalId} to Automatic");
-                SignalsShim.SetSignalMode(signalId, "Automatic");
-                restoredCount++;
+                var id = prop.Name;
+                mutations.Add(() => SignalsShim.SetSignalMode(id, "Automatic"));
             }
 
-            Main.Log($"PathingActivation: {restoredCount} signals restored to Automatic, {distantSkipped} distant skipped");
-            Sessions.AddTag("signals");
+            if (mutations.Count == 0)
+            {
+                Main.Log($"PathingActivation: nothing to sweep ({distantSkipped} distant skipped)");
+                return;
+            }
+
+            Main.Log($"PathingActivation: pacing restore of {mutations.Count} signals ({distantSkipped} distant skipped)");
+            PacedSignalSweep.Run(mutations, () => Sessions.AddTag("signals"));
         }
 
         public static void ClearRouteSignals(List<string> signalIds)

@@ -338,18 +338,21 @@ branch-entry ("In") signals can be attributed to a junction.
   `Operation` in Automatic, so the next update re-lights them into a manual
   S1c "Expect caution + dispatch control lamp" state. Needs a Signals mod fix
   first; see §7.)
-  `DeactivatePathingMode()` is the clean teardown: it releases staging claims
-  (`StagingData.ClearAll()`, which reverts each claimed block's guard signal to
-  Manual+S1 while stored paths still exist), clears stored paths, then sweeps
-  every non-distant signal back to **Automatic** and pushes a `signals` tag.
-  It is called when the `enablePathing` flag is toggled off (on the main thread)
-  and on mod disable. `RevertRouteSignals` / `ClearRouteSignals` remain as
-  per-path teardown helpers.
-  > **Known freeze (see §7 #14):** both `ActivatePathingMode()` and
-  > `DeactivatePathingMode()` sweep *every* non-distant signal in the world on
-  > the main thread, synchronously, in a single frame - this is what makes
-  > toggling `enablePathing` freeze the game. The teardown is correct in state,
-  > not in performance.
+   `DeactivatePathingMode()` is the clean teardown: it releases staging claims
+   (`StagingData.ClearAll()`, which reverts each claimed block's guard signal to
+   Manual+S1 while stored paths still exist), clears stored paths, then sweeps
+   every non-distant signal back to **Automatic** (paced, see below) and pushes a
+   `signals` tag. It is called when the `enablePathing` flag is toggled off (on the
+   main thread) and on mod disable. `RevertRouteSignals` / `ClearRouteSignals`
+   remain as per-path teardown helpers.
+   - **Sweeps are paced across frames** (`PacedSignalSweep`, hosted on the
+     `Updater` main-thread component): `ActivatePathingMode` /
+     `SweepSignalsToAutomatic` collect a `List<Action>` of per-signal mutations and
+     apply ~24 of them per frame instead of mutating the whole map in one frame -
+     this removed the enable/disable game freeze (see §7 item 14, now resolved).
+     `SetSignalToStop` additionally refuses to run against a Distant signal (they
+     can't hold a stop aspect), so a future call site can never force one under
+     Manual control.
 
 ---
 
@@ -663,25 +666,23 @@ Derived from reading the code; not a plan. The most fragile points:
     The `/signalpack` lamp table is built lazily from observed aspects, so a dot
     whose aspect hasn't been captured yet falls back to the aspect-set
     colouring, which can also make a mismatched signal harder to spot.
-14. **Enabling / disabling pathing still freezes the game.** The path-*set*
-    freeze (HTTP thread vs staging lock) is fixed, but toggling `enablePathing`
-    still freezes:
-    - **Disable** (`Settings.FeatureFlags.Draw` → `DeactivatePathingMode`,
-      main/GUI thread): `StagingData.ClearAll()` releases every claimed block
-      (each `SetSignalToStop`), then `SweepSignalsToAutomatic()` runs mode
-      changes on **every** non-distant signal in the world - hundreds of
-      per-signal Unity mutations synchronously in one GUI frame.
-    - **Enable** (`POST /pathing/activate` → `ActivatePathingMode` +
-      `InitializeFromPaths`, marshalled to the main thread): the same full-map
-      sweep in reverse (`SetSignalToStop` on every junction-detected signal).
-    Both sweeps are unthrottled and unbounded (not paced like the 5s
-    `ForceUpdateAllSignalAspects`). Needs batching/pacing the per-signal mode
-    changes (or deferring them across frames). Note: the aspect-change callback
-    previously **flushed the pack table to disk for every single signal** the
-    sweep touched (`RecordPackAspect` → `PackTableStore.Flush`); that I/O storm
-    is gone (`FlushThrottled`, 5s gate + one catch-up write, final flush on
-    teardown), but the per-signal mode/aspect mutations still run in one main
-    thread.
+14. **Enabling / disabling pathing froze the game (fixed).** The path-*set*
+    freeze (HTTP thread vs staging lock) was fixed earlier; the enable/disable
+    toggle froze for a second reason - both `ActivatePathingMode` and
+    `DeactivatePathingMode` swept **every** non-distant signal in the world in a
+    single main-thread frame (hundreds of per-signal mode/aspect mutations, each
+    firing the aspect-changed callback). Two fixes removed it:
+    - the aspect-change callback no longer flushes the pack table to disk per
+      signal (`FlushThrottled`, 5s gate + one catch-up write, final flush on
+      teardown - the on-disk copy lags ≤5s; `/signalpack` reads the live
+      in-memory table);
+    - the full-map sweeps are now **paced across frames** (`PacedSignalSweep`:
+      mutations are collected up front and applied ~24 per frame on the main
+      thread - measured <1s total, no hitch).
+    Distant signals were never part of the freeze: all sweep paths already
+    skipped them, and `SetSignalToStop` now additionally refuses to run on a
+    `Distant` signal outright (they can't hold a stop aspect), so no future call
+    site can force one under Manual control.
 15. **Frontend reload / re-activation drops a path's claimed parts.** When the
     browser reloads (or pathing is re-activated), `POST /pathing/activate` runs
     `StagingData.InitializeFromPaths`, which **clears `_activeBlocks`** and

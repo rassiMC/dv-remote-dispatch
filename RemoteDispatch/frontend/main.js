@@ -2054,30 +2054,14 @@ function setLayoutCancelVisible() {
 	document.body.classList.toggle('sig-layout-editing', layoutEditorKey !== null);
 }
 
-// While an editor is open, the slim sidebar is unusable for wide content — extend
-// it over the map so the grid and the aspect table fit without scrolling.
+// While an editor is open, the slim sidebar is unusable for the wide aspect
+// table — widen it to half the screen (floored so small windows stay usable) so
+// most of the table shows over the map; anything wider still scrolls inside.
 // Pass null (no editor rendered) to restore the normal width.
 function setSidebarWidthForEditing(editorEl) {
 	const sidebarEl = document.getElementById('sidebar');
 	if (!sidebarEl) return;
-	if (!editorEl) {
-		sidebarEl.style.width = '';
-		return;
-	}
-
-	let w = 300;
-	editorEl.querySelectorAll('.sig-layout-grid, table').forEach(el => {
-		if (el.offsetWidth > w) w = el.offsetWidth;
-	});
-	// Pane chrome between the sidebar edge and the content: tab strip (40) + pane
-	// padding (40) + group padding (12) + border (~2), plus a little slack.
-	w += 110;
-
-	const cap = Math.round(window.innerWidth * 0.9);
-	const current = sidebarEl.getBoundingClientRect().width || 460;
-	w = Math.min(w, cap);
-	if (w < current) w = current; // only grow while editing, never shrink below the normal width
-	sidebarEl.style.width = w + 'px';
+	sidebarEl.style.width = editorEl ? 'max(520px, 50vw)' : '';
 }
 
 // Groups live signals by RD type. Each type holds its distinct lamp layouts side by side;

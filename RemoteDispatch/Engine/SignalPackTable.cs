@@ -48,6 +48,21 @@ namespace DvMod.RemoteDispatch
 	}
 
 	/// <summary>
+	/// A remembered "original representation -> new representation" mapping. When a signal's
+	/// lamps/aspects are edited in the frontend, the pre-edit lamp layout is stored as
+	/// OriginalKey (a canonical LampKey signature). Newly discovered signals whose captured
+	/// lamp layout matches OriginalKey get the edited Lamps + Aspects applied automatically.
+	/// Overrides cascade: an original layout that was edited more than once resolves through
+	/// the chain to the newest target (e.g. X-&gt;Y then Y-&gt;Z makes a raw X signal resolve to Z).
+	/// </summary>
+	public class PackOverride
+	{
+		public string OriginalKey { get; set; } = string.Empty;
+		public SignalLamp[] Lamps { get; set; } = Array.Empty<SignalLamp>();
+		public Dictionary<string, SignalAspect> Aspects { get; set; } = new Dictionary<string, SignalAspect>(StringComparer.Ordinal);
+	}
+
+	/// <summary>
 	/// Serializable pack table: the root object persisted as "signalpacks/DVSignalpack-*.json".
 	/// </summary>
 	public class PackTable
@@ -61,6 +76,7 @@ namespace DvMod.RemoteDispatch
 		/// pathing mode blocks a signal. Additive: the base mod ignores this field.
 		/// </summary>
 		public Dictionary<string, string>? StopAspects { get; set; }
+		public List<PackOverride> Overrides { get; set; } = new List<PackOverride>();
 	}
 
 	/// <summary>
@@ -152,11 +168,23 @@ namespace DvMod.RemoteDispatch
 
 				bool changed = false;
 
-				// Only set lamps if the caller supplied them (first time we see the signal).
 				if (lamps != null)
 				{
-					entry.Lamps = lamps;
-					changed = true;
+					// A captured layout that matches a remembered original representation:
+					// apply the edited template so newly discovered signals inherit it.
+					// Overrides cascade: a layout edited more than once resolves to the newest
+					// target (e.g. X->Y then Y->Z makes a raw X signal resolve to Z).
+					if (TryResolveOverride(lamps, out var overrideLamps, out var overrideAspects))
+					{
+						entry.Lamps = (SignalLamp[])overrideLamps!.Clone();
+						changed = true;
+						changed |= MergeAspects(entry, overrideAspects!);
+					}
+					else
+					{
+						entry.Lamps = lamps;
+						changed = true;
+					}
 				}
 
 				if (!entry.Aspects.ContainsKey(aspectId))
@@ -271,6 +299,10 @@ namespace DvMod.RemoteDispatch
 					if (string.IsNullOrEmpty(id) || !s_table.Signals.TryGetValue(id, out var entry)) continue;
 					if (AreSameDefinitions(entry.Lamps, entry.Aspects, lamps, aspects)) continue;
 
+					// Remember the original representation so that any new signal discovered
+					// later with the same lamp layout inherits this edit automatically.
+					RecordOverride(entry.Lamps, lamps, aspects);
+
 					entry.Lamps = lamps;
 					entry.Aspects = new Dictionary<string, SignalAspect>(aspects, StringComparer.Ordinal);
 					changed = true;
@@ -278,6 +310,155 @@ namespace DvMod.RemoteDispatch
 
 				return changed;
 			}
+		}
+
+		/// <summary>
+		/// Canonical signature of a lamp layout, mirroring the frontend's layoutKey
+		/// (Name | Colour | Shape | Grid;...). Used to match "original representations".
+		/// Returns null when there is no meaningful layout to match on.
+		/// </summary>
+		private static string? LampKey(SignalLamp[]? lamps)
+		{
+			if (lamps == null || lamps.Length == 0) return null;
+
+			var parts = new string[lamps.Length];
+			for (int i = 0; i < lamps.Length; i++)
+			{
+				var lamp = lamps[i];
+				var grid = lamp.Grid;
+				var gx = 0;
+				var gy = i;
+				if (grid != null && grid.Length == 2)
+				{
+					gx = grid[0];
+					gy = grid[1];
+				}
+				// Shape normalises the same way the frontend does: only "bar" is special.
+				var shape = string.Equals(lamp.Shape, "bar", StringComparison.OrdinalIgnoreCase) ? "bar" : "circle";
+				parts[i] = $"{lamp.Name}|{lamp.Colour ?? ""}|{shape}|{gx},{gy}";
+			}
+			return string.Join(";", parts);
+		}
+
+		private const int MaxOverrideHops = 64;
+
+		/// <summary>
+		/// Follows the override chain starting from the captured lamp layout. Each override maps an
+		/// original layout to a new one, so a layout edited more than once cascades to the newest
+		/// target (e.g. X-&gt;Y then Y-&gt;Z resolves raw X to Z). Aspects are merged across every hop,
+		/// later edits winning per-aspect. Returns false (with nulls) when no override matches.
+		/// Cycle-safe: each distinct layout key is visited at most once.
+		/// </summary>
+		private static bool TryResolveOverride(SignalLamp[]? lamps, out SignalLamp[]? targetLamps, out IDictionary<string, SignalAspect>? targetAspects)
+		{
+			targetLamps = null;
+			targetAspects = null;
+
+			var current = lamps;
+			var visited = new HashSet<string>(StringComparer.Ordinal);
+
+			while (current != null && visited.Count < MaxOverrideHops)
+			{
+				var key = LampKey(current);
+				if (key == null || !visited.Add(key)) break;
+
+				var match = FindOverrideByKey(key);
+				if (match == null) break;
+
+				targetLamps = match.Lamps;
+				if (targetAspects == null) targetAspects = new Dictionary<string, SignalAspect>(StringComparer.Ordinal);
+				foreach (var kvp in match.Aspects)
+				{
+					targetAspects[kvp.Key] = CloneAspect(kvp.Value);
+				}
+
+				current = match.Lamps;
+			}
+
+			return targetLamps != null;
+		}
+
+		private static PackOverride? FindOverrideByKey(string key)
+		{
+			if (s_table == null || s_table.Overrides == null) return null;
+			foreach (var o in s_table.Overrides)
+			{
+				if (o != null && string.Equals(o.OriginalKey, key, StringComparison.Ordinal))
+					return o;
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// Stores (or replaces) the override template for the given original lamp layout.
+		/// </summary>
+		private static void RecordOverride(SignalLamp[]? originalLamps, SignalLamp[] newLamps, IDictionary<string, SignalAspect> newAspects)
+		{
+			var key = LampKey(originalLamps);
+			if (key == null || s_table == null) return;
+
+			if (s_table.Overrides == null) s_table.Overrides = new List<PackOverride>();
+
+			var existing = s_table.Overrides.Find(o => o != null && string.Equals(o.OriginalKey, key, StringComparison.Ordinal));
+			if (existing != null)
+			{
+				existing.Lamps = newLamps;
+				existing.Aspects = new Dictionary<string, SignalAspect>(newAspects, StringComparer.Ordinal);
+			}
+			else
+			{
+				s_table.Overrides.Add(new PackOverride
+				{
+					OriginalKey = key,
+					Lamps = newLamps,
+					Aspects = new Dictionary<string, SignalAspect>(newAspects, StringComparer.Ordinal),
+				});
+			}
+		}
+
+		/// <summary>
+		/// Merges the override's aspects into the entry, override values winning for the aspects
+		/// it defines while preserving any other aspects already on the entry (e.g. ones discovered
+		/// after the edit). Returns true if any aspect changed.
+		/// </summary>
+		private static bool MergeAspects(SignalEntry entry, IDictionary<string, SignalAspect> from)
+		{
+			bool changed = false;
+			foreach (var kvp in from)
+			{
+				if (entry.Aspects.TryGetValue(kvp.Key, out var existing))
+				{
+					if (!AspectEquals(existing, kvp.Value))
+					{
+						entry.Aspects[kvp.Key] = CloneAspect(kvp.Value);
+						changed = true;
+					}
+				}
+				else
+				{
+					entry.Aspects[kvp.Key] = CloneAspect(kvp.Value);
+					changed = true;
+				}
+			}
+			return changed;
+		}
+
+		private static SignalAspect CloneAspect(SignalAspect a)
+		{
+			return new SignalAspect
+			{
+				DisallowPassing = a.DisallowPassing,
+				Lit = (string[]?)a.Lit?.Clone() ?? Array.Empty<string>(),
+				Blinking = (string[]?)a.Blinking?.Clone() ?? Array.Empty<string>(),
+			};
+		}
+
+		private static bool AspectEquals(SignalAspect? a, SignalAspect? b)
+		{
+			if (a == null || b == null) return a == null && b == null;
+			return a.DisallowPassing == b.DisallowPassing
+				&& AreSameNameArrays(a.Lit, b.Lit)
+				&& AreSameNameArrays(a.Blinking, b.Blinking);
 		}
 
 		private static bool AreSameDefinitions(SignalLamp[]? aLamps, IDictionary<string, SignalAspect>? aAspects, SignalLamp[] bLamps, IDictionary<string, SignalAspect> bAspects)

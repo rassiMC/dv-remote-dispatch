@@ -453,3 +453,128 @@ body.switchboard-active #map {
 .sig-lamp-blinking {
 	animation: sigBlink 0.8s infinite;
 }
+
+/* signal layout editor (sidebar) */
+
+.sig-filter-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin: 10px 0 6px;
+	padding-bottom: 4px;
+	border-bottom: 1px solid #ddd;
+}
+
+.sig-filter-header .sig-filter-divider {
+	margin: 0;
+	padding-bottom: 0;
+	border-bottom: none;
+}
+
+.sig-layout-cancel {
+	font-size: 0.72rem;
+	padding: 3px 8px;
+	border: 1px solid #ccc;
+	border-radius: 3px;
+	background: #fff;
+	cursor: pointer;
+}
+
+.sig-layout-cancel:hover {
+	background: #f0f0f0;
+}
+
+.sig-type-face-clickable {
+	cursor: pointer;
+	border-radius: 4px;
+}
+
+.sig-type-face-clickable:hover {
+	outline: 2px solid #6aa9ff;
+	outline-offset: 1px;
+}
+
+.sig-layout-editor {
+	display: inline-block;
+}
+
+.sig-layout-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 4px;
+}
+
+.sig-layout-title {
+	font-size: 0.72rem;
+	color: #888;
+	margin-right: auto;
+}
+
+.sig-layout-reset,
+.sig-layout-save,
+.sig-layout-done {
+	font-size: 0.72rem;
+	padding: 2px 8px;
+	border: 1px solid #ccc;
+	border-radius: 3px;
+	background: #fff;
+	cursor: pointer;
+}
+
+.sig-layout-reset:hover,
+.sig-layout-save:hover,
+.sig-layout-done:hover {
+	background: #f0f0f0;
+}
+
+.sig-layout-save,
+.sig-layout-done {
+	font-weight: 600;
+}
+
+/* Reset and Save stack vertically in the editor toolbar */
+.sig-layout-buttons {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.sig-layout-grid {
+	position: relative;
+}
+
+.sig-layout-cell {
+	position: absolute;
+	border: 1px dashed #ccc;
+	border-radius: 4px;
+	background: #fff;
+}
+
+.sig-layout-lamp {
+	position: absolute;
+	border-radius: 50%;
+	border: 1.5px solid #333;
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+}
+
+.sig-layout-lamp:hover {
+	box-shadow: 0 0 0 2px #6aa9ff;
+}
+
+.sig-layout-lamp.dragging {
+	cursor: grabbing;
+	z-index: 1;
+	box-shadow: 0 0 0 2px #6aa9ff;
+}
+
+.sig-layout-status {
+	font-size: 0.72rem;
+	color: #c0392b;
+	margin-top: 4px;
+	min-height: 1em;
+}
+

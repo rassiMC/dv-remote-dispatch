@@ -221,6 +221,12 @@ namespace DvMod.RemoteDispatch
 			var url = context.Request.Url;
 			var segments = url.Segments;
 
+			if (segments.Length == 3 && segments[2].TrimEnd('/').Equals("layout", StringComparison.OrdinalIgnoreCase) && context.Request.HttpMethod == "POST")
+			{
+				HandleSignalLayoutRequest(context);
+				return;
+			}
+
 			if (segments.Length < 3 || !segments[2].TrimEnd('/').Equals("control", StringComparison.OrdinalIgnoreCase))
 			{
 				Main.Warning($"Invalid signal control request URL: {url}");
@@ -338,6 +344,113 @@ namespace DvMod.RemoteDispatch
 			}
 
 			RenderEmpty(context, success ? 204 : 400);
+		}
+
+		// POSTs of the sidebar layout editor: body is {"signals": ["id", ...], "layout": {"0": [x, y] | null, ...}}
+		// where "layout" keys are lamp array indices. Applies the custom lamp positions to all listed
+		// signals in the pack table, persists it, and pushes a "signalpack" update to the clients.
+		private static void HandleSignalLayoutRequest(HttpListenerContext context)
+		{
+			Main.DebugLog("/signal/layout endpoint hit");
+			if (!Main.settings.featureFlags.enableSignals)
+			{
+				RenderEmpty(context, 404);
+				return;
+			}
+
+			if (!Main.settings.permissions.HasSignalControlPermission(context.User.Identity.Name))
+			{
+				RenderEmpty(context, 403);
+				return;
+			}
+
+			const int maxBodySize = 65536;
+			const int maxSignals = 512;
+			const int maxLayoutEntries = 4096;
+			const int maxGridExtent = 15;
+
+			try
+			{
+				var bodyText = ReadRequestBody(context.Request.InputStream, maxBodySize);
+				if (string.IsNullOrEmpty(bodyText))
+				{
+					Main.Warning("Signal layout request with empty body");
+					RenderEmpty(context, 400);
+					return;
+				}
+
+				var data = JObject.Parse(bodyText);
+				if (data["signals"] is not JArray signals || data["layout"] is not JObject layout)
+				{
+					Main.Warning("Signal layout request missing 'signals' or 'layout'");
+					RenderEmpty(context, 400);
+					return;
+				}
+
+				var signalIds = new List<string>();
+				foreach (var token in signals)
+				{
+					if (token is not JValue value || value.Type != JTokenType.String)
+						throw new ArgumentException("'signals' entries must be strings");
+					var id = value.ToString();
+					if (string.IsNullOrEmpty(id))
+						throw new ArgumentException("empty signal id in 'signals'");
+					signalIds.Add(id);
+				}
+				if (signalIds.Count == 0 || signalIds.Count > maxSignals)
+					throw new ArgumentException($"unsupported 'signals' count: {signalIds.Count}");
+
+				var positions = new Dictionary<string, int[]?>(StringComparer.Ordinal);
+				foreach (var property in layout.Properties())
+				{
+					if (!int.TryParse(property.Name, out _))
+						throw new ArgumentException($"'layout' keys must be lamp indices, got '{property.Name}'");
+
+					int[]? grid = null;
+					if (property.Value.Type != JTokenType.Null)
+					{
+						if (property.Value is not JArray pair || pair.Count != 2)
+							throw new ArgumentException($"'layout[{property.Name}]' must be [x, y] or null");
+						grid = pair.ToObject<int[]>();
+						if (grid[0] < 0 || grid[1] < 0 || grid[0] > maxGridExtent || grid[1] > maxGridExtent)
+							throw new ArgumentException($"grid coordinates out of range (0..{maxGridExtent})");
+					}
+					positions[property.Name] = grid;
+				}
+				if (positions.Count > maxLayoutEntries)
+					throw new ArgumentException($"too many layout entries: {positions.Count}");
+
+				var changed = PackTableStore.UpdateLayout(signalIds, positions);
+				if (changed)
+				{
+					PackTableStore.Flush();
+					Sessions.AddTag("signalpack");
+				}
+
+				Main.DebugLog($"Signal layout request for {signalIds.Count} signal(s); changed={changed}");
+				RenderEmpty(context, changed ? 204 : 400);
+			}
+			catch (Exception e)
+			{
+				Main.Warning($"Failed to process signal layout request: {e.Message}");
+				RenderEmpty(context, 400);
+			}
+		}
+
+		private static string ReadRequestBody(Stream stream, int maxSize)
+		{
+			using var memoryStream = new MemoryStream();
+			var buffer = new byte[8192];
+			var totalRead = 0;
+			var bytesRead = 0;
+			while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+			{
+				memoryStream.Write(buffer, 0, bytesRead);
+				totalRead += bytesRead;
+				if (totalRead > maxSize)
+					throw new InvalidOperationException("Request body too large");
+			}
+			return Encoding.UTF8.GetString(memoryStream.ToArray());
 		}
 
 		private static async Task HandleUpdatesRequest(HttpListenerContext context)

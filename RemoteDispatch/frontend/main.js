@@ -541,7 +541,7 @@ function updateAllJunctions(states) {
 // signals
 
 const signalMarkers = new Map();
-const signalIconAnchor = [12, 12];
+const signalIconAnchorY = 12; // the anchor x is the face's horizontal centre (computed per icon), y is fixed
 
 // Signal pack table (lamp/aspect layout), served via /signalpack.
 let packTable = { Signals: {} };
@@ -565,6 +565,66 @@ function makeSafeSignalId(id) {
 	return id.replace(/[\.\:\[\]\#\$%\{\}\(\)\*\+\>\s]+/g, '_');
 }
 
+// Signal faces are drawn in a viewBox that wraps the lamps' grid positions as a min-rect:
+// a fixed 10-unit slot per grid cell, with 3-unit padding around the box.
+// The rendered icon is drawn 2× the viewBox, and distant signals render at 75% of normal scale.
+const signalIconMaxScale = 3; // cap: icons won't grow beyond 3× their base size
+const signalRenderScale = 2; // CSS pixels per viewBox unit
+const signalTypeScale = { normal: 1, distant: 0.75 }; // distant renders at 75% of normal
+const signalFacePad = 3; // padding around the face box
+const signalFaceSlot = 10; // viewBox space allocated per grid cell
+const signalFaceDefaultCols = 1;
+const signalFaceDefaultRows = 5; // face used until pack data loads
+// Layout editor: pixel size of a grid cell / gap between cells, and the farthest grid
+// coordinate a lamp may take (must match the server's max grid extent).
+const signalLayoutEditorCell = 30;
+const signalLayoutEditorGap = 4;
+const signalLayoutMaxGrid = 15;
+
+// Grid cell [col, row] for a lamp: the user-edited layout if present, otherwise the
+// default single column laid out in array order.
+function lampGridPos(lamp, index) {
+	if (lamp && Array.isArray(lamp.Grid) && lamp.Grid.length === 2) return lamp.Grid;
+	return [0, index];
+}
+
+// Min-rect face dimensions (viewBox units) around the lamps' grid positions.
+function signalFaceDimensions(lamps) {
+	if (!lamps || !lamps.length) {
+		return {
+			w: signalFaceSlot * signalFaceDefaultCols,
+			h: 2 * signalFacePad + signalFaceSlot * signalFaceDefaultRows,
+			cols: signalFaceDefaultCols,
+			rows: signalFaceDefaultRows,
+		};
+	}
+	let cols = 0, rows = 0;
+	lamps.forEach((lamp, i) => {
+		const [x, y] = lampGridPos(lamp, i);
+		if (x + 1 > cols) cols = x + 1;
+		if (y + 1 > rows) rows = y + 1;
+	});
+	return {
+		w: signalFaceSlot * cols,
+		h: 2 * signalFacePad + signalFaceSlot * rows,
+		cols,
+		rows,
+	};
+}
+
+function getSignalIconSize(type, lamps) {
+	const factor = signalTypeScale[String(type).toLowerCase()] || signalTypeScale.normal;
+	const { w, h } = signalFaceDimensions(lamps);
+	const zoom = map.getZoom();
+	const scale = zoom < initialZoom - 4 ? 1 / (2 ** (initialZoom - 4 - zoom)) : 1;
+	const minScale = 1 / signalIconMaxScale; // floor so they don't vanish entirely
+	const s = Math.max(scale, minScale);
+	return [
+		Math.round(w * signalRenderScale * factor * s),
+		Math.round(h * signalRenderScale * factor * s),
+	];
+}
+
 // Escapes a string for safe embedding in SVG/HTML.
 function escapeXml(s) {
 	return String(s).replace(/[&<>"']/g, c => ({
@@ -582,8 +642,10 @@ function normalizeLampColour(c) {
 }
 
 // Builds a generic lamp-based signal face as an SVG string.
-// Lamps are laid out vertically in the order they appear in the pack entry.
-// The SVG fills whatever box the caller (divIcon iconSize) gives it.
+// Lamps sit on integer grid cells ([col, row]); the face box is the min-rect around them,
+// so empty cells/rows can exist. Lamps without a user layout fall back to the default
+// single column in array order.
+// The SVG fills whatever box the caller (divIcon iconSize / preview wrapper) gives it.
 // When allLit is true, every lamp is shown in its own colour (used for the "none"
 // sidebar preview so lamp colours are visible without any aspect applied).
 function createSignalFaceSvg(entry, aspect, allLit = false) {
@@ -592,19 +654,21 @@ function createSignalFaceSvg(entry, aspect, allLit = false) {
 	const lit = allLit ? lamps.map(lamp => lamp.Name) : (aspectDef ? (aspectDef.Lit || []) : []);
 	const blinking = allLit ? [] : (aspectDef ? (aspectDef.Blinking || []) : []);
 
-	const w = signalFaceWidth, h = signalFaceHeight(lamps);
+	const { w, h } = signalFaceDimensions(lamps);
 	const pad = signalFacePad;
+	const slot = signalFaceSlot;
 	const lampR = 3.2;
-	const gap = lamps.length > 1 ? (h - 2 * pad) / lamps.length : 0;
 
 	let lampsSvg = '';
 	lamps.forEach((lamp, i) => {
-		const y = lamps.length > 1 ? pad + gap * i + gap / 2 : h / 2;
+		const [gx, gy] = lampGridPos(lamp, i);
+		const cx = slot * gx + slot / 2;
+		const cy = pad + slot * gy + slot / 2;
 		const isLampLit = allLit || lit.indexOf(lamp.Name) !== -1;
 		const isBlink = !allLit && blinking.indexOf(lamp.Name) !== -1;
 		const fill = isLampLit ? normalizeLampColour(lamp.Colour) : '#2a2a2a';
 		const cls = isBlink ? 'sig-lamp sig-lamp-blinking' : 'sig-lamp';
-		lampsSvg += `<circle class="${cls}" cx="${w / 2}" cy="${y.toFixed(1)}" r="${lampR}" fill="${escapeXml(fill)}" stroke="#000" stroke-width="0.5"/>`;
+		lampsSvg += `<circle class="${cls}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${lampR}" fill="${escapeXml(fill)}" stroke="#000" stroke-width="0.5"/>`;
 	});
 
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${w} ${h}">
@@ -615,34 +679,10 @@ function createSignalFaceSvg(entry, aspect, allLit = false) {
 
 // Neutral fallback for signals whose pack entry isn't loaded yet.
 function createNeutralSignalSvg() {
-	return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-		<circle cx="8" cy="8" r="6" fill="#3a3a3a" stroke="#555" stroke-width="1"/>
+	const { w, h } = signalFaceDimensions(null);
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">
+		<circle cx="${w / 2}" cy="${h / 2}" r="4.5" fill="#3a3a3a" stroke="#555" stroke-width="1"/>
 	</svg>`;
-}
-
-const signalIconMaxScale = 3; // cap: icons won't grow beyond 3× their base size
-const signalRenderScale = 2; // CSS pixels per viewBox unit
-const signalTypeScale = { normal: 1, distant: 0.75 }; // distant renders at 75% of normal
-const signalFaceWidth = 16; // SVG viewBox width
-const signalFacePad = 3; // padding above/below the lamps
-const signalFaceSlot = 10; // vertical space allocated per lamp
-
-function signalFaceHeight(lamps) {
-	const count = (lamps && lamps.length) ? lamps.length : 5; // default to a 5-lamp face until pack data loads
-	return 2 * signalFacePad + signalFaceSlot * count;
-}
-
-function getSignalIconSize(type, lamps) {
-	const factor = signalTypeScale[String(type).toLowerCase()] || signalTypeScale.normal;
-	const h = signalFaceHeight(lamps);
-	const zoom = map.getZoom();
-	const scale = zoom < initialZoom - 4 ? 1 / (2 ** (initialZoom - 4 - zoom)) : 1;
-	const minScale = 1 / signalIconMaxScale; // floor so they don't vanish entirely
-	const s = Math.max(scale, minScale);
-	return [
-		Math.round(signalFaceWidth * signalRenderScale * factor * s),
-		Math.round(h * signalRenderScale * factor * s),
-	];
 }
 
 function getSignalIcon(aspect, mode, type, entry) {
@@ -653,7 +693,7 @@ function getSignalIcon(aspect, mode, type, entry) {
 		html: html,
 		className: 'signal-divicon',
 		iconSize: iconSize,
-		iconAnchor: signalIconAnchor,
+		iconAnchor: [Math.round(iconSize[0] / 2), signalIconAnchorY],
 	});
 }
 
@@ -1944,13 +1984,38 @@ function applySignalVisibility() {
 	});
 }
 
-// Signature identifying a signal's lamp layout (ordered lamp names + colours).
-// Signals of the same RD type can have different layouts (e.g. 3-lamp vs 4-lamp
-// variants), so this is what distinguishes preview rows within a type.
+// Signature identifying a signal's lamp layout (ordered lamp names + colours + grid
+// positions). Signals of the same RD type can have different layouts (e.g. 3-lamp vs
+// 4-lamp variants, or the same lamps arranged differently), so this is what
+// distinguishes preview rows within a type.
 function layoutKey(entry) {
 	const lamps = (entry && entry.Lamps) ? entry.Lamps : [];
 	if (!lamps.length) return null;
-	return lamps.map(lamp => `${lamp.Name}|${normalizeLampColour(lamp.Colour)}`).join(';');
+	return lamps.map((lamp, i) => {
+		const grid = lampGridPos(lamp, i);
+		return `${lamp.Name}|${normalizeLampColour(lamp.Colour)}|${grid[0]},${grid[1]}`;
+	}).join(';');
+}
+
+// layoutKey of the face whose layout editor is open (null = closed).
+let layoutEditorKey = null;
+
+// Lamp positions of the open editor's group as of when it was opened; the "Cancel
+// edit" button restores this snapshot (and re-saves it if the session changed it).
+let layoutEditorSnapshot = null;
+
+function snapshotLayout(layout) {
+	return {
+		signalIds: layout.signalIds.slice(),
+		map: layoutMapOf(layout.entry.Lamps),
+	};
+}
+
+// The "Cancel edit" button (next to the "Signal types" header) only shows while
+// the layout editor is open.
+function setLayoutCancelVisible() {
+	const btn = document.getElementById('sig-layout-cancel');
+	if (btn) btn.hidden = layoutEditorKey === null;
 }
 
 // Groups live signals by RD type. Each type holds its distinct lamp layouts side by side;
@@ -1960,7 +2025,7 @@ function layoutKey(entry) {
 function collectSignalTypes() {
 	const byType = new Map();
 
-	signalMarkers.forEach(({ type, entry, signalAspects }) => {
+	signalMarkers.forEach(({ type, entry, signalAspects }, signalId) => {
 		if (!type) return;
 		if (!byType.has(type)) byType.set(type, { layouts: new Map(), aspects: new Set() });
 		const group = byType.get(type);
@@ -1972,10 +2037,12 @@ function collectSignalTypes() {
 				packAspects: {},
 				apiAspects: new Set(),
 				signals: 0,
+				signalIds: [],
 			});
 		}
 		const layout = group.layouts.get(key);
 		layout.signals += 1;
+		layout.signalIds.push(signalId);
 
 		if (key && entry.Aspects) {
 			Object.entries(entry.Aspects).forEach(([aspectId, def]) => {
@@ -2010,6 +2077,7 @@ function collectSignalTypes() {
 				aspects: [...layout.apiAspects]
 					.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })),
 				signals: layout.signals,
+				signalIds: layout.signalIds.slice(),
 			});
 		});
 
@@ -2026,13 +2094,15 @@ function collectSignalTypes() {
 // Pixel dimensions for a sidebar preview face, matching the map-icon render scale.
 function previewFaceSize(type, lamps) {
 	const factor = signalTypeScale[String(type).toLowerCase()] || signalTypeScale.normal;
+	const { w, h } = signalFaceDimensions(lamps);
 	return [
-		Math.round(signalFaceWidth * signalRenderScale * factor),
-		Math.round(signalFaceHeight(lamps) * signalRenderScale * factor),
+		Math.round(w * signalRenderScale * factor),
+		Math.round(h * signalRenderScale * factor),
 	];
 }
 
 function renderSignalTypePreviews() {
+	setLayoutCancelVisible();
 	const container = document.getElementById('sig-type-list');
 	if (!container) return;
 
@@ -2052,16 +2122,28 @@ function renderSignalTypePreviews() {
 			: '';
 
 		const faces = group.layouts.map(layout => {
+			const key = layout.hasFace ? layoutKey(layout.entry) : null;
+
+			// The face being edited renders the interactive layout editor instead.
+			if (key && key === layoutEditorKey) {
+				return `
+					<div class="sig-type-item">
+						${renderSignalLayoutEditor(layout)}
+					</div>`;
+			}
+
 			const [w, h] = layout.hasFace ? previewFaceSize(group.type, layout.entry.Lamps) : [0, 0];
 			const face = layout.hasFace
 				? createSignalFaceSvg(layout.entry, null, true) // "none": every lamp lit to show colours
 				: '<div class="sig-type-face-empty">No pack data yet.</div>';
 			const faceStyle = layout.hasFace ? `width:${w}px;height:${h}px` : '';
 			const sub = layout.hasFace ? String(layout.signals) : '';
+			const faceClass = key ? 'sig-type-face sig-type-face-clickable' : 'sig-type-face';
+			const faceTitle = key ? ' title="Click to edit this layout"' : '';
 
 			return `
 				<div class="sig-type-item">
-					<div class="sig-type-face" style="${faceStyle}">${face}</div>
+					<div class="${faceClass}" data-layout="${key ? escapeXml(key) : ''}"${faceTitle} style="${faceStyle}">${face}</div>
 					${sub ? `<div class="sig-type-sub" title="${layout.signals} signal${layout.signals === 1 ? '' : 's'} sharing this layout">${escapeXml(sub)}</div>` : ''}
 				</div>`;
 		}).join('');
@@ -2076,21 +2158,436 @@ function renderSignalTypePreviews() {
 			</div>`;
 	}).join('');
 
+	// Layouts are looked up within their type group (by layout key) so that two types
+	// sharing an identical layout don't get mixed up.
+	const layoutInGroup = (groupEl, key) => {
+		const group = groups[Number(groupEl.dataset.group)];
+		if (!group || !key) return null;
+		return group.layouts.find(l => l.hasFace && layoutKey(l.entry) === key) || null;
+	};
+
 	container.querySelectorAll('.sig-type-select').forEach(select => {
 		select.addEventListener('change', () => {
 			const groupEl = select.closest('.sig-type-group');
 			if (!groupEl) return;
-			const group = groups[Number(groupEl.dataset.group)];
-			if (!group) return;
 			const isNone = select.value === 'none';
 			const aspect = isNone ? null : select.value;
 
-			groupEl.querySelectorAll('.sig-type-face').forEach((faceEl, i) => {
-				const layout = group.layouts[i];
-				if (!layout || !layout.hasFace) return;
+			groupEl.querySelectorAll('.sig-type-face').forEach(faceEl => {
+				const key = faceEl.dataset.layout;
+				const layout = layoutInGroup(groupEl, key);
+				if (!layout || key === layoutEditorKey) return; // editor face renders its own
 				faceEl.innerHTML = createSignalFaceSvg(layout.entry, aspect, isNone);
 			});
 		});
+	});
+
+	container.querySelectorAll('.sig-type-face-clickable').forEach(faceEl => {
+		faceEl.addEventListener('click', () => {
+			const groupEl = faceEl.closest('.sig-type-group');
+			const layout = groupEl ? layoutInGroup(groupEl, faceEl.dataset.layout) : null;
+			layoutEditorKey = faceEl.dataset.layout;
+			layoutEditorSnapshot = layout ? snapshotLayout(layout) : null;
+			renderSignalTypePreviews();
+		});
+	});
+
+	container.querySelectorAll('.sig-layout-editor').forEach(editorEl => {
+		const groupEl = editorEl.closest('.sig-type-group');
+		const layout = groupEl ? layoutInGroup(groupEl, editorEl.dataset.layout) : null;
+		if (!layout) return;
+		const gridEl = editorEl.querySelector('.sig-layout-grid');
+		gridEl.querySelectorAll('.sig-layout-lamp').forEach(lampEl => {
+			wireLampDrag(layout, gridEl, lampEl);
+		});
+		editorEl.querySelector('.sig-layout-done').addEventListener('click', e => {
+			e.stopPropagation();
+			// Done = save any unsaved changes, then close.
+			const map = layoutMapOf(layout.entry.Lamps);
+			const dirty = !layoutEditorSnapshot || !layoutMapsEqual(layoutEditorSnapshot.map, map);
+			closeLayoutEditor();
+			if (dirty && !layoutSaveInFlight) persistSignalLayout(layout.signalIds, map);
+		});
+		editorEl.querySelector('.sig-layout-save').addEventListener('click', e => {
+			e.stopPropagation();
+			saveLayoutSession(layout);
+		});
+		editorEl.querySelector('.sig-layout-reset').addEventListener('click', e => {
+			e.stopPropagation();
+			resetSignalLayout(layout);
+		});
+	});
+}
+
+// Interactive layout editor for a signal face: a min-rect grid of cells (one per integer
+// position) with the lamps drawn on top for dragging. Only one is open at a time
+// (layoutEditorKey).
+function renderSignalLayoutEditor(layout) {
+	const lamps = layout.entry.Lamps;
+	const key = layoutKey(layout.entry);
+
+	let cols = 0, rows = 0;
+	lamps.forEach((lamp, i) => {
+		const [x, y] = lampGridPos(lamp, i);
+		if (x + 1 > cols) cols = x + 1;
+		if (y + 1 > rows) rows = y + 1;
+	});
+	if (!cols) cols = 1;
+	if (!rows) rows = 1;
+
+	const cell = signalLayoutEditorCell;
+	const gap = signalLayoutEditorGap;
+	const pitch = cell + gap;
+	const gridWidth = cols * pitch - gap;
+	const gridHeight = rows * pitch - gap;
+
+	let cellsHtml = '';
+	for (let y = 0; y < rows; y++) {
+		for (let x = 0; x < cols; x++) {
+			cellsHtml += `<div class="sig-layout-cell" data-cell="${x}-${y}" style="left:${x * pitch}px;top:${y * pitch}px;width:${cell}px;height:${cell}px;"></div>`;
+		}
+	}
+
+	const lampSize = 14;
+	const lampsHtml = lamps.map((lamp, i) => {
+		const [x, y] = lampGridPos(lamp, i);
+		const left = x * pitch + (cell - lampSize) / 2;
+		const top = y * pitch + (cell - lampSize) / 2;
+		return `<div class="sig-layout-lamp" data-index="${i}" title="${escapeXml(lamp.Name)}" `
+			+ `style="left:${left}px;top:${top}px;width:${lampSize}px;height:${lampSize}px;background:${escapeXml(normalizeLampColour(lamp.Colour))};"></div>`;
+	}).join('');
+
+	return `
+		<div class="sig-layout-editor" data-layout="${escapeXml(key)}">
+			<div class="sig-layout-toolbar">
+				<span class="sig-layout-title">drag lamps to arrange · ${layout.signals} signal${layout.signals === 1 ? '' : 's'}</span>
+				<span class="sig-layout-buttons">
+					<button type="button" class="sig-layout-reset">Reset</button>
+					<button type="button" class="sig-layout-save">Save</button>
+				</span>
+				<button type="button" class="sig-layout-done">Done</button>
+			</div>
+			<div class="sig-layout-grid" data-cols="${cols}" data-rows="${rows}" style="width:${gridWidth}px;height:${gridHeight}px;">
+				${cellsHtml}
+				${lampsHtml}
+			</div>
+			<div class="sig-layout-status"></div>
+		</div>`;
+}
+
+// Drag behaviour for a lamp in the editor: it follows the pointer, stays clamped inside
+// the grid (growing it by one cell when the pointer passes the right/bottom edge, so a
+// lamp can never be pushed off-screen), and snaps to the nearest cell on release.
+// Drops onto a cell already occupied by another lamp are rejected.
+// All positions are computed in the grid's viewport space (clientX/Y + getBoundingClientRect)
+// so no mix of layout and viewport coordinates can offset the snap.
+function wireLampDrag(layout, gridEl, lampEl) {
+	const lampIndex = Number(lampEl.dataset.index);
+	const cell = signalLayoutEditorCell;
+	const gap = signalLayoutEditorGap;
+	const pitch = cell + gap;
+	const halfCell = cell / 2;
+
+	let curCols = Number(gridEl.dataset.cols) || 1;
+	let curRows = Number(gridEl.dataset.rows) || 1;
+	// Cells built so far (growth only appends the ones that are missing).
+	const builtCells = new Set();
+	gridEl.querySelectorAll('.sig-layout-cell').forEach(c => {
+		if (c.dataset.cell) builtCells.add(c.dataset.cell);
+	});
+
+	const growTo = (newCols, newRows) => {
+		curCols = newCols;
+		curRows = newRows;
+		gridEl.dataset.cols = newCols;
+		gridEl.dataset.rows = newRows;
+		gridEl.style.width = (newCols * pitch - gap) + 'px';
+		gridEl.style.height = (newRows * pitch - gap) + 'px';
+		for (let y = 0; y < newRows; y++) {
+			for (let x = 0; x < newCols; x++) {
+				const tag = x + '-' + y;
+				if (builtCells.has(tag)) continue;
+				builtCells.add(tag);
+				const cEl = document.createElement('div');
+				cEl.className = 'sig-layout-cell';
+				cEl.dataset.cell = tag;
+				cEl.style.left = x * pitch + 'px';
+				cEl.style.top = y * pitch + 'px';
+				cEl.style.width = cell + 'px';
+				cEl.style.height = cell + 'px';
+				gridEl.insertBefore(cEl, lampEl); // keep the dragged lamp on top
+			}
+		}
+	};
+
+	const showOccupiedHint = () => {
+		const statusEl = document.querySelector('#sig-type-list .sig-layout-status');
+		if (statusEl) statusEl.textContent = 'cell already occupied';
+	};
+
+	const clampInt = (v, min, max) => (max < min ? min : Math.max(min, Math.min(v, max)));
+
+	let dragging = false;
+	let grabDx, grabDy;
+
+	lampEl.addEventListener('pointerdown', e => {
+		e.preventDefault();
+		e.stopPropagation();
+		const rect = gridEl.getBoundingClientRect();
+		dragging = true;
+		// Pointer offset from the lamp's centre stays fixed for the whole drag.
+		grabDx = (e.clientX - rect.left) - (lampEl.offsetLeft + lampEl.offsetWidth / 2);
+		grabDy = (e.clientY - rect.top) - (lampEl.offsetTop + lampEl.offsetHeight / 2);
+		lampEl.setPointerCapture(e.pointerId);
+		lampEl.classList.add('dragging');
+	});
+
+	lampEl.addEventListener('pointermove', e => {
+		if (!dragging) return;
+		e.preventDefault();
+		const rect = gridEl.getBoundingClientRect();
+		const pointerX = (e.clientX - rect.left) - grabDx; // lamp centre, in grid px
+		const pointerY = (e.clientY - rect.top) - grabDy;
+
+		// Extend the grid by one cell when the lamp centre passes the last cell's
+		// centre (up to signalLayoutMaxGrid + 1 cells per axis).
+		if (pointerX >= (curCols - 1) * pitch + halfCell && curCols <= signalLayoutMaxGrid)
+			growTo(curCols + 1, curRows);
+		if (pointerY >= (curRows - 1) * pitch + halfCell && curRows <= signalLayoutMaxGrid)
+			growTo(curCols, curRows + 1);
+
+		// Keep the lamp fully inside the grid so it is never hidden behind the map.
+		lampEl.style.left = clampInt(pointerX - halfCell, 0, curCols * pitch - gap - lampEl.offsetWidth) + 'px';
+		lampEl.style.top = clampInt(pointerY - halfCell, 0, curRows * pitch - gap - lampEl.offsetHeight) + 'px';
+	});
+
+	const finish = e => {
+		if (!dragging) return;
+		dragging = false;
+		lampEl.classList.remove('dragging');
+		const rect = gridEl.getBoundingClientRect();
+		const gx = clampInt(Math.round((((e.clientX - rect.left) - grabDx - halfCell)) / pitch), 0, curCols - 1);
+		const gy = clampInt(Math.round((((e.clientY - rect.top) - grabDy - halfCell)) / pitch), 0, curRows - 1);
+
+		const [curX, curY] = lampGridPos(layout.entry.Lamps[lampIndex], lampIndex);
+		if (gx === curX && gy === curY) {
+			// No-op drop: re-render to realign the lamp without bothering the server.
+			renderSignalTypePreviews();
+			return;
+		}
+		for (let i = 0; i < layout.entry.Lamps.length; i++) {
+			if (i === lampIndex) continue;
+			const [ox, oy] = lampGridPos(layout.entry.Lamps[i], i);
+			if (ox === gx && oy === gy) {
+				// Occupied cell: bounce the lamp back to its saved position.
+				renderSignalTypePreviews();
+				showOccupiedHint();
+				return;
+			}
+		}
+		commitLampMove(layout, lampIndex, gx, gy);
+	};
+
+	lampEl.addEventListener('pointerup', finish);
+	lampEl.addEventListener('lostpointercapture', () => {
+		dragging = false;
+		lampEl.classList.remove('dragging');
+	});
+	lampEl.addEventListener('pointercancel', () => {
+		// Abort the drag and re-render to realign the lamp with the saved position.
+		if (!dragging) return;
+		dragging = false;
+		lampEl.classList.remove('dragging');
+		renderSignalTypePreviews();
+	});
+}
+
+// Moves a lamp's grid cell: updates every signal sharing this layout in the local
+// packTable, refreshes the sidebar and map icons. Not saved until Save/Done.
+function commitLampMove(layout, lampIndex, gx, gy) {
+	gx = Math.max(0, Math.min(gx, signalLayoutMaxGrid));
+	gy = Math.max(0, Math.min(gy, signalLayoutMaxGrid));
+
+	const map = layoutMapOf(layout.entry.Lamps);
+	map[lampIndex] = [gx, gy];
+
+	applyLayoutToPackTable(layout, map);
+	layoutEditorKey = layoutKey(layout.entry); // the layout signature changes with it
+	renderSignalTypePreviews();
+	updateSignalIcons(layout.signalIds);
+}
+
+// Clears the custom layout of a whole group (back to the default single column),
+// locally. Not saved until Save/Done.
+function resetSignalLayout(layout) {
+	const map = {};
+	layout.entry.Lamps.forEach((lamp, i) => { map[i] = null; });
+
+	applyLayoutToPackTable(layout, map);
+	layoutEditorKey = layoutKey(layout.entry);
+	renderSignalTypePreviews();
+	updateSignalIcons(layout.signalIds);
+}
+
+// Applies an index-keyed lamp position map (values [x, y] or null) to every signal
+// entry sharing the given layout. Group members are guaranteed to share lamp order.
+function applyLayoutToPackTable(layout, layoutMap) {
+	layout.signalIds.forEach(signalId => {
+		const entry = packTable.Signals[signalId];
+		if (!entry || !Array.isArray(entry.Lamps)) return;
+		Object.keys(layoutMap).forEach(key => {
+			const i = Number(key);
+			if (i >= entry.Lamps.length) return;
+			entry.Lamps[i].Grid = layoutMap[i];
+		});
+	});
+}
+
+// Refreshes the map icons of the given signals after a layout change.
+function updateSignalIcons(signalIds) {
+	signalIds.forEach(signalId => {
+		const state = signalMarkers.get(signalId);
+		if (state) state.marker.setIcon(getSignalIcon(state.aspect, state.mode, state.type, state.entry));
+	});
+}
+
+const sameGridValue = (a, b) => {
+	a = Array.isArray(a) ? a : null;
+	b = Array.isArray(b) ? b : null;
+	return (a === null && b === null) || (a !== null && b !== null && a[0] === b[0] && a[1] === b[1]);
+};
+
+// Full index -> [x, y] | null map from a lamp list (null = default column).
+function layoutMapOf(lamps) {
+	const map = {};
+	lamps.forEach((lamp, i) => {
+		map[i] = (lamp.Grid && lamp.Grid.length === 2) ? [lamp.Grid[0], lamp.Grid[1]] : null;
+	});
+	return map;
+}
+
+// True if two index -> position maps hold the same values.
+function layoutMapsEqual(a, b) {
+	const keys = Object.keys(a);
+	if (keys.length !== Object.keys(b).length) return false;
+	return keys.every(i => sameGridValue(a[i], b[i]));
+}
+
+// A save request is in flight (POST /signal/layout).
+let layoutSaveInFlight = false;
+
+// Saves the session's current positions to the server and moves the "last saved"
+// baseline forward. Stays open; shows a short status hint.
+function saveLayoutSession(layout) {
+	if (layoutSaveInFlight) return;
+	const map = layoutMapOf(layout.entry.Lamps);
+	if (layoutEditorSnapshot && layoutMapsEqual(layoutEditorSnapshot.map, map)) {
+		flashLayoutStatus('everything saved');
+		return;
+	}
+	persistSignalLayout(layout.signalIds, map, () => {
+		layoutEditorSnapshot = snapshotLayout(layout);
+		flashLayoutStatus('saved');
+	});
+}
+
+// Closes the editor without touching the lamp positions.
+function closeLayoutEditor() {
+	layoutEditorKey = null;
+	layoutEditorSnapshot = null;
+	renderSignalTypePreviews();
+}
+
+function flashLayoutStatus(msg) {
+	const statusEl = document.querySelector('#sig-type-list .sig-layout-status');
+	if (statusEl) statusEl.textContent = msg;
+}
+
+// Cancels the current edit session: restores the lamp positions from the last save
+// (or from when the editor was opened). No POST — the server already holds that
+// state, because edits only leave the editor through Save/Done.
+function cancelSignalLayoutEdit() {
+	if (layoutEditorKey === null) return;
+
+	const snapshot = layoutEditorSnapshot;
+	if (snapshot && !layoutSaveInFlight) {
+		const firstEntry = packTable.Signals[snapshot.signalIds[0]];
+		const current = (firstEntry && Array.isArray(firstEntry.Lamps)) ? layoutMapOf(firstEntry.Lamps) : null;
+		if (current && !layoutMapsEqual(snapshot.map, current)) {
+			applyLayoutToPackTable({ signalIds: snapshot.signalIds }, snapshot.map);
+			updateSignalIcons(snapshot.signalIds);
+		}
+	}
+
+	closeLayoutEditor();
+}
+
+// Keeps custom layouts tight: if a signal's fully-placed layout starts below/right of
+// cell [0, 0] (empty first row/column), every lamp is shifted left/up by the offset.
+// Runs every 10 s; skipped while the editor is open so it never re-renders mid-edit.
+function normalizeSignalLayouts() {
+	if (layoutEditorKey !== null) return;
+	const signals = packTable.Signals;
+	if (!signals) return;
+
+	const fixed = [];
+	Object.keys(signals).forEach(signalId => {
+		const entry = signals[signalId];
+		const lamps = (entry && Array.isArray(entry.Lamps)) ? entry.Lamps : [];
+		if (!lamps.length) return;
+
+		const allExplicit = lamps.every(lamp => lamp.Grid && lamp.Grid.length === 2);
+		if (!allExplicit) return;
+
+		let minCol = Infinity, minRow = Infinity;
+		lamps.forEach(lamp => {
+			if (lamp.Grid[0] < minCol) minCol = lamp.Grid[0];
+			if (lamp.Grid[1] < minRow) minRow = lamp.Grid[1];
+		});
+		if (minCol === 0 && minRow === 0) return;
+
+		lamps.forEach(lamp => {
+			lamp.Grid = [lamp.Grid[0] - minCol, lamp.Grid[1] - minRow];
+		});
+		fixed.push(signalId);
+	});
+
+	if (!fixed.length) return;
+
+	renderSignalTypePreviews();
+	updateSignalIcons(fixed);
+	fixed.forEach(signalId => {
+		const lamps = packTable.Signals[signalId].Lamps;
+		const map = {};
+		lamps.forEach((lamp, i) => { map[i] = lamp.Grid || null; });
+		persistSignalLayout([signalId], map);
+	});
+}
+
+// Periodic layout normalization (see normalizeSignalLayouts).
+setInterval(normalizeSignalLayouts, 10000);
+
+// POSTs the layout to the server. On failure the table is re-synced from /signalpack,
+// which re-renders the previews (the editor closes if the saved layout no longer matches).
+// onSuccess runs only for accepted saves; layoutSaveInFlight guards double-saves.
+function persistSignalLayout(signalIds, layoutMap, onSuccess) {
+	layoutSaveInFlight = true;
+	fetch(new URL('/signal/layout', location), {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ signals: signalIds, layout: layoutMap }),
+	}).then(resp => {
+		if (!resp.ok) throw new Error('HTTP ' + resp.status);
+		layoutSaveInFlight = false;
+		if (onSuccess) onSuccess();
+	}).catch(err => {
+		layoutSaveInFlight = false;
+		console.warn('Failed to save signal layout:', err);
+		const statusEl = document.querySelector('#sig-type-list .sig-layout-status');
+		if (statusEl) statusEl.textContent = 'Save failed (' + err.message + ') — reloading from server';
+		fetch(new URL('/signalpack', location))
+			.then(r => r.json())
+			.then(data => refreshPackTable(data));
 	});
 }
 
@@ -2133,7 +2630,10 @@ function buildSignalsSidebar(installed) {
 			</div>
 		</div>
 		<div class="sig-filter-section">
-			<div class="sig-filter-divider">Signal types</div>
+			<div class="sig-filter-header">
+				<div class="sig-filter-divider">Signal types</div>
+				<button type="button" class="sig-layout-cancel" id="sig-layout-cancel" hidden>Cancel edit</button>
+			</div>
 			<div id="sig-type-list"></div>
 		</div>`;
 
@@ -2163,6 +2663,9 @@ function buildSignalsSidebar(installed) {
 		signalVisibility.yards[cb.dataset.yard] = cb.checked;
 		applySignalVisibility();
 	});
+
+	const cancelBtn = content.querySelector('#sig-layout-cancel');
+	cancelBtn.addEventListener('click', () => cancelSignalLayoutEdit());
 }
 
 let signalsInstalled = false;

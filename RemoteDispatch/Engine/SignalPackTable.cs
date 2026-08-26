@@ -14,6 +14,12 @@ namespace DvMod.RemoteDispatch
 		public string Name { get; set; } = string.Empty;
 		public string Colour { get; set; } = string.Empty;
 		public double[]? Position { get; set; }
+
+		/// <summary>
+		/// Optional user-edited grid position <c>[col, row]</c> from the frontend layout editor.
+		/// Null means the lamp uses the default single-column layout (array order).
+		/// </summary>
+		public int[]? Grid { get; set; }
 	}
 
 	/// <summary>
@@ -238,6 +244,50 @@ namespace DvMod.RemoteDispatch
 				Array.Sort(result, StringComparer.Ordinal);
 				return result;
 			}
+		}
+
+		/// <summary>
+		/// Applies user-edited grid positions to the lamps of the listed signals. Layout keys are
+		/// lamp array indices; a null value clears the lamp's position (back to the default column).
+		/// Returns true if the table changed.
+		/// </summary>
+		internal static bool UpdateLayout(IReadOnlyList<string> signalIds, IReadOnlyDictionary<string, int[]?> layout)
+		{
+			if (signalIds == null || signalIds.Count == 0 || layout == null) return false;
+
+			lock (s_lock)
+			{
+				if (s_table == null) return false;
+
+				bool changed = false;
+				foreach (var id in signalIds)
+				{
+					if (string.IsNullOrEmpty(id) || !s_table.Signals.TryGetValue(id, out var entry)) continue;
+					if (entry.Lamps == null) continue;
+
+					foreach (var kvp in layout)
+					{
+						if (!int.TryParse(kvp.Key, out int index) || index < 0 || index >= entry.Lamps.Length) continue;
+						var grid = kvp.Value;
+						if (grid != null && (grid.Length != 2 || grid[0] < 0 || grid[1] < 0)) continue;
+
+						var lamp = entry.Lamps[index];
+						if (lamp == null) continue;
+						if (AreSameGrid(lamp.Grid, grid)) continue;
+
+						lamp.Grid = grid;
+						changed = true;
+					}
+				}
+
+				return changed;
+			}
+		}
+
+		private static bool AreSameGrid(int[]? a, int[]? b)
+		{
+			if (a == null || b == null) return a == null && b == null;
+			return a.Length == b.Length && a[0] == b[0] && a[1] == b[1];
 		}
 
 		/// <summary>

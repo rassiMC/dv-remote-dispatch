@@ -692,14 +692,22 @@ body.switchboard-active #map {
 	z-index: 1;
 }
 
+.sig-lamp-swatch {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	border: 1px solid #999;
+	border-radius: 3px;
+	vertical-align: middle;
+}
+
 .sig-lamp-colour {
-	width: 22px;
-	height: 16px;
-	padding: 1px;
+	font-size: 0.7rem;
+	max-width: 76px;
+	padding: 1px 2px;
 	border: 1px solid #ccc;
 	border-radius: 3px;
 	background: #fff;
-	cursor: pointer;
 	vertical-align: middle;
 }
 
@@ -759,5 +767,11 @@ body.switchboard-active #map {
 
 .sig-lamp-row-new {
 	animation: sigLampRowPulse 0.9s ease 2;
+}
+
+/* While a signal layout editor is open its content can spill past the side pane —
+   keep the whole sidebar above the Leaflet map panes. */
+body.sig-layout-editing #sidebar {
+	z-index: 1500;
 }
 

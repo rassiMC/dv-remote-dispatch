@@ -651,6 +651,23 @@ function normalizeLampColour(c) {
 	return s;
 }
 
+// All unique lamp colours currently in the pack table (as "#RRGGBB", sorted) —
+// the options offered by the per-lamp colour dropdown.
+function collectPackColours() {
+	const set = new Set();
+	const signals = packTable.Signals;
+	if (signals) {
+		Object.keys(signals).forEach(signalId => {
+			const entry = signals[signalId];
+			if (!entry || !Array.isArray(entry.Lamps)) return;
+			entry.Lamps.forEach(lamp => {
+				if (lamp && lamp.Colour) set.add(normalizeLampColour(lamp.Colour));
+			});
+		});
+	}
+	return [...set].sort();
+}
+
 // Builds a generic lamp-based signal face as an SVG string.
 // Lamps sit on integer grid cells ([col, row]); the face box is the min-rect around them,
 // so empty cells/rows can exist. Lamps without a user layout fall back to the default
@@ -2029,10 +2046,12 @@ function snapshotLayout(layout) {
 }
 
 // The "Cancel edit" button (next to the "Signal types" header) only shows while
-// the layout editor is open.
+// the layout editor is open. The body class keeps the whole sidebar above the
+// Leaflet map panes while editor content overflows the side pane.
 function setLayoutCancelVisible() {
 	const btn = document.getElementById('sig-layout-cancel');
 	if (btn) btn.hidden = layoutEditorKey === null;
+	document.body.classList.toggle('sig-layout-editing', layoutEditorKey !== null);
 }
 
 // Groups live signals by RD type. Each type holds its distinct lamp layouts side by side;
@@ -2248,12 +2267,10 @@ function renderSignalTypePreviews() {
 					setAspectLampState(layout, cellEl.dataset.aspect, lamp, cycle[lampAspectState(lamp, aspectDef)]);
 				});
 			});
-			matrixEl.querySelectorAll('.sig-lamp-colour').forEach(input => {
-				const idx = Number(input.dataset.lamp);
-				// Live repaint while the picker is open; full re-render once it commits.
-				input.addEventListener('input', e => setLampColour(layout, idx, e.target.value, false));
-				input.addEventListener('change', e => setLampColour(layout, idx, e.target.value, true));
-			});
+		matrixEl.querySelectorAll('.sig-lamp-colour').forEach(selectEl => {
+			const idx = Number(selectEl.dataset.lamp);
+			selectEl.addEventListener('change', e => setLampColour(layout, idx, e.target.value));
+		});
 			matrixEl.querySelectorAll('.sig-lamp-remove').forEach(btn => {
 				btn.addEventListener('click', e => {
 					e.stopPropagation();
@@ -2353,9 +2370,16 @@ function renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize) 
 		`<th title="${escapeXml(id)}">${escapeXml(id)}</th>`
 	).join('');
 
+	// Every colour that exists in the pack, offered by the per-lamp dropdown.
+	const packColours = collectPackColours();
+
 	const rowsHtml = lamps.map((lamp, i) => {
 		const isBar = lampShape(lamp) === 'bar';
 		const swatch = normalizeLampColour(lamp.Colour);
+		const colours = packColours.indexOf(swatch) !== -1 ? packColours : [swatch, ...packColours];
+		const colourOptions = colours.map(c =>
+			`<option value="${escapeXml(c)}"${c === swatch ? ' selected' : ''}>${escapeXml(c)}</option>`
+		).join('');
 		const cellsHtml = aspects.map(id => {
 			const aspectDef = layout.entry.Aspects ? layout.entry.Aspects[id] : null;
 			const state = lampAspectState(lamp, aspectDef);
@@ -2370,7 +2394,8 @@ function renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize) 
 		return `
 			<tr class="sig-lamp-row${newRow}">
 				<td class="sig-lamp-col">
-					<input type="color" class="sig-lamp-colour" value="${escapeXml(swatch)}" data-lamp="${i}" title="colour of ${escapeXml(lamp.Name)}">
+					<span class="sig-lamp-swatch" style="background:${escapeXml(swatch)};" title="current colour ${escapeXml(swatch)}"></span>
+					<select class="sig-lamp-colour" data-lamp="${i}" title="set colour of ${escapeXml(lamp.Name)}">${colourOptions}</select>
 					<span class="sig-lamp-name" title="${escapeXml(lamp.Name)}">${escapeXml(lamp.Name)}</span>
 					${shapeMark}
 					<button type="button" class="sig-lamp-remove" data-lamp="${i}" title="remove ${escapeXml(lamp.Name)}">×</button>
@@ -2753,10 +2778,9 @@ function setAspectLampState(layout, aspectId, lamp, state) {
 	renderSignalTypePreviews();
 }
 
-// Sets a lamp's colour on every group member. With fullRender it re-keys the open
-// editor (colour is part of layoutKey) and re-renders; without, it repaints only the
-// visuals so a colour-picker stays open while the user is dragging inside it.
-function setLampColour(layout, lampIndex, hex, fullRender) {
+// Sets a lamp's colour on every group member, re-keys the open editor (colour is
+// part of layoutKey) and re-renders sidebar + map icons.
+function setLampColour(layout, lampIndex, hex) {
 	const h = String(hex).replace('#', '').toUpperCase();
 	const colour = (h.length === 6 || h.length === 8) ? h : null;
 	if (!colour) return;
@@ -2768,20 +2792,8 @@ function setLampColour(layout, lampIndex, hex, fullRender) {
 		if (lamp) lamp.Colour = colour;
 	});
 
-	if (fullRender) {
-		layoutEditorKey = layoutKey(layout.entry);
-		renderSignalTypePreviews();
-		updateSignalIcons(layout.signalIds);
-		return;
-	}
-
-	const css = normalizeLampColour(colour);
-	const gridLamp = document.querySelector('#sig-type-list .sig-layout-grid .sig-layout-lamp[data-index="' + lampIndex + '"]');
-	if (gridLamp) gridLamp.style.background = css;
-	document.querySelectorAll('#sig-type-list .sig-aspect-cell[data-lamp="' + lampIndex + '"]').forEach(cellEl => {
-		if (cellEl.classList.contains('sig-aspect-on') || cellEl.classList.contains('sig-aspect-blink'))
-			cellEl.style.background = css;
-	});
+	layoutEditorKey = layoutKey(layout.entry);
+	renderSignalTypePreviews();
 	updateSignalIcons(layout.signalIds);
 }
 

@@ -670,6 +670,10 @@ body.switchboard-active #map {
 .sig-layout-matrix {
 	border-collapse: collapse;
 	font-size: 0.72rem;
+	/* Content width, never stretched into the (old, narrow) wrap: the sidebar sizes
+	   itself to this in setSidebarWidthForEditing. */
+	width: fit-content;
+	max-width: none;
 }
 
 .sig-layout-matrix th,

@@ -2069,7 +2069,9 @@ function setSidebarWidthForEditing(editorEl) {
 	editorEl.querySelectorAll('.sig-layout-grid, table').forEach(el => {
 		if (el.offsetWidth > w) w = el.offsetWidth;
 	});
-	w += 80; // pane + group padding and slack
+	// Pane chrome between the sidebar edge and the content: tab strip (40) + pane
+	// padding (40) + group padding (12) + border (~2), plus a little slack.
+	w += 110;
 
 	const cap = Math.round(window.innerWidth * 0.9);
 	const current = sidebarEl.getBoundingClientRect().width || 460;
@@ -2176,10 +2178,6 @@ function renderSignalTypePreviews() {
 		return;
 	}
 
-	// Usable width for the open editor: its grid/matrix scroll inside it instead of
-	// overflowing the (clipping) sidebar pane.
-	const availWidth = container.clientWidth || 400;
-
 	container.innerHTML = groups.map((group, groupIndex) => {
 		const hasData = group.layouts.some(l => l.hasFace);
 		const options = hasData
@@ -2196,7 +2194,7 @@ function renderSignalTypePreviews() {
 			if (key && key === layoutEditorKey) {
 				return `
 					<div class="sig-type-item">
-						${renderSignalLayoutEditor(layout, availWidth)}
+						${renderSignalLayoutEditor(layout)}
 					</div>`;
 			}
 
@@ -2319,12 +2317,9 @@ function renderSignalTypePreviews() {
 // Interactive layout editor for a signal face: a min-rect grid of cells (one per integer
 // position) with the lamps drawn on top for dragging. Only one is open at a time
 // (layoutEditorKey).
-function renderSignalLayoutEditor(layout, availWidth = 400) {
+function renderSignalLayoutEditor(layout) {
 	const lamps = layout.entry.Lamps;
 	const key = layoutKey(layout.entry);
-
-	// Keep the editor inside the sidebar pane: anything wider scrolls horizontally.
-	const wrapMax = Math.max(120, availWidth - 24);
 
 	let cols = 0, rows = 0;
 	lamps.forEach((lamp, i) => {
@@ -2373,7 +2368,7 @@ function renderSignalLayoutEditor(layout, availWidth = 400) {
 			</div>
 		</div>`;
 
-	const matrixHtml = renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize, wrapMax);
+	const matrixHtml = renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize);
 
 	return `
 		<div class="sig-layout-editor" data-layout="${escapeXml(key)}">
@@ -2386,7 +2381,7 @@ function renderSignalLayoutEditor(layout, availWidth = 400) {
 				<button type="button" class="sig-layout-done">Done</button>
 			</div>
 			${paletteHtml}
-			<div class="sig-layout-scroll" style="max-width:${wrapMax}px;">
+			<div class="sig-layout-scroll">
 				<div class="sig-layout-grid" data-cols="${cols}" data-rows="${rows}" style="width:${gridWidth}px;height:${gridHeight}px;">
 					${cellsHtml}
 					${lampsHtml}
@@ -2400,7 +2395,7 @@ function renderSignalLayoutEditor(layout, availWidth = 400) {
 // The aspect × lamp table: aspects across the top, lamps down the side. Each row has a
 // colour swatch and a remove button; each cell is the lamp's state in that aspect
 // (off / on / blinking, cycled by clicking). Rendered below the editor grid.
-function renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize, wrapMax) {
+function renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize) {
 	const lamps = layout.entry.Lamps;
 	if (!lamps.length) return '';
 	const aspects = (layout.aspects || []).filter(id => id && id !== 'OFF');
@@ -2445,7 +2440,7 @@ function renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize, 
 	}).join('');
 
 	return `
-		<div class="sig-layout-matrix-wrap" style="max-width:${wrapMax}px;">
+		<div class="sig-layout-matrix-wrap">
 			<div class="sig-layout-matrix-title">aspects × lamps (click a cell: off → on → blink)</div>
 			<table class="sig-layout-matrix">
 				<thead><tr><th class="sig-lamp-col">lamp</th>${headHtml}</tr></thead>

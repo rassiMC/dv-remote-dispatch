@@ -71,9 +71,12 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 - Direct block occupancy.
 - Switch → in-game junction mapping (single-track and DoubleTrack).
 - Server-side path CRUD and the staging/claim engine.
-- Clean pathing enable/disable: toggling `enablePathing` off releases claims and
-  reverts all guard signals to Automatic; the map ⇄ switchboard view toggle keeps
-  active pathing running and server-synced in the background.
+- Clean pathing enable/disable **state handling**: toggling `enablePathing` off
+  releases claims and reverts all guard signals to Automatic; the map ⇄
+  switchboard view toggle keeps active pathing running and server-synced in the
+  background. (Note: the enable/disable *sweep itself still freezes the game* -
+  every non-distant signal is mutated on the main thread in one frame; see
+  CURRENT-STATE item 14. The teardown logic is clean, the performance is not.)
 - Block colouring unified: occupied always reads as occupied regardless of path
   membership (single-source `resolveBlockColor` table; see §2a). The GF
   mapping fix and the crossover leg-swap fixes are done too.
@@ -85,6 +88,11 @@ A dispatcher looking at the switchboard should be able to, at a glance:
    opposing/upcoming traffic on a shared span, backing off and retrying).
    Live *resolution* of conflicts remains on hold; validate the prevention
    behaviour in real multi-train use before release.
+   **Known hole in prevention**: the *initial* claim of a path that faces
+   opposing traffic still claims past it - `TryClaimFrom`'s Case 2 branch
+   (`opposingPaths.Count > 0`) claims the single next block without the
+   `CalcRange` conflict walk (CURRENT-STATE item 16). Fix intent: route Case 2
+   through the same range/opposing gating as Case 1.
 2. ~~**Occupied-block shortcut path win** (route-seeking)~~ - **resolved**: the
    switchboard route search now uses a **two-tier Dijkstra** in
    `PathingController.computeBlockPath` / `_ensurePathTree`:
@@ -110,7 +118,10 @@ A dispatcher looking at the switchboard should be able to, at a glance:
    lookahead window on the next tick - it seeds only the start block and arms
    the full 20s retry interval first. Residual: a train moving into a still-
    unclaimed block (before the seed window extends) stalls the path
-   deliberately - the dispatcher can delete/recreate it.
+   deliberately - the dispatcher can delete/recreate it. **Known downside of the
+   restore fix**: `InitializeFromPaths` clears `_activeBlocks`, so a frontend
+   reload / re-activation *drops every previously claimed block* and they only
+   regrow on the auto-claim cadence afterwards (CURRENT-STATE item 15).
 4. **Path creation claims one block via an ad-hoc path** - `PathingData.AddPath`
    seeds the new path by calling `StagingData.AddPath` (StagingData.cs:83-106),
    which claims the first block directly through a private **direct** call to
@@ -125,9 +136,11 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 
 ### On hold / later
 - Full UI polish (WIP but not release-blocking).
-- **HB Bravo Yard misdrawn switches**: in both the single-track and DoubleTrack
-  layouts, some switches in HB Bravo Yard are drawn incorrectly. Cosmetic
-  layout-data bug; not needed before the upcoming release.
+- **HB Bravo Yard misdrawn switches**: in the single-track layout, the **Bravo
+  Yard section is still misplaced** and needs a **manual** fix in the layout
+  file (`ST_2.1-hotfix.json`); some switches in Bravo Yard are also drawn
+  incorrectly in the DoubleTrack layout. Cosmetic layout-data bug; not needed
+  before the upcoming release.
 - A **switchboard legend**: a visible colour key for block states
   (clear/path/occupied) and the per-path colour model. The block colouring
   scheme itself is defined and implemented (see §2a), but a legend needs
@@ -167,7 +180,12 @@ on the board.
 ## 4. Roadmap direction
 
 1. **Ship** the release: fix the blockers above, keep pathing conflict-free by
-   prevention, disable Hardcore mode.
+   prevention, disable Hardcore mode. Before shipping: verify **parity with
+   upstream's signal-integration work** (still in flux upstream - frequent
+   progress checks + parity merges, CURRENT-STATE release blocker #4) and run
+   **exhaustive testing across all currently available signal packs**
+   (CURRENT-STATE release blocker #5), including DoubleTrack where the signal
+   flip interaction is suspected.
 2. **Make the switchboard layout an asset.** Move the anchor (and, eventually,
    more mapping metadata) *into the layout file*, so community members can
    author and upload their own switchboard layouts without code changes. Layouts

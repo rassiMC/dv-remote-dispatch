@@ -1,10 +1,10 @@
 # Remote Dispatch - Current State
 
 This document describes **what the codebase actually does right now** (the "is"),
-based on the local branch - 51 commits ahead of upstream `trunk` (1.7.0). It is a
+based on the local branch - 90 commits ahead of upstream `trunk` (1.7.0). It is a
 snapshot, not a plan. For intended direction, see `docs/VISION.md` (if present).
 
-- Branch: `trunk`, 51 commits ahead of `origin/trunk` (merge-base `f4c3f21`, "publish 1.7.0")
+- Branch: `trunk`, 90 commits ahead of `origin/trunk` (merge-base `f4c3f21`, "publish 1.7.0")
 - Upstream: https://github.com/domroutley/dv-remote-dispatch
 - Local remotes: `origin` (domroutley), `fork` (rassiMC)
 
@@ -97,7 +97,7 @@ RemoteDispatch/
 
 RemoteDispatch.Signals/      # separate DLL (NEW Signals mod: Signals.Game, no API)
 ├── Bootstrap.cs            # public static API surface (Initialize/Teardown/...)
-├── SignalsBridge.cs        # subscribes to SignalManager/Signal events, Signal.Name keys
+├── SignalsBridge.cs        # subscribes to SignalManager/Signal events, registry Signal.Id keys
 └── LoggingReturn.cs        # 3 logging callbacks forwarded from main mod
 
 RemoteDispatch.SignalsMP/   # separate DLL (OLD Signals mod forks: Signals.API)
@@ -212,22 +212,29 @@ RemoteDispatch (Shims/SignalsShim)
 - New-fork `SignalsBridge.cs` instead subscribes to the `SignalManager` static
   events (`AspectChanged`, `OperationModeChanged`, `OverrideChanged`) plus per-`Signal`
   events, and drives a throttled `Signal.UpdateAspect(false)` sweep for freshness.
-  Signal keys are `Signal.Name` (the new mod's `Signal.Id` is an int registry key,
-  not a stable public id). `SignalOperationMode` is folded back to the legacy
+  New-fork signal keys are the numeric **registry `Signal.Id`** (parity with
+  upstream `b230c83`): entry signals often share display names like "A"/"B"
+  across yards, and name-keying silently dropped them from `/signals`. The
+  display name is now a separate `Name` projection field (also carried through
+  `MinimalSignalData`, alongside `YardId`), which the frontend uses for marker
+  titles/popups; `-mp` signal ids are unchanged (name-embedded). Signal ids are
+  **per-run, not persistent** - `signalpacks/*.json` tables are keyed by the
+  numeric id from the current session.
+  `SignalOperationMode` is folded back to the legacy
   `Manual`/`Automatic` strings that the frontend and pathing code expect, and the
   new richer `SignalType` is folded back to the old `Mainline/IntoYard/Shunting/
   Distant/Other` names. Direct occupancy uses
   `RailTrackOnTrackBogiesExtensions.BogiesOnTrack` (public Assembly-CSharp helper
   the new mod's internal `HasBogies` wraps).
-  - **Direction/junction are derived from controller data, not signal names.**
+  - **Direction is derived from the junction controller, not signal names.**
     The old fork's names carried a `{junctionId}:F/:B1/:B2` suffix that encoded
-    junction + facing; the new fork's `Signal.Name` does not. The bridge therefore
-    reads `BasicSignalController.PlacementInfo.Direction` (`TrackDirection.Out/In`)
-    for direction and `BasicSignalController.GroupJunction` for the owning junction
-    on **every** controller (the junction's Out signal is a `JunctionSignalController`,
-    while the In/branch signals are plain `TrackSignalController`s in the group's
-    `BranchSignals` - the old `signal.Controller == junctionController` cast only
-    matched the Out one). For In signals the bridge additionally emits
+    junction + facing; the new fork's `Signal.Name` does not. The bridge casts
+    each controller to a `JunctionSignalController` when present and treats a
+    signal as `Out` when `signal.Controller == junctionController`, else `In`
+    (upstream `GetDirection`); a name-suffix heuristic runs as a fallback.
+    The owning junction is read off `controller.GroupJunction` on **every**
+    controller so In/branch signals still carry a `JunctionId` (the switchboard
+    depends on this), and for In signals the bridge additionally emits
     `RequiredBranch` (0 = left, 1 = right) from the controller's index in
     `JunctionSignalGroup.BranchSignals`, which the frontend uses to assign
     `LeftIn`/`RightIn`.
@@ -338,6 +345,11 @@ branch-entry ("In") signals can be attributed to a junction.
   It is called when the `enablePathing` flag is toggled off (on the main thread)
   and on mod disable. `RevertRouteSignals` / `ClearRouteSignals` remain as
   per-path teardown helpers.
+  > **Known freeze (see §7 #14):** both `ActivatePathingMode()` and
+  > `DeactivatePathingMode()` sweep *every* non-distant signal in the world on
+  > the main thread, synchronously, in a single frame - this is what makes
+  > toggling `enablePathing` freeze the game. The teardown is correct in state,
+  > not in performance.
 
 ---
 
@@ -544,12 +556,13 @@ public surface:
   installed `DVSignals` mod folder). Its `SignalsBridge`:
   - Subscribes to `SignalManager` static events (`AspectChanged`,
     `OperationModeChanged`, `OverrideChanged`) and per-`Signal` events.
-  - Keys everything by `Signal.Name` (the new mod's `Signal.Id` is an int
-    registry key, not a string id).
-  - Derives direction/junction from the controller's placement data
-    (`PlacementInfo.Direction`, `GroupJunction`) and the In-signal branch from
-    the group's `BranchSignals` ordering (emitted as `RequiredBranch`) - no
-    name-suffix parsing. See §4.2.
+  - Keys everything by the numeric `Signal.Id` registry key (parity with
+    upstream `b230c83`); the display name is carried as a separate `Name`
+    field, as is `YardId`. See §4.2.
+  - Derives direction from a junction-controller comparison (upstream
+    `GetDirection`), junction from `GroupJunction`, and the In-signal branch
+    from the group's `BranchSignals` ordering (emitted as `RequiredBranch`).
+    A name-suffix heuristic is the fallback. See §4.2.
   - Guards `SetSignalAspect`/`SetSignalMode` against off-main-thread calls.
   - Folds `SignalOperationMode` back to `Manual`/`Automatic` and the richer
     `SignalType` back to the legacy `Mainline/IntoYard/Shunting/Distant/Other`.
@@ -631,14 +644,58 @@ Derived from reading the code; not a plan. The most fragile points:
     seed claim skips the opposing/upcoming-traffic checks the rest of the engine
     applies. (VISION blocker #4; fix intent: seed through the same claim entry
     point the engine uses.)
-13. **Some signals are mapped to the wrong spot in the switchboard**: a small
-    number of signal dots land on the wrong switch/port. Direction + In-branch
-    come from the controller's placement data (`PlacementInfo.Direction`,
-    `GroupJunction`, `RequiredBranch` - see §4.2), but for a few signals the
-    branch/port attribution is off, so their dot appears on a neighbouring switch
-    or the wrong port. The `/signalpack` lamp table is built lazily from observed
-    aspects, so a dot whose aspect hasn't been captured yet falls back to the
-    aspect-set colouring, which can also make a mismatched signal harder to spot.
+13. **Some signals are mapped to the wrong spot / wrong side in the switchboard**:
+    a small number of signal dots land on the wrong switch/port, and some are
+    mapped to the **wrong side of their switch** (an `Out` vs `In` swap).
+    (The "missing entirely" part is gone: name-keyed signals collided across
+    yards and were dropped - now keyed by unique registry `Signal.Id`, see §4.2.)
+    For the residual misplaced dots, two suspects are open:
+    - **DoubleTrack + Signals flip cancellation** (maintainer hypothesis,
+      unconfirmed): the DoubleTrack mod and the Signals mod each mirror/flip
+      signals on the second track, and the two flips cancel each other out for
+      a subset of signals, leaving them with an inverted In/Out classification
+      before RD ever reads them. Needs investigation against both mods'
+      signal-placement behaviour.
+    - The In/Out classification now comes from the junction-controller
+      comparison (upstream `GetDirection`, see §4.2); signals whose controller
+      isn't part of a junction group fall back to a name-suffix heuristic and
+      then a blanket "Out", so a mis-parented controller yields a wrong-side dot.
+    The `/signalpack` lamp table is built lazily from observed aspects, so a dot
+    whose aspect hasn't been captured yet falls back to the aspect-set
+    colouring, which can also make a mismatched signal harder to spot.
+14. **Enabling / disabling pathing still freezes the game.** The path-*set*
+    freeze (HTTP thread vs staging lock) is fixed, but toggling `enablePathing`
+    still freezes:
+    - **Disable** (`Settings.FeatureFlags.Draw` → `DeactivatePathingMode`,
+      main/GUI thread): `StagingData.ClearAll()` releases every claimed block
+      (each `SetSignalToStop`), then `SweepSignalsToAutomatic()` runs mode
+      changes on **every** non-distant signal in the world - hundreds of
+      per-signal Unity mutations synchronously in one GUI frame.
+    - **Enable** (`POST /pathing/activate` → `ActivatePathingMode` +
+      `InitializeFromPaths`, marshalled to the main thread): the same full-map
+      sweep in reverse (`SetSignalToStop` on every junction-detected signal).
+    Both sweeps are unthrottled and unbounded (not paced like the 5s
+    `ForceUpdateAllSignalAspects`). Needs batching/pacing the per-signal mode
+    changes (or deferring them across frames).
+15. **Frontend reload / re-activation drops a path's claimed parts.** When the
+    browser reloads (or pathing is re-activated), `POST /pathing/activate` runs
+    `StagingData.InitializeFromPaths`, which **clears `_activeBlocks`** and
+    re-seeds each path with only its start block claimed, deferring the first
+    extension by the full 20s retry interval. So any blocks that were already
+    claimed before the reload are released and only re-grown afterwards at the
+    auto-claim cadence - a reload never restores the live claimed window. (This
+    is the flip side of the "restored paths no longer blast the lookahead" fix
+    in item 10 / VISION blocker #3; the claims themselves are still not
+    persisted/restored.)
+16. **Initial claiming for paths with opposing traffic is broken.** The first
+    automatic extension of a newly created path that faces opposing traffic
+    claims incorrectly: in `StagingData.TryClaimFrom` the **Case 2** branch
+    (`opposingPaths.Count > 0`, StagingData.cs:527-536) claims the single next
+    block `b2` unconditionally (only checking it isn't active/occupied) instead
+    of running the `CalcRange`/conflict walk the Case 1 (`newPaths`) branch
+    uses. So on the very first extension a path can claim into a section that
+    opposing traffic should still hold. Fix intent: make the advancing function's
+    Case 2 path go through the same range/opposing-traffic gating as Case 1.
 
 ### Release blockers (per maintainer, April 2026)
 
@@ -650,10 +707,24 @@ they are fair game for agent help:
    "Resolved" note below).
 2. **Path conflicts**: multi-train handling has no complete solution. For the
    upcoming release the plan is to *prevent* conflicts outright rather than
-   resolve them live, to avoid issues.
+   resolve them live, to avoid issues. The **initial-claim Case 2 bug** (item 16)
+   is a hole in the prevention: a new path's first extension can claim past
+   opposing traffic. See VISION blocker #1/#4.
 3. A **new DoubleTrack mod version** is planned; it will need a new
    switchboard layout, but work can only start once the scope of that release
    is known (coordinated with the maintainer).
+4. **Upstream signal-integration work is not finished.** Upstream
+   (domroutley/dv-remote-dispatch) is still actively merging Signals work, and
+   this fork's signal handling (bridges, `RequiredBranch`, pack capture,
+   `/signalpack`) must stay in parity with it. Frequent checks of upstream
+   progress and **parity merges** are required before release - do not assume
+   the 1.7.0 merge-base is the final signal surface.
+5. **Exhaustive testing of all currently available signal packs** is required
+   before release: default pack plus every custom pack this fork should
+   support, covering lamp capture (`/signalpack`), lit-lamp dot colouring,
+   per-type stop-aspect configuration (Settings stop-aspect rows), and the
+   pathing-mode sweeps - especially on DoubleTrack where the signal flip
+   interaction (item 13) is suspected.
 
 > Resolved: block colouring is unified. `TrackRenderer.resolveBlockColor` is
 > now the single source of truth for block colours. Each locked path gets a
@@ -664,10 +735,13 @@ they are fair game for agent help:
 > locked-path colouring now flows through `resolveBlockColor`, and the sidebar
 > path chips use the same result.
 
-> Resolved: pathing disable/re-enable is now a clean operation
-> (`PathingActivation.DeactivatePathingMode()`), and the map ⇄ switchboard view
-> toggle no longer tears down active pathing - it keeps running in the
-> background. Corresponding VISION blockers removed.
+> Resolved: pathing disable/re-enable is now a **clean operation** from a
+> state/signal standpoint (`PathingActivation.DeactivatePathingMode()`), and the
+> map ⇄ switchboard view toggle no longer tears down active pathing - it keeps
+> running in the background. Corresponding VISION blockers removed. **However,
+> the enable/disable toggle still freezes the game** because both activation and
+> deactivation sweep every non-distant signal on the main thread (see known
+> limit #14); the "clean" here refers to signal-state teardown, not performance.
 >
 > Resolved: the junction that broke a station's switch mapping in both
 > single-track and DoubleTrack (GF) is fixed. `BuildTrackGraph`/`TraceToJunctions`
@@ -692,12 +766,20 @@ they are fair game for agent help:
 > Resolved: with the new Signals fork, signal names stopped carrying the old
 > `{junctionId}:F/:B1/:B2` suffix, so `createSwitchSignals` could no longer
 > attach most signals to their junction (direction/junction were parsed from the
-> name). The new-fork bridge now derives direction from
-> `BasicSignalController.PlacementInfo.Direction`, the owning junction from
-> `GroupJunction`, and the In-signal left/right port from `RequiredBranch` (the
-> controller's index in the group's `BranchSignals`), surfaced through
-> `MinimalSignalData.RequiredBranch`. The frontend keys off those fields with the
-> old name-suffix parse kept only as an `-mp` fallback. See §4.2.
+> name). The new-fork bridge now derives direction from a junction-controller
+> comparison (`signal.Controller == junctionController` = Out, else In - the
+> upstream `GetDirection`, with a name-suffix heuristic only as fallback), the
+> owning junction from `GroupJunction`, and the In-signal left/right port from
+> `RequiredBranch` (the controller's index in the group's `BranchSignals`),
+> all surfaced through `MinimalSignalData`. The frontend keys off those fields
+> with the old name-suffix parse kept only as an `-mp` fallback. See §4.2.
+>
+> Resolved: new-fork signals were previously keyed by `Signal.Name`, so
+> identically-named entry signals across yards (e.g. "A"/"B") overwrote each
+> other in the `/signals` dictionary and some were missing from the board
+> entirely. Parity with upstream `b230c83` now keys the projection by the unique
+> per-run `Signal.Id` (with `Name` and `YardId` as payload fields), so every
+> signal appears exactly once. See §4.2.
 >
 > Resolved: setting a path in the switchboard froze the game. `POST /path`
 > mutated Unity objects (`Junction.Switch`, signal aspects) from the HTTP

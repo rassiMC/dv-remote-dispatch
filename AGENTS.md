@@ -12,6 +12,7 @@ This is a C# UnityModManager mod for Derail Valley that provides remote dispatch
 ## Docs
 - `docs/CURRENT-STATE.md` - **what the code does right now**: architecture, HTTP surface, occupancy/pathing/signals data flow, frontend switchboard modules, and known WIP/rough edges. Read this first.
 - `docs/VISION.md` - (target document) where the project is heading: intended switchboard/pathing experience and feature goals. Read this before planning work.
+- `docs/DVSignals_INTEGRATION.md` - vendored DVSignals (Signals mod) integration feature doc, kept in sync with `origin/trunk` signal work; see its status note for the divergence between the two forks' Signal handling (this one keys by Signal.Id per upstream `b230c83`).
 - `docs/RELEASE_PROCESS.md` - release workflow steps.
 
 The local branch is ~51 commits ahead of upstream trunk (1.7.0); the added work is the switchboard feature (occupancy, signal control, block-level pathing/staging).

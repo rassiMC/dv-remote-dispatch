@@ -53,14 +53,18 @@ const SwitchboardSignals = {
 
         const junctionSignals = getSignalsByJunctionId(ingameData.junctionId);
         for (const sig of junctionSignals) {
-            const id = sig.Id || '';
-            const colonIdx = id.lastIndexOf(':');
-            const suffix = colonIdx > 0 ? id.substring(colonIdx + 1) : '';
+            // For the new fork the Id key is the signal's unique instance id, which no
+            // longer carries the old {junctionId}:F/:B1/:B2 suffix (display name lives in
+            // sig.name). The -mp backend has no name field but its Id still IS the old
+            // suffixed name, so the suffix parse below applies to it.
+            const name = sig.name || sig.Id || '';
+            const colonIdx = name.lastIndexOf(':');
+            const suffix = colonIdx > 0 ? name.substring(colonIdx + 1) : '';
 
-            // The new Signals fork reports direction from the controller's placement
-            // info and the In branch (0=left, 1=right) from the junction group's
-            // branch-signal ordering. Old-fork names ({junctionId}:F/:B1/:B2) remain
-            // as a fallback for the -mp backend.
+            // The new Signals fork reports direction from its junction/branch
+            // controllers and the In branch (0=left, 1=right) from the junction
+            // group's branch-signal ordering. Old-fork names ({junctionId}:F/:B1/:B2)
+            // remain as a fallback for the -mp backend.
             const direction = sig.direction || null;
             const branch = (sig.RequiredBranch !== null && sig.RequiredBranch !== undefined) ? sig.RequiredBranch : null;
 

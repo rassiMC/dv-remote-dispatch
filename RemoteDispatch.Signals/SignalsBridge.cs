@@ -116,19 +116,19 @@ namespace DvMod.RemoteDispatch.Signals
         private void OnSignalAspectChanged(SgSignal signal, IAspect? aspect)
         {
             if (signal.Definition == null) return;
-            _onAspectChanged?.Invoke(signal.Name, aspect?.Id ?? "OFF");
+            _onAspectChanged?.Invoke(signal.Id.ToString(), aspect?.Id ?? "OFF");
         }
 
         private void OnSignalOperationModeChanged(SgSignal signal, SignalOperationMode mode)
         {
             if (signal.Definition == null) return;
-            _onModeChanged?.Invoke(signal.Name, ModeToString(mode));
+            _onModeChanged?.Invoke(signal.Id.ToString(), ModeToString(mode));
         }
 
         private void OnSignalOverrideChanged(SgSignal signal, int _)
         {
             if (signal.Definition == null) return;
-            _onAspectChanged?.Invoke(signal.Name, signal.CurrentAspect?.Id ?? "OFF");
+            _onAspectChanged?.Invoke(signal.Id.ToString(), signal.CurrentAspect?.Id ?? "OFF");
         }
 
         // Instance-level handlers.
@@ -165,11 +165,11 @@ namespace DvMod.RemoteDispatch.Signals
         }
 
         /// <summary>
-        /// Returns the current aspect ID of a signal by its display name, or null if not found.
+        /// Returns the current aspect ID of a signal by its unique registry Id, or null if not found.
         /// </summary>
         internal string? GetSignalAspect(string signalId)
         {
-            var signal = FindSignalByName(signalId);
+            var signal = FindSignalById(signalId);
             if (signal == null) return null;
             return signal.CurrentAspect?.Id ?? "OFF";
         }
@@ -196,6 +196,15 @@ namespace DvMod.RemoteDispatch.Signals
                 {
                     if (!controller.Exists) continue;
 
+                    var junctionController = controller is JunctionSignalController jsc ? jsc : null;
+
+                    // The switchboard needs In (branch) signals attributed to their
+                    // junction too, so read the owning junction off the group
+                    // (available on every controller in a junction group), while
+                    // direction classification uses the junction controller when
+                    // present (see GetDirection).
+                    var junction = controller.GroupJunction;
+
                     // A junction group's BranchSignals are created in outBranches order
                     // (branch 0 = left, branch 1 = right), so the controller's index
                     // inside its group's branch list is the left/right discriminator
@@ -218,15 +227,19 @@ namespace DvMod.RemoteDispatch.Signals
                         SubscribeToSignal(signal);
 
                         var block = signal.Block;
-                        var junction = controller.GroupJunction;
                         var junctionId = junction?.junctionData.junctionIdLong;
-                        var direction = GetDirection(controller);
+                        var direction = GetDirection(signal, junctionController);
                         var type = TypeToString(controller.Type);
                         var position = signal.Definition.transform.position;
+                        var signalId = signal.Id.ToString();
 
-                        result[signal.Name] = new
+                        // Key by the signal's unique instance Id, not its display Name:
+                        // entry signals often share names like "A" or "B" across yards,
+                        // which would overwrite each other in the result dictionary.
+                        result[signalId] = new
                         {
-                            Id = signal.Name,
+                            Id = signalId,
+                            Name = signal.Name,
                             Type = type,
                             Mode = ModeToString(signal.Operation),
                             CurrentAspectId = signal.CurrentAspect?.Id ?? "OFF",
@@ -251,24 +264,26 @@ namespace DvMod.RemoteDispatch.Signals
             return result;
         }
 
-        private static string GetDirection(BasicSignalController controller)
+        private static string GetDirection(SgSignal signal, JunctionSignalController? junctionController)
         {
-            // TrackDirection.Out/In is assigned per controller at placement time
-            // (SignalPlacer), so it is the authoritative In/Out for every signal
-            // type - no name-suffix parsing needed.
-            if (controller.PlacementInfo is { } placement)
+            if (junctionController != null)
             {
-                switch (placement.Direction)
-                {
-                    case TrackDirection.Out:
-                        return "Out";
-                    case TrackDirection.In:
-                        return "In";
-                }
+                // Reflect the junction signal's facing. A junction signal protects the
+                // diverging (out) branches; branch signals protect the converging (in) track.
+                return signal.Controller == junctionController ? "Out" : "In";
             }
 
-            // Signals placed on a junction's approach track are the Out (facing)
-            // signal; anything else with no placement data is treated as Out.
+            // Heuristic fallback: match the old API suffix convention
+            // ({junctionId}:F = Out, {junctionId}:B{1,2} = In).
+            var name = signal.Name;
+            var colonIdx = name.LastIndexOf(':');
+            if (colonIdx > 0 && colonIdx < name.Length - 1)
+            {
+                var suffix = name.Substring(colonIdx + 1);
+                if (suffix == "F" || suffix == "T") return "Out";
+                if (suffix.StartsWith("B")) return "In";
+            }
+
             return "Out";
         }
 
@@ -326,7 +341,7 @@ namespace DvMod.RemoteDispatch.Signals
                 return false;
             }
 
-            var signal = FindSignalByName(signalId);
+            var signal = FindSignalById(signalId);
             if (signal == null) return false;
 
             LoggingReturn.Log?.Invoke($"Attempting to set signal aspect: {signalId} -> {aspect}");
@@ -370,7 +385,7 @@ namespace DvMod.RemoteDispatch.Signals
                 return false;
             }
 
-            var signal = FindSignalByName(signalId);
+            var signal = FindSignalById(signalId);
             if (signal == null) return false;
 
             LoggingReturn.DebugLog?.Invoke($"Attempting to set signal mode: {signalId} -> {mode}");
@@ -405,7 +420,7 @@ namespace DvMod.RemoteDispatch.Signals
             return _mainThreadId < 0 || System.Threading.Thread.CurrentThread.ManagedThreadId == _mainThreadId;
         }
 
-        private static SgSignal? FindSignalByName(string signalId)
+        private static SgSignal? FindSignalById(string signalId)
         {
             if (string.IsNullOrEmpty(signalId) || SignalManager.Instance == null) return null;
 
@@ -413,7 +428,7 @@ namespace DvMod.RemoteDispatch.Signals
             {
                 foreach (var signal in controller.AllSignals)
                 {
-                    if (string.Equals(signal.Name, signalId, StringComparison.OrdinalIgnoreCase))
+                    if (signal.Id.ToString().Equals(signalId, StringComparison.OrdinalIgnoreCase))
                     {
                         return signal;
                     }
@@ -471,9 +486,9 @@ namespace DvMod.RemoteDispatch.Signals
         /// The returned object serializes to:
         /// { PackId, PackVersion, PackName, Lamps: [{Name,Colour,Position:[x,y,z]}], CurrentAspectId, DisallowPassing, Lit: [], Blinking: [] }
         /// </summary>
-        internal object? CaptureSignal(string signalName)
+        internal object? CaptureSignal(string signalId)
         {
-            var signal = FindSignalByName(signalName);
+            var signal = FindSignalById(signalId);
             if (signal == null || signal.Definition == null) return null;
 
             try
@@ -544,7 +559,7 @@ namespace DvMod.RemoteDispatch.Signals
             }
             catch (Exception ex)
             {
-                LoggingReturn.Warning?.Invoke($"CaptureSignal({signalName}) failed: {ex.Message}");
+                LoggingReturn.Warning?.Invoke($"CaptureSignal({signalId}) failed: {ex.Message}");
                 return null;
             }
         }

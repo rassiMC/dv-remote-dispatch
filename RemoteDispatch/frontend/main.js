@@ -663,17 +663,19 @@ function createSignalMarker(signalId, signalData) {
 	const signalType = signalData.Type
 	const position = signalData.Position;
 	const entry = packTable.Signals ? (packTable.Signals[signalId] || null) : null;
+	const name = signalData.Name || signalId;
+	const yard = signalData.YardId || null;
 
 	const marker = L.marker(position, {
 		icon: getSignalIcon(aspect, mode, signalType, entry),
 		interactive: true,
-		title: signalId,
+		title: name,
 		zIndexOffset: Math.floor(position[0] * 100000 + position[1] * 100000),
 	})
 		.bindPopup(() => buildSignalPopup(signalId, signalType), { maxWidth: 260 })
 		.addTo(map);
 
-	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, entry, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null, RequiredBranch: (signalData.RequiredBranch !== null && signalData.RequiredBranch !== undefined) ? signalData.RequiredBranch : null, signalAspects: signalData.Aspects || null });
+	signalMarkers.set(signalId, { marker, aspect, mode, type: signalType, entry, Id: signalData.Id || signalId, junctionId: signalData.JunctionId || null, direction: signalData.Direction || null, RequiredBranch: (signalData.RequiredBranch !== null && signalData.RequiredBranch !== undefined) ? signalData.RequiredBranch : null, signalAspects: signalData.Aspects || null, name, yard });
 }
 
 
@@ -699,10 +701,12 @@ function buildSignalPopup(signalId, signalType) {
 	if (!state)
 		return '';
 
+	const signalName = state.name || signalId;
+
 	if (signalType == "Distant") {
 		const el = document.createElement('strong');
 		el.style.fontSize = '1.1em';
-		el.textContent = signalId;
+		el.textContent = signalName;
 		return el;
 	}
 
@@ -722,7 +726,7 @@ function buildSignalPopup(signalId, signalType) {
 	const container = document.createElement('div');
 	container.style.cssText = 'min-width:200px;font-family:sans-serif';
 	container.innerHTML = `
-		<strong style="font-size:1.1em">${signalId}</strong>
+		<strong style="font-size:1.1em">${escapeXml(signalName)}</strong>
 			<div style="margin:6px 0">
 				Mode: <strong id="sig-mode-label-${makeSafeSignalId(signalId)}">${state.mode}</strong>
 			</div>
@@ -837,6 +841,9 @@ function updateAllSignals(signalsData) {
 		const existing = signalMarkers.get(signalId);
 		if (!existing)
 			return;
+
+		if (signalData.Name) existing.name = signalData.Name;
+		if (signalData.YardId) existing.yard = signalData.YardId;
 
 		const aspect = signalData.CurrentAspectId || 'OFF';
 		const mode = signalData.Mode ?? existing.mode;
@@ -1920,15 +1927,8 @@ const signalVisibility = {
 	yards: {}
 };
 
-function yardFromSignalId(signalId) {
-	const stripped = signalId.startsWith('#') ? signalId.slice(1) : signalId;
-	const part = stripped.split('-')[2];
-	return part ? part.split(':')[0] : null;
-}
-
 function applySignalVisibility() {
-	signalMarkers.forEach(({ marker, type }, signalId) => {
-		const yard = yardFromSignalId(signalId);
+	signalMarkers.forEach(({ marker, type, yard }, signalId) => {
 		const yardVisible = yard ? (signalVisibility.yards[yard] ?? true) : true;
 		const distantVisible = type === 'Distant' ? signalVisibility.distant : true;
 		const visible = signalVisibility.show
@@ -2104,7 +2104,7 @@ function buildSignalsSidebar(installed) {
 	}
 
 	const presentYards = [...new Set(
-		[...signalMarkers.keys()].map(yardFromSignalId).filter(y => y && validYards.has(y))
+		[...signalMarkers.values()].map(state => state.yard).filter(y => y && validYards.has(y))
 	)].sort();
 
 	presentYards.forEach(yard => { signalVisibility.yards[yard] = true; });

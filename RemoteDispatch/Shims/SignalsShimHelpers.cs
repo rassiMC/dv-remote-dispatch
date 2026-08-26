@@ -18,12 +18,14 @@ namespace DvMod.RemoteDispatch
 		public class MinimalSignalData
 		{
 			public string? Id { get; set; }
+			public string? Name { get; set; }
 			public string? CurrentAspectId { get; set; }
 			public string? Mode { get; set; }
 			public string? Type { get; set; }
 			public string? Direction { get; set; }
 			public JToken[]? Position { get; set; }
 			public string? JunctionId { get; set; }
+			public string? YardId { get; set; }
 			public int? RequiredBranch { get; set; }
 			public string[]? Aspects { get; set; }
 		}
@@ -118,8 +120,8 @@ namespace DvMod.RemoteDispatch
 		{
 			/// <summary>
 			/// Projects raw signal data to minimal form containing only frontend-required fields.
-			/// Strips 5 unused fields (IsOn, SelectedBranch, YardId, TrackId).
-			/// Keeps 9 used fields: Id, CurrentAspectId, Mode, Position, Type, Direction, JunctionId, RequiredBranch, Aspects.
+			/// Strips 3 unused fields (IsOn, SelectedBranch, TrackId).
+			/// Keeps 10 used fields: Id, Name, CurrentAspectId, Mode, Position, Type, Direction, JunctionId, RequiredBranch, YardId, Aspects.
 			/// </summary>
 			public static Dictionary<string, MinimalSignalData> Create(Dictionary<string, object> rawSignals)
 			{
@@ -161,12 +163,14 @@ namespace DvMod.RemoteDispatch
 				return new MinimalSignalData
 				{
 					Id = signalObject["Id"]?.ToString(),
+					Name = signalObject["Name"]?.ToString(),
 					CurrentAspectId = currentAspect,
 					Mode = mode,
 					Position = position,
 					Type = type,
 					Direction = direction,
 					JunctionId = signalObject["JunctionId"]?.ToString(),
+					YardId = signalObject["YardId"]?.ToString(),
 					RequiredBranch = signalObject["RequiredBranch"]?.Type == JTokenType.Integer ? signalObject["RequiredBranch"].Value<int>() : (int?)null,
 					Aspects = signalObject["Aspects"]?.ToObject<string[]>()
 				};

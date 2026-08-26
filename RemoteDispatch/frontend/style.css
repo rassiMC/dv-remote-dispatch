@@ -513,8 +513,7 @@ body.switchboard-active #map {
 }
 
 .sig-layout-reset,
-.sig-layout-save,
-.sig-layout-done {
+.sig-layout-save {
 	font-size: 0.72rem;
 	padding: 2px 8px;
 	border: 1px solid #ccc;
@@ -524,13 +523,11 @@ body.switchboard-active #map {
 }
 
 .sig-layout-reset:hover,
-.sig-layout-save:hover,
-.sig-layout-done:hover {
+.sig-layout-save:hover {
 	background: #f0f0f0;
 }
 
-.sig-layout-save,
-.sig-layout-done {
+.sig-layout-save {
 	font-weight: 600;
 }
 

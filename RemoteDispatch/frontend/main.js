@@ -2254,16 +2254,12 @@ function renderSignalTypePreviews() {
 		editorEl.querySelectorAll('.sig-layout-palette-item').forEach(itemEl => {
 			wirePaletteDrag(layout, itemEl, gridEl, itemEl.dataset.shape);
 		});
-		editorEl.querySelector('.sig-layout-done').addEventListener('click', e => {
+		editorEl.querySelector('.sig-layout-save').addEventListener('click', e => {
 			e.stopPropagation();
-			// Done = save any unsaved changes, then close.
+			// Save & exit = persist any unsaved changes, then close.
 			const dirty = !layoutEditorSnapshot || !entriesEqual(layoutEditorSnapshot.entry, layout.entry);
 			closeLayoutEditor();
 			if (dirty && !layoutSaveInFlight) persistSignalEntry(layout.signalIds, layout.entry);
-		});
-		editorEl.querySelector('.sig-layout-save').addEventListener('click', e => {
-			e.stopPropagation();
-			saveLayoutSession(layout);
 		});
 		editorEl.querySelector('.sig-layout-reset').addEventListener('click', e => {
 			e.stopPropagation();
@@ -2369,9 +2365,8 @@ function renderSignalLayoutEditor(layout) {
 				<span class="sig-layout-title">drag lamps to arrange · ${layout.signals} signal${layout.signals === 1 ? '' : 's'}</span>
 				<span class="sig-layout-buttons">
 					<button type="button" class="sig-layout-reset">Reset</button>
-					<button type="button" class="sig-layout-save">Save</button>
+					<button type="button" class="sig-layout-save">Save &amp; exit</button>
 				</span>
-				<button type="button" class="sig-layout-done">Done</button>
 			</div>
 			${paletteHtml}
 			<div class="sig-layout-scroll">
@@ -2711,7 +2706,7 @@ function wirePaletteDrag(layout, itemEl, gridEl, shape) {
 }
 
 // Moves a lamp's grid cell: updates every signal sharing this layout in the local
-// packTable, refreshes the sidebar and map icons. Not saved until Save/Done.
+// packTable, refreshes the sidebar and map icons. Not saved until Save & exit.
 function commitLampMove(layout, lampIndex, gx, gy) {
 	gx = Math.max(0, Math.min(gx, signalLayoutMaxGrid));
 	gy = Math.max(0, Math.min(gy, signalLayoutMaxGrid));
@@ -2723,7 +2718,7 @@ function commitLampMove(layout, lampIndex, gx, gy) {
 }
 
 // Clears the custom layout of a whole group (back to the default single column),
-// locally. Not saved until Save/Done.
+// locally. Not saved until Save & exit.
 function resetSignalLayout(layout) {
 	layout.entry.Lamps.forEach((lamp, i) => setLampGrid(layout, i, null));
 	layoutEditorKey = layoutKey(layout.entry);
@@ -2898,20 +2893,6 @@ function removeLampFromGroup(layout, lampIndex) {
 // A save request is in flight (POST /signal/entry).
 let layoutSaveInFlight = false;
 
-// Saves the session's current group entry to the server and moves the "last saved"
-// baseline forward. Stays open; shows a short status hint.
-function saveLayoutSession(layout) {
-	if (layoutSaveInFlight) return;
-	if (layoutEditorSnapshot && entriesEqual(layoutEditorSnapshot.entry, layout.entry)) {
-		flashLayoutStatus('everything saved');
-		return;
-	}
-	persistSignalEntry(layout.signalIds, layout.entry, () => {
-		layoutEditorSnapshot = snapshotLayout(layout);
-		flashLayoutStatus('saved');
-	});
-}
-
 // Closes the editor without touching the lamp positions.
 function closeLayoutEditor() {
 	layoutEditorKey = null;
@@ -2925,9 +2906,9 @@ function flashLayoutStatus(msg) {
 	if (statusEl) statusEl.textContent = msg;
 }
 
-// Cancels the current edit session: restores the group's lamps + aspects from the
-// last save (or from when the editor was opened). No POST — the server already
-// holds that state, because edits only leave the editor through Save/Done.
+// Cancels the current edit session: restores the group's lamps + aspects from
+// when the editor was opened. No POST — the server already holds that state,
+// because edits only leave the editor through Save & exit.
 function cancelSignalLayoutEdit() {
 	if (layoutEditorKey === null) return;
 

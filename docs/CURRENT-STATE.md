@@ -226,18 +226,24 @@ RemoteDispatch (Shims/SignalsShim)
   Distant/Other` names. Direct occupancy uses
   `RailTrackOnTrackBogiesExtensions.BogiesOnTrack` (public Assembly-CSharp helper
   the new mod's internal `HasBogies` wraps).
-  - **Direction is derived from the junction controller, not signal names.**
+  - **Direction is the controller's facing semantic, not signal names.**
     The old fork's names carried a `{junctionId}:F/:B1/:B2` suffix that encoded
-    junction + facing; the new fork's `Signal.Name` does not. The bridge casts
-    each controller to a `JunctionSignalController` when present and treats a
-    signal as `Out` when `signal.Controller == junctionController`, else `In`
-    (upstream `GetDirection`); a name-suffix heuristic runs as a fallback.
-    The owning junction is read off `controller.GroupJunction` on **every**
-    controller so In/branch signals still carry a `JunctionId` (the switchboard
-    depends on this), and for In signals the bridge additionally emits
-    `RequiredBranch` (0 = left, 1 = right) from the controller's index in
-    `JunctionSignalGroup.BranchSignals`, which the frontend uses to assign
-    `LeftIn`/`RightIn`.
+    junction + facing; the new fork's `Signal.Name` does not. The bridge reads
+    `TrackSignalController.Direction` (set by the Signals mod at creation:
+    junction signals = `Out`, branch signals = `In`) and maps it to
+    `"Out"`/`"In"`. (Upstream's `signal.Controller == junctionController`
+    comparison only ever matches the Out controller, so it classified branch
+    controllers as `Out`; this fork deliberately keeps the placement-derived
+    facing - upstream's switchboard doesn't attach In signals, so it never
+    needed the branch case.) The owning junction is read off
+    `controller.GroupJunction` on **every** controller so In/branch signals
+    still carry a `JunctionId` (the switchboard depends on this), and for In
+    signals the bridge additionally emits `RequiredBranch` (0 = left,
+    1 = right) from the controller's **index in `Junction.outBranches`**
+    (matched by `StartingTrack`), which matches the switchboard graph's
+    left/right port assignment - the frontend uses it to assign `LeftIn`/
+    `RightIn`. (The group's `BranchSignals` list can skip small tracks, so its
+    index is *not* the port index.)
   - Both bridges guard `SetSignalAspect`/`SetSignalMode` with a **main-thread
     check** (thread id captured in `Register`); off-thread calls warn and no-op
     instead of touching Unity state.
@@ -562,10 +568,12 @@ public surface:
   - Keys everything by the numeric `Signal.Id` registry key (parity with
     upstream `b230c83`); the display name is carried as a separate `Name`
     field, as is `YardId`. See §4.2.
-  - Derives direction from a junction-controller comparison (upstream
-    `GetDirection`), junction from `GroupJunction`, and the In-signal branch
-    from the group's `BranchSignals` ordering (emitted as `RequiredBranch`).
-    A name-suffix heuristic is the fallback. See §4.2.
+  - Derives direction from the controller's facing
+    `TrackSignalController.Direction` (junction signals = Out, branch signals =
+    In; upstream's junction-controller comparison can't classify branch
+    controllers), junction from `GroupJunction`, and the In-signal left/right
+    port from the controller's `Junction.outBranches` index (emitted as
+    `RequiredBranch`). See §4.2.
   - Guards `SetSignalAspect`/`SetSignalMode` against off-main-thread calls.
   - Folds `SignalOperationMode` back to `Manual`/`Automatic` and the richer
     `SignalType` back to the legacy `Mainline/IntoYard/Shunting/Distant/Other`.
@@ -648,21 +656,21 @@ Derived from reading the code; not a plan. The most fragile points:
     applies. (VISION blocker #4; fix intent: seed through the same claim entry
     point the engine uses.)
 13. **Some signals are mapped to the wrong spot / wrong side in the switchboard**:
-    a small number of signal dots land on the wrong switch/port, and some are
-    mapped to the **wrong side of their switch** (an `Out` vs `In` swap).
-    (The "missing entirely" part is gone: name-keyed signals collided across
-    yards and were dropped - now keyed by unique registry `Signal.Id`, see §4.2.)
-    For the residual misplaced dots, two suspects are open:
+    the direction logic previously classified *all* signals on a multi-signal
+    switch as `Out` (a single dot at the base) - **fixed** by reading the
+    controller's facing `TrackSignalController.Direction` (see §4.2); the
+    left/right port now comes from the controller's `Junction.outBranches`
+    index (was `JunctionSignalGroup.BranchSignals` index, which shifts when
+    small tracks are skipped). Residual open suspects:
     - **DoubleTrack + Signals flip cancellation** (maintainer hypothesis,
       unconfirmed): the DoubleTrack mod and the Signals mod each mirror/flip
       signals on the second track, and the two flips cancel each other out for
       a subset of signals, leaving them with an inverted In/Out classification
       before RD ever reads them. Needs investigation against both mods'
       signal-placement behaviour.
-    - The In/Out classification now comes from the junction-controller
-      comparison (upstream `GetDirection`, see §4.2); signals whose controller
-      isn't part of a junction group fall back to a name-suffix heuristic and
-      then a blanket "Out", so a mis-parented controller yields a wrong-side dot.
+    - Signals whose controller isn't a `TrackSignalController` (e.g. Distant)
+      have no switchboard facing and fall back to `Out`; they carry no junction
+      so they never attach to a switch.
     The `/signalpack` lamp table is built lazily from observed aspects, so a dot
     whose aspect hasn't been captured yet falls back to the aspect-set
     colouring, which can also make a mismatched signal harder to spot.
@@ -772,11 +780,13 @@ they are fair game for agent help:
 > Resolved: with the new Signals fork, signal names stopped carrying the old
 > `{junctionId}:F/:B1/:B2` suffix, so `createSwitchSignals` could no longer
 > attach most signals to their junction (direction/junction were parsed from the
-> name). The new-fork bridge now derives direction from a junction-controller
-> comparison (`signal.Controller == junctionController` = Out, else In - the
-> upstream `GetDirection`, with a name-suffix heuristic only as fallback), the
-> owning junction from `GroupJunction`, and the In-signal left/right port from
-> `RequiredBranch` (the controller's index in the group's `BranchSignals`),
+> name). The new-fork bridge now derives direction from the controller's
+> facing `TrackSignalController.Direction` (junction signals = Out, branch
+> signals = In - a fork divergence from upstream's junction-controller
+> comparison, which can't classify branch controllers), the owning junction
+> from `GroupJunction`, and the In-signal left/right port from `RequiredBranch`
+> (the controller's index in `Junction.outBranches`, matched by `StartingTrack`
+> - the group's `BranchSignals` index shifts when small tracks are skipped),
 > all surfaced through `MinimalSignalData`. The frontend keys off those fields
 > with the old name-suffix parse kept only as an `-mp` fallback. See §4.2.
 >

@@ -7,6 +7,16 @@
 > pathing mode, main-thread guards in both bridges, and Id-keyed
 > `signalpacks/*.json` tables (no name-keyed migration needed — unreleased).
 > The commit list at the end records the upstream source commits.
+>
+> **Divergence (deliberate):** direction. Upstream's `GetDirection` compares
+> `signal.Controller == junctionController`, which only ever matches the Out
+> controller - branch/In signals fall through to a blanket `Out` (fine for
+> upstream's switchboard, which doesn't attach In signals). This fork's
+> switchboard needs In signals on the left/right ports, so
+> `RemoteDispatch.Signals` reads the controller-facing
+> `TrackSignalController.Direction` (junction signals = Out, branch signals =
+> In) and derives `RequiredBranch` from the `Junction.outBranches` index.
+> See `docs/CURRENT-STATE.md` §4.2.
 
 # DVSignals Integration
 

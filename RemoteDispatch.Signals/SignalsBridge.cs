@@ -196,24 +196,27 @@ namespace DvMod.RemoteDispatch.Signals
                 {
                     if (!controller.Exists) continue;
 
-                    var junctionController = controller is JunctionSignalController jsc ? jsc : null;
-
                     // The switchboard needs In (branch) signals attributed to their
                     // junction too, so read the owning junction off the group
-                    // (available on every controller in a junction group), while
-                    // direction classification uses the junction controller when
-                    // present (see GetDirection).
+                    // (available on every controller in a junction group).
                     var junction = controller.GroupJunction;
 
-                    // A junction group's BranchSignals are created in outBranches order
-                    // (branch 0 = left, branch 1 = right), so the controller's index
-                    // inside its group's branch list is the left/right discriminator
-                    // for In (branch) signals.
-                    var group = controller.Group;
+                    // Direction is the controller's facing semantic, set by the Signals
+                    // mod at creation: junction signals protect the diverging (out)
+                    // branches => "Out"; branch signals protect the converging (in)
+                    // track => "In". (Upstream's signal.Controller == junctionController
+                    // comparison only matches the Out controller, so branch controllers
+                    // fell through to a blanket "Out"; see GetDirection below.)
+                    var direction = GetDirection(controller);
+
+                    // The left/right port for an In (branch) signal is its index in the
+                    // junction's outBranches order, which matches the switchboard
+                    // graph's left/right port assignment. The group's BranchSignals
+                    // list can skip small tracks, so its index is not the port index.
                     int? branchIndex = null;
-                    if (group?.BranchSignals != null && controller is TrackSignalController trackController)
+                    if (direction == "In" && junction != null && controller is TrackSignalController trackController)
                     {
-                        var idx = group.BranchSignals.IndexOf(trackController);
+                        var idx = junction.outBranches.FindIndex(b => b.track == trackController.StartingTrack);
                         if (idx >= 0)
                             branchIndex = idx;
                     }
@@ -228,7 +231,6 @@ namespace DvMod.RemoteDispatch.Signals
 
                         var block = signal.Block;
                         var junctionId = junction?.junctionData.junctionIdLong;
-                        var direction = GetDirection(signal, junctionController);
                         var type = TypeToString(controller.Type);
                         var position = signal.Definition.transform.position;
                         var signalId = signal.Id.ToString();
@@ -264,25 +266,15 @@ namespace DvMod.RemoteDispatch.Signals
             return result;
         }
 
-        private static string GetDirection(SgSignal signal, JunctionSignalController? junctionController)
+        private static string GetDirection(BasicSignalController controller)
         {
-            if (junctionController != null)
-            {
-                // Reflect the junction signal's facing. A junction signal protects the
-                // diverging (out) branches; branch signals protect the converging (in) track.
-                return signal.Controller == junctionController ? "Out" : "In";
-            }
-
-            // Heuristic fallback: match the old API suffix convention
-            // ({junctionId}:F = Out, {junctionId}:B{1,2} = In).
-            var name = signal.Name;
-            var colonIdx = name.LastIndexOf(':');
-            if (colonIdx > 0 && colonIdx < name.Length - 1)
-            {
-                var suffix = name.Substring(colonIdx + 1);
-                if (suffix == "F" || suffix == "T") return "Out";
-                if (suffix.StartsWith("B")) return "In";
-            }
+            // TrackSignalController.Direction is the signal's facing semantic, set at
+            // creation by the Signals mod (junction signals = Out, branch signals = In).
+            // Signals without a TrackSignalController (e.g. Distant) have no switchboard
+            // facing and fall back to "Out"; they carry no junction so they never attach
+            // to a switch anyway.
+            if (controller is TrackSignalController tsc)
+                return tsc.Direction == TrackDirection.Out ? "Out" : "In";
 
             return "Out";
         }

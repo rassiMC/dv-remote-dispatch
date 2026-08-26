@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Switchboard signal In/Out mapping: every switch with more than one signal
+  previously displayed a single signal at its base (classified as `Out`).
+  Direction is now read from the controller's facing
+  `TrackSignalController.Direction` (junction signals = `Out`, branch signals =
+  `In`) instead of the upstream junction-controller comparison, which only ever
+  matched the Out controller. In (branch) signals now attach to the correct
+  left/right port: `RequiredBranch` is derived from the controller's
+  `Junction.outBranches` index (matching the switchboard graph's port
+  assignment) rather than the group's `BranchSignals` list index, which could
+  shift when small tracks are skipped.
+
 ## [1.7.0] - 2026-08-06
 
 ### Added

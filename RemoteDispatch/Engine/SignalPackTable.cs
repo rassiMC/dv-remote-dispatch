@@ -62,6 +62,13 @@ namespace DvMod.RemoteDispatch
 		private static PackTable? s_table;
 		private static string? s_key;
 
+		// Throttled flush state (s_lock-guarded). A sweep that changes hundreds of
+		// signal aspects in one frame used to write the whole pack table to disk per
+		// change; the catch-up schedule collapses that into one write per gate window.
+		private static readonly TimeSpan FlushGate = TimeSpan.FromSeconds(5);
+		private static DateTime s_lastFlush = DateTime.MinValue;
+		private static bool s_flushScheduled;
+
 		/// <summary>The directory where pack tables are persisted (signalpacks/ under the mod folder).</summary>
 		internal static string? TableDirectory { get; set; }
 
@@ -259,6 +266,42 @@ namespace DvMod.RemoteDispatch
 					Main.Warning($"Failed to save signal pack table: {ex.Message}");
 				}
 			}
+		}
+
+		/// <summary>
+		/// Persists at most once per <see cref="FlushGate"/>; a burst of aspect changes (e.g. a
+		/// pathing-mode sweep) schedules a single catch-up flush instead of writing the whole
+		/// table to disk per signal. In-memory state is always current, so /signalpack reads
+		/// are unaffected; only the on-disk copy lags by up to the gate.
+		/// </summary>
+		internal static void FlushThrottled()
+		{
+			lock (s_lock)
+			{
+				var now = DateTime.UtcNow;
+				if (now - s_lastFlush >= FlushGate)
+				{
+					s_lastFlush = now;
+					s_flushScheduled = false;
+				}
+				else if (!s_flushScheduled)
+				{
+					s_flushScheduled = true;
+					var wait = FlushGate - (now - s_lastFlush);
+					System.Threading.Tasks.Task.Delay(wait).ContinueWith(_ =>
+					{
+						lock (s_lock) s_flushScheduled = false;
+						Flush();
+					});
+					return;
+				}
+				else
+				{
+					return;
+				}
+			}
+
+			Flush();
 		}
 	}
 }

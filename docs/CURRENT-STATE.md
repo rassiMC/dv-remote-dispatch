@@ -676,7 +676,12 @@ Derived from reading the code; not a plan. The most fragile points:
       sweep in reverse (`SetSignalToStop` on every junction-detected signal).
     Both sweeps are unthrottled and unbounded (not paced like the 5s
     `ForceUpdateAllSignalAspects`). Needs batching/pacing the per-signal mode
-    changes (or deferring them across frames).
+    changes (or deferring them across frames). Note: the aspect-change callback
+    previously **flushed the pack table to disk for every single signal** the
+    sweep touched (`RecordPackAspect` → `PackTableStore.Flush`); that I/O storm
+    is gone (`FlushThrottled`, 5s gate + one catch-up write, final flush on
+    teardown), but the per-signal mode/aspect mutations still run in one main
+    thread.
 15. **Frontend reload / re-activation drops a path's claimed parts.** When the
     browser reloads (or pathing is re-activated), `POST /pathing/activate` runs
     `StagingData.InitializeFromPaths`, which **clears `_activeBlocks`** and

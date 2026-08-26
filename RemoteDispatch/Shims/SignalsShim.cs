@@ -312,6 +312,16 @@ namespace DvMod.RemoteDispatch
 
 			try
 			{
+				// Persist any table state still held back by the throttled flush.
+				PackTableStore.Flush();
+			}
+			catch (Exception ex)
+			{
+				Main.Warning($"Failed to flush signal pack table on teardown: {ex.Message}");
+			}
+
+			try
+			{
 				// Do the teardown in a try/catch to avoid any exceptions from preventing the rest of the mod from unloading properly.
 				_teardownMethod?.Invoke(null, null);
 			}
@@ -469,7 +479,9 @@ namespace DvMod.RemoteDispatch
 				var changed = PackTableStore.Upsert(signalId, lamps, aspect, disallowPassing, lit, blinking);
 				if (!changed) return;
 
-				PackTableStore.Flush();
+				// Throttled: a pathing-mode sweep changes hundreds of aspects in one
+				// frame, so one disk flush per change would stall the main thread.
+				PackTableStore.FlushThrottled();
 				Sessions.AddTag("signalpack");
 			}
 			catch (Exception ex)

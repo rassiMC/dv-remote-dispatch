@@ -769,9 +769,19 @@ body.switchboard-active #map {
 	animation: sigLampRowPulse 0.9s ease 2;
 }
 
-/* While a signal layout editor is open its content can spill past the side pane —
-   keep the whole sidebar above the Leaflet map panes. */
+/* The sidebar itself (z-index 2000 from the leaflet-sidebar css) is already above
+   the map — but the root and content elements clip overflow. While an editor is
+   open, drop the clipping so any content that spills past the pane paints over
+   the map instead of disappearing behind it. */
 body.sig-layout-editing #sidebar {
-	z-index: 1500;
+	overflow: visible;
+}
+
+body.sig-layout-editing .leaflet-sidebar-content {
+	overflow-x: visible;
+}
+
+.sig-layout-scroll {
+	overflow-x: auto;
 }
 

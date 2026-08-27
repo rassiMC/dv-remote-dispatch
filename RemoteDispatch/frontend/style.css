@@ -775,6 +775,18 @@ body.switchboard-active #map {
 	border-style: dashed;
 }
 
+.sig-switchboard-row td {
+	border-top: 1px solid #446;
+}
+
+.sig-switchboard-cell {
+	border-color: #339;
+}
+
+.sig-switchboard-set {
+	border-color: #9cf;
+}
+
 @keyframes sigLampRowPulse {
 	0%, 100% { background: transparent; }
 	50% { background: #fff3b0; }

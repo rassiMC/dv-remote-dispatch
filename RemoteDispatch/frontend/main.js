@@ -581,6 +581,11 @@ const signalLayoutEditorCell = 30;
 const signalLayoutEditorGap = 4;
 const signalLayoutMaxGrid = 15;
 
+// Switchboard row in the aspect × lamp table: clicking an aspect's cell cycles its dot
+// colour through these (none → green → yellow → red → white → blue → none). The switchboard
+// dot colour for a signal is looked up by its current aspect.
+const SWITCHBOARD_COLOURS = ['green', 'yellow', 'red', 'white', 'blue'];
+
 // Grid cell [col, row] for a lamp: the user-edited layout if present, otherwise the
 // default single column laid out in array order.
 function lampGridPos(lamp, index) {
@@ -2085,6 +2090,7 @@ function collectSignalTypes() {
 		if (!group.layouts.has(key)) {
 			group.layouts.set(key, {
 				lamps: key ? entry.Lamps : null,
+				switchboardAspects: key ? entry.SwitchboardAspects : null,
 				packAspects: {},
 				apiAspects: new Set(),
 				signals: 0,
@@ -2124,7 +2130,7 @@ function collectSignalTypes() {
 			const layout = layouts.get(key);
 			layoutList.push({
 				hasFace: !!key,
-				entry: { Lamps: layout.lamps || [], Aspects: layout.packAspects },
+				entry: { Lamps: layout.lamps || [], Aspects: layout.packAspects, SwitchboardAspects: layout.switchboardAspects },
 				aspects: [...layout.apiAspects]
 					.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })),
 				signals: layout.signals,
@@ -2282,6 +2288,12 @@ function renderSignalTypePreviews() {
 			const idx = Number(selectEl.dataset.lamp);
 			selectEl.addEventListener('change', e => setLampColour(layout, idx, e.target.value));
 		});
+		matrixEl.querySelectorAll('.sig-switchboard-cell').forEach(cellEl => {
+			cellEl.addEventListener('click', ev => {
+				ev.stopPropagation();
+				setSwitchboardAspectColour(layout, cellEl.dataset.aspect);
+			});
+		});
 			matrixEl.querySelectorAll('.sig-lamp-remove').forEach(btn => {
 				btn.addEventListener('click', e => {
 					e.stopPropagation();
@@ -2383,7 +2395,9 @@ function renderSignalLayoutEditor(layout) {
 
 // The aspect × lamp table: aspects across the top, lamps down the side. Each row has a
 // colour swatch and a remove button; each cell is the lamp's state in that aspect
-// (off / on / blinking, cycled by clicking). Rendered below the editor grid.
+// (off / on / blinking, cycled by clicking). A trailing "switchboard" row picks the dot
+// colour for each aspect (none / green / yellow / red / white / blue, cycled by clicking),
+// which replaces the aspect-derived dot colouring for that state.
 function renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize) {
 	const lamps = layout.entry.Lamps;
 	if (!lamps.length) return '';
@@ -2428,12 +2442,24 @@ function renderSignalAspectTable(layout, cell, gap, pitch, barW, barH, dotSize) 
 			</tr>`;
 	}).join('');
 
+	const switchboardCellsHtml = aspects.map(id => {
+		const colour = switchboardAspectColour(layout.entry, id);
+		const bg = colour ? `style="background:${switchboardDotHex(colour)};"` : '';
+		return `<td><button type="button" class="sig-aspect-cell sig-switchboard-cell${colour ? ' sig-switchboard-set' : ''}" data-aspect="${escapeXml(id)}" ${bg} title="switchboard dot colour for ${escapeXml(id)}: ${colour || 'none'}; click to change"></button></td>`;
+	}).join('');
+
 	return `
 		<div class="sig-layout-matrix-wrap">
-			<div class="sig-layout-matrix-title">aspects × lamps (click a cell: off → on → blink)</div>
+			<div class="sig-layout-matrix-title">aspects × lamps (click a cell: off → on → blink) · switchboard row (click: dot colour per aspect)</div>
 			<table class="sig-layout-matrix">
 				<thead><tr><th class="sig-lamp-col">lamp</th>${headHtml}</tr></thead>
-				<tbody>${rowsHtml}</tbody>
+				<tbody>
+					${rowsHtml}
+					<tr class="sig-switchboard-row" title="switchboard dot colour per aspect (replaces aspect-derived colouring)">
+						<td class="sig-lamp-col">switchboard</td>
+						${switchboardCellsHtml}
+					</tr>
+				</tbody>
 			</table>
 		</div>`;
 }
@@ -2756,8 +2782,8 @@ function entriesEqual(a, b) {
 	return a && b && stableStringify(a) === stableStringify(b);
 }
 
-// Writes a group's edited entry (lamps + aspects) to every listed signal, cloned per
-// entry so members don't alias each other's arrays.
+// Writes a group's edited entry (lamps + aspects + switchboard colours) to every listed
+// signal, cloned per entry so members don't alias each other's arrays.
 function applyEntryToMembers(signalIds, entry) {
 	signalIds.forEach(signalId => {
 		const target = packTable.Signals[signalId];
@@ -2765,6 +2791,7 @@ function applyEntryToMembers(signalIds, entry) {
 		const clone = JSON.parse(JSON.stringify(entry));
 		target.Lamps = clone.Lamps;
 		target.Aspects = clone.Aspects;
+		target.SwitchboardAspects = clone.SwitchboardAspects;
 	});
 }
 
@@ -2798,6 +2825,38 @@ function setAspectLampState(layout, aspectId, lamp, state) {
 			const at = aspect.Blinking.indexOf(lamp.Name);
 			if (at !== -1) aspect.Blinking.splice(at, 1);
 		}
+	});
+	renderSignalTypePreviews();
+}
+
+// The switchboard dot colour assigned to an aspect (from entry.SwitchboardAspects), or ''.
+function switchboardAspectColour(entry, aspectId) {
+	const sb = (entry && entry.SwitchboardAspects) ? entry.SwitchboardAspects : {};
+	const colour = sb[aspectId];
+	return (colour && SWITCHBOARD_COLOURS.indexOf(colour) !== -1) ? colour : '';
+}
+
+// Hex used for a switchboard dot colour (must match SwitchboardSignals.DOT_COLORS).
+function switchboardDotHex(colour) {
+	const hex = { red: '#ff4444', blue: '#4488ff', green: '#44ff44', white: '#ffffff', yellow: '#eecc33' };
+	return hex[colour] || '#666';
+}
+
+// Cycles an aspect's switchboard dot colour (none → green → yellow → red → white → blue → none)
+// for every group member, then re-renders.
+function setSwitchboardAspectColour(layout, aspectId) {
+	const entry = layout.entry;
+	const current = switchboardAspectColour(entry, aspectId);
+	const cycle = [...SWITCHBOARD_COLOURS, ''];
+	const at = cycle.indexOf(current);
+	const next = cycle[(at + 1) % cycle.length];
+
+	layout.signalIds.forEach(signalId => {
+		const member = packTable.Signals[signalId];
+		if (!member) return;
+		if (!member.SwitchboardAspects) member.SwitchboardAspects = {};
+		if (next) member.SwitchboardAspects[aspectId] = next;
+		else delete member.SwitchboardAspects[aspectId];
 	});
 	renderSignalTypePreviews();
 }
@@ -2957,7 +3016,7 @@ function normalizeSignalLayouts() {
 	updateSignalIcons(fixed);
 	fixed.forEach(signalId => {
 		const entry = packTable.Signals[signalId];
-		persistSignalEntry([signalId], { Lamps: entry.Lamps, Aspects: entry.Aspects });
+		persistSignalEntry([signalId], { Lamps: entry.Lamps, Aspects: entry.Aspects, SwitchboardAspects: entry.SwitchboardAspects });
 	});
 }
 
@@ -2986,7 +3045,7 @@ function persistSignalEntry(signalIds, entry, onSuccess) {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
 			signals: signalIds,
-			entry: { Lamps: lamps, Aspects: entry.Aspects || {} },
+			entry: { Lamps: lamps, Aspects: entry.Aspects || {}, SwitchboardAspects: entry.SwitchboardAspects || {} },
 		}),
 	}).then(resp => {
 		if (!resp.ok) throw new Error('HTTP ' + resp.status);

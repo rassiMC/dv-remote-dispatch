@@ -492,7 +492,27 @@ namespace DvMod.RemoteDispatch
 					};
 				}
 
-				var changed = PackTableStore.ApplyDefinitions(signalIds, lamps, aspects);
+				// Optional per-aspect switchboard dot colours: an object mapping aspect id
+				// -> semantic colour key (""/absent = none).
+				Dictionary<string, string>? switchboardAspects = null;
+				var switchboardToken = entryData["SwitchboardAspects"];
+				if (switchboardToken != null && switchboardToken.Type != JTokenType.Null)
+				{
+					if (switchboardToken is not JObject switchboardData || switchboardData.Count > maxAspects)
+						throw new ArgumentException($"'entry.SwitchboardAspects' must be an object of at most {maxAspects} aspects");
+					switchboardAspects = new Dictionary<string, string>(StringComparer.Ordinal);
+					foreach (var property in switchboardData.Properties())
+					{
+						if (string.IsNullOrEmpty(property.Name) || property.Name.Length > maxNameLength)
+							throw new ArgumentException($"invalid switchboard aspect id '{property.Name}'");
+						var colour = property.Value?.ToString() ?? "";
+						if (!string.IsNullOrEmpty(colour) && Array.IndexOf(AllowedSwitchboardColours, colour) < 0)
+							throw new ArgumentException($"switchboard colour '{colour}' for aspect '{property.Name}' is invalid");
+						switchboardAspects[property.Name] = colour;
+					}
+				}
+
+				var changed = PackTableStore.ApplyDefinitions(signalIds, lamps, aspects, switchboardAspects);
 				if (changed)
 				{
 					PackTableStore.Flush();
@@ -530,6 +550,16 @@ namespace DvMod.RemoteDispatch
 			if (string.IsNullOrEmpty(shape) || shape.Equals("circle", StringComparison.OrdinalIgnoreCase)) return "circle";
 			return shape.Equals("bar", StringComparison.OrdinalIgnoreCase) ? "bar" : null;
 		}
+
+		/// <summary>Semantic dot colours the frontend switchboard understands for its signal dots.</summary>
+		private static readonly string[] AllowedSwitchboardColours =
+		{
+			"green",
+			"yellow",
+			"red",
+			"white",
+			"blue",
+		};
 
 		private static string ReadRequestBody(Stream stream, int maxSize)
 		{

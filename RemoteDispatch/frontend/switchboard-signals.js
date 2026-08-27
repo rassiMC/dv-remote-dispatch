@@ -198,15 +198,23 @@ const SwitchboardSignals = {
         return 'yellow';
     },
 
-    // Resolves the dot colour for one port signal from the lamps lit by its
-    // currently displayed aspect. Precedence across all lit lamps:
-    // red > blue > green > white > yellow. Falls back to the aspect-set
-    // mapping when no pack-table lamp data has been captured for the signal yet.
+    // Resolves the dot colour for one port signal. The signal's pack entry can carry a
+    // per-aspect "switchboard" row (set in the aspect × lamp editor) that replaces the
+    // aspect-derived colouring: the dot shows the configured colour for the signal's
+    // current aspect. When no switchboard colour is configured for that aspect the dot
+    // falls back to the lamps lit by the current aspect, then to the aspect-set mapping.
     signalDotColor(signal) {
         if (!signal) return '#666';
 
-        const aspect = signal.aspect;
         const entry = signal.entry;
+        const aspect = signal.aspect;
+
+        if (entry && entry.SwitchboardAspects && aspect) {
+            const colour = entry.SwitchboardAspects[aspect];
+            if (colour === 'red' || colour === 'blue' || colour === 'green' || colour === 'white' || colour === 'yellow')
+                return this.DOT_COLORS[colour];
+        }
+
         const aspectDef = (entry && entry.Aspects) ? entry.Aspects[aspect] : null;
 
         if (aspectDef && aspectDef.Lit && entry.Lamps && entry.Lamps.length > 0) {

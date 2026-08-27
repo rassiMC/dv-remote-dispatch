@@ -45,6 +45,14 @@ namespace DvMod.RemoteDispatch
 	{
 		public SignalLamp[] Lamps { get; set; } = Array.Empty<SignalLamp>();
 		public Dictionary<string, SignalAspect> Aspects { get; set; } = new Dictionary<string, SignalAspect>(StringComparer.Ordinal);
+
+		/// <summary>
+		/// Per-aspect switchboard dot colours: aspect id -> semantic colour key
+		/// ("green", "yellow", "red", "white", "blue"). Optional; an absent/empty entry means
+		/// the dot falls back to the aspect-derived colouring. Set from the "switchboard" row
+		/// of the aspect × lamp editor, one colour per state the signal can be in.
+		/// </summary>
+		public Dictionary<string, string>? SwitchboardAspects { get; set; }
 	}
 
 	/// <summary>
@@ -60,6 +68,7 @@ namespace DvMod.RemoteDispatch
 		public string OriginalKey { get; set; } = string.Empty;
 		public SignalLamp[] Lamps { get; set; } = Array.Empty<SignalLamp>();
 		public Dictionary<string, SignalAspect> Aspects { get; set; } = new Dictionary<string, SignalAspect>(StringComparer.Ordinal);
+		public Dictionary<string, string>? SwitchboardAspects { get; set; }
 	}
 
 	/// <summary>
@@ -174,9 +183,12 @@ namespace DvMod.RemoteDispatch
 					// apply the edited template so newly discovered signals inherit it.
 					// Overrides cascade: a layout edited more than once resolves to the newest
 					// target (e.g. X->Y then Y->Z makes a raw X signal resolve to Z).
-					if (TryResolveOverride(lamps, out var overrideLamps, out var overrideAspects))
+					if (TryResolveOverride(lamps, out var overrideLamps, out var overrideAspects, out var overrideSwitchboardAspects))
 					{
 						entry.Lamps = (SignalLamp[])overrideLamps!.Clone();
+						entry.SwitchboardAspects = overrideSwitchboardAspects == null
+							? null
+							: new Dictionary<string, string>(overrideSwitchboardAspects, StringComparer.Ordinal);
 						changed = true;
 						changed |= MergeAspects(entry, overrideAspects!);
 					}
@@ -281,11 +293,11 @@ namespace DvMod.RemoteDispatch
 		}
 
 		/// <summary>
-		/// Replaces the lamps and aspects of the listed signals with user-edited definitions from
-		/// the frontend signal editor. Returns true if the table changed (resaving an identical
-		/// definition is a no-op).
+		/// Replaces the lamps, aspects and switchboard colours of the listed signals with
+		/// user-edited definitions from the frontend signal editor. Returns true if the table
+		/// changed (resaving an identical definition is a no-op).
 		/// </summary>
-		internal static bool ApplyDefinitions(IReadOnlyList<string> signalIds, SignalLamp[] lamps, IDictionary<string, SignalAspect> aspects)
+		internal static bool ApplyDefinitions(IReadOnlyList<string> signalIds, SignalLamp[] lamps, IDictionary<string, SignalAspect> aspects, IDictionary<string, string>? switchboardAspects = null)
 		{
 			if (signalIds == null || signalIds.Count == 0 || lamps == null || aspects == null) return false;
 
@@ -297,14 +309,17 @@ namespace DvMod.RemoteDispatch
 				foreach (var id in signalIds)
 				{
 					if (string.IsNullOrEmpty(id) || !s_table.Signals.TryGetValue(id, out var entry)) continue;
-					if (AreSameDefinitions(entry.Lamps, entry.Aspects, lamps, aspects)) continue;
+					if (AreSameDefinitions(entry, lamps, aspects, switchboardAspects)) continue;
 
 					// Remember the original representation so that any new signal discovered
 					// later with the same lamp layout inherits this edit automatically.
-					RecordOverride(entry.Lamps, lamps, aspects);
+					RecordOverride(entry.Lamps, lamps, aspects, switchboardAspects);
 
 					entry.Lamps = lamps;
 					entry.Aspects = new Dictionary<string, SignalAspect>(aspects, StringComparer.Ordinal);
+					entry.SwitchboardAspects = switchboardAspects == null
+						? null
+						: new Dictionary<string, string>(switchboardAspects, StringComparer.Ordinal);
 					changed = true;
 				}
 
@@ -349,10 +364,11 @@ namespace DvMod.RemoteDispatch
 		/// later edits winning per-aspect. Returns false (with nulls) when no override matches.
 		/// Cycle-safe: each distinct layout key is visited at most once.
 		/// </summary>
-		private static bool TryResolveOverride(SignalLamp[]? lamps, out SignalLamp[]? targetLamps, out IDictionary<string, SignalAspect>? targetAspects)
+		private static bool TryResolveOverride(SignalLamp[]? lamps, out SignalLamp[]? targetLamps, out IDictionary<string, SignalAspect>? targetAspects, out IDictionary<string, string>? targetSwitchboardAspects)
 		{
 			targetLamps = null;
 			targetAspects = null;
+			targetSwitchboardAspects = null;
 
 			var current = lamps;
 			var visited = new HashSet<string>(StringComparer.Ordinal);
@@ -371,6 +387,7 @@ namespace DvMod.RemoteDispatch
 				{
 					targetAspects[kvp.Key] = CloneAspect(kvp.Value);
 				}
+				targetSwitchboardAspects = match.SwitchboardAspects;
 
 				current = match.Lamps;
 			}
@@ -392,7 +409,7 @@ namespace DvMod.RemoteDispatch
 		/// <summary>
 		/// Stores (or replaces) the override template for the given original lamp layout.
 		/// </summary>
-		private static void RecordOverride(SignalLamp[]? originalLamps, SignalLamp[] newLamps, IDictionary<string, SignalAspect> newAspects)
+		private static void RecordOverride(SignalLamp[]? originalLamps, SignalLamp[] newLamps, IDictionary<string, SignalAspect> newAspects, IDictionary<string, string>? switchboardAspects = null)
 		{
 			var key = LampKey(originalLamps);
 			if (key == null || s_table == null) return;
@@ -404,6 +421,9 @@ namespace DvMod.RemoteDispatch
 			{
 				existing.Lamps = newLamps;
 				existing.Aspects = new Dictionary<string, SignalAspect>(newAspects, StringComparer.Ordinal);
+				existing.SwitchboardAspects = switchboardAspects == null
+					? null
+					: new Dictionary<string, string>(switchboardAspects, StringComparer.Ordinal);
 			}
 			else
 			{
@@ -412,6 +432,9 @@ namespace DvMod.RemoteDispatch
 					OriginalKey = key,
 					Lamps = newLamps,
 					Aspects = new Dictionary<string, SignalAspect>(newAspects, StringComparer.Ordinal),
+					SwitchboardAspects = switchboardAspects == null
+						? null
+						: new Dictionary<string, string>(switchboardAspects, StringComparer.Ordinal),
 				});
 			}
 		}
@@ -461,9 +484,11 @@ namespace DvMod.RemoteDispatch
 				&& AreSameNameArrays(a.Blinking, b.Blinking);
 		}
 
-		private static bool AreSameDefinitions(SignalLamp[]? aLamps, IDictionary<string, SignalAspect>? aAspects, SignalLamp[] bLamps, IDictionary<string, SignalAspect> bAspects)
+		private static bool AreSameDefinitions(SignalEntry entry, SignalLamp[] bLamps, IDictionary<string, SignalAspect> bAspects, IDictionary<string, string>? bSwitchboardAspects)
 		{
-			if (!AreSameLamps(aLamps, bLamps)) return false;
+			if (!AreSameLamps(entry.Lamps, bLamps)) return false;
+			if (!AreSameSwitchboardAspects(entry.SwitchboardAspects, bSwitchboardAspects)) return false;
+			var aAspects = entry.Aspects;
 			if (aAspects == null || aAspects.Count != bAspects.Count) return false;
 			foreach (var kvp in bAspects)
 			{
@@ -511,6 +536,19 @@ namespace DvMod.RemoteDispatch
 			if (a == null || b == null) return a == null && b == null;
 			if (a.Length != b.Length) return false;
 			for (int i = 0; i < a.Length; i++) if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
+			return true;
+		}
+
+		/// <summary>Compares two aspect->colour switchboard maps (null and empty treated as equal).</summary>
+		private static bool AreSameSwitchboardAspects(IDictionary<string, string>? a, IDictionary<string, string>? b)
+		{
+			if (a == null || a.Count == 0) return b == null || b.Count == 0;
+			if (b == null || a.Count != b.Count) return false;
+			foreach (var kvp in a)
+			{
+				if (!b.TryGetValue(kvp.Key, out var other) || !string.Equals(kvp.Value ?? "", other ?? "", StringComparison.Ordinal))
+					return false;
+			}
 			return true;
 		}
 

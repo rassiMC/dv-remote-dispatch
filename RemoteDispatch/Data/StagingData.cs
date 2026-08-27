@@ -190,6 +190,15 @@ namespace DvMod.RemoteDispatch
             }
         }
 
+        /// <summary>
+        /// Updates a path's block list (route extension). Existing claims on blocks that
+        /// remain in place (the common prefix - an extend only appends a tail) are
+        /// preserved so the clearance is never dropped; only blocks actually removed from
+        /// the route are released. The train's current block is re-seeded if needed and
+        /// the lookahead window is restored synchronously inside this call (same lock,
+        /// main thread), so a train advancing right after the update never observes a gap
+        /// in its clearance.
+        /// </summary>
         public static void UpdatePath(string pathId, JArray newBlocksArray)
         {
             lock (lockObj)
@@ -199,8 +208,25 @@ namespace DvMod.RemoteDispatch
                 _retryTimes.Remove(pathId);
 
                 var oldBlocks = staging.blocks;
-                foreach (var blockId in oldBlocks)
+                var newBlocks = newBlocksArray?.ToObject<string[]>();
+                if (newBlocks == null || newBlocks.Length == 0)
+                    return;
+
+                // Longest common prefix: an extend keeps the existing route intact and
+                // only adds to the tail, so everything up to `common` is unchanged.
+                int common = 0;
+                while (common < oldBlocks.Length && common < newBlocks.Length
+                    && string.Equals(oldBlocks[common], newBlocks[common], StringComparison.Ordinal))
+                    common++;
+
+                var newSet = new HashSet<string>(newBlocks);
+                for (int i = 0; i < oldBlocks.Length; i++)
                 {
+                    var blockId = oldBlocks[i];
+                    // Blocks still in place (common prefix) keep their queue entry and claim.
+                    if (i < common && newSet.Contains(blockId))
+                        continue;
+
                     if (_blockQueues.TryGetValue(blockId, out var queue))
                     {
                         queue.Remove(pathId);
@@ -208,14 +234,24 @@ namespace DvMod.RemoteDispatch
                             _blockQueues.Remove(blockId);
                     }
                     if (_activeBlocks.TryGetValue(blockId, out var claimingPath) && claimingPath == pathId)
-                    {
                         ReleaseBlock(blockId);
+                }
+
+                // If the change reached (or passed) the train's current block, reseed from
+                // the start of the (possibly rearranged) route instead of trusting the
+                // preserved prefix. For a pure extend this never triggers.
+                if (staging.currentBlockIndex >= common)
+                {
+                    staging.currentBlockIndex = 0;
+                    for (int i = common; i < oldBlocks.Length; i++)
+                    {
+                        var blockId = oldBlocks[i];
+                        if (_activeBlocks.TryGetValue(blockId, out var claimingPath) && claimingPath == pathId)
+                            ReleaseBlock(blockId);
                     }
                 }
 
-                var newBlocks = newBlocksArray.ToObject<string[]>();
                 staging.blocks = newBlocks;
-                staging.currentBlockIndex = 0;
                 staging.status = "Active";
 
                 foreach (var blockId in newBlocks)
@@ -223,6 +259,24 @@ namespace DvMod.RemoteDispatch
                     var queue = GetQueue(blockId);
                     if (!queue.Contains(pathId))
                         queue.Add(pathId);
+                }
+
+                // Restore the train's own block claim (mirrors AddPath seeding), then
+                // immediately re-extend the lookahead clearance. Both run under lockObj
+                // on the main thread, so no Process() tick can observe released blocks.
+                var occupancy = OccupancyData.GetOccupancyData();
+                int cur = staging.currentBlockIndex;
+                if (cur < staging.blocks.Length)
+                {
+                    var curBlock = staging.blocks[cur];
+                    if (!_activeBlocks.ContainsKey(curBlock))
+                        TryClaimSeed(curBlock, staging);
+                }
+
+                int ws = staging.currentBlockIndex + 1;
+                if (ws < staging.blocks.Length)
+                {
+                    TryClaimFrom(staging, ws, MaxAutoClaimAhead, occupancy);
                 }
             }
         }

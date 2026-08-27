@@ -628,7 +628,8 @@ Derived from reading the code; not a plan. The most fragile points:
    consistent (see §4.4).
 8. `OccupancyData` direct-mode caches track geometry once at startup
    (`EnsureTrackCache`) - if the world changes (scene load), stale cache can
-   persist; `ClearMapping` exists on teardown only.
+   persist; `ClearMapping` exists on teardown only. (On hold: hasn't surfaced
+   as a problem in practice; see VISION future plans.)
 9. **Route search two-tier occupancy** (fix landed): the switchboard search
    (`PathingController.computeBlockPath` / `_ensurePathTree`) now runs a
    **valid** tier that hard-blocks occupied through-blocks (source exempt) so a
@@ -679,6 +680,8 @@ Derived from reading the code; not a plan. The most fragile points:
     The `/signalpack` lamp table is built lazily from observed aspects, so a dot
     whose aspect hasn't been captured yet falls back to the aspect-set
     colouring, which can also make a mismatched signal harder to spot.
+    (The residual suspects above are **ignored for now** per maintainer; see
+    VISION future plans.)
 14. **Enabling / disabling pathing froze the game (fixed).** The path-*set*
     freeze (HTTP thread vs staging lock) was fixed earlier; the enable/disable
     toggle froze for a second reason - both `ActivatePathingMode` and
@@ -729,6 +732,8 @@ Derived from reading the code; not a plan. The most fragile points:
     display re-evaluates to its automatic aspect. Needs investigation of how
     the packs handle manual overrides vs the fork's `SetSignalAspect`/
     `SetSignalMode` path (`RemoteDispatch.Signals/SignalsBridge.cs`).
+    **(Resolved)** - this was a bug in the Signals mod itself, fixed there; no
+    change was needed in Remote Dispatch.
 
 ### Release blockers (per maintainer, April 2026)
 

@@ -132,18 +132,55 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 
 ### On hold / later
 - Full UI polish (WIP but not release-blocking).
-- **HB Bravo Yard misdrawn switches**: in the single-track layout, the **Bravo
-  Yard section is still misplaced** and needs a **manual** fix in the layout
-  file (`ST_2.1-hotfix.json`); some switches in Bravo Yard are also drawn
-  incorrectly in the DoubleTrack layout. Cosmetic layout-data bug; not needed
-  before the upcoming release.
+- **Switchboard layout fixes** (maintainer-owned, by hand): the **Bravo Yard
+  section is still misplaced** in the single-track layout (`ST_2.1-hotfix.json`)
+  and some Bravo Yard switches are drawn incorrectly in the DoubleTrack layout;
+  also the **"Double track long switch near SW"** in the DT layout. Cosmetic
+  layout-data bugs; not needed before the upcoming release.
 - A **switchboard legend**: a visible colour key for block states
   (clear/path/occupied) and the per-path colour model. The block colouring
   scheme itself is defined and implemented (see §2a), but a legend needs
   dedicated UI time and is intentionally deferred.
-- A **DoubleTrack 2.0-ready layout**: will need a new switchboard layout once
-   the scope of the next DoubleTrack release is known.
+- A **new DoubleTrack layout** for the (now released) new DoubleTrack mod
+  version; scope/work owned by the maintainer.
 - Path-conflict *resolution* (as opposed to prevention).
+
+### Future plans (agreed backlog, not yet scheduled)
+
+- **Custom path colours**: a colour picker per locked path in the sidebar
+  (`renderPathList`), persisted server-side (a `color` field on the path
+  payload + a `PATCH /path/{id}/color` endpoint mirroring the note endpoint);
+  `pathsSignatureChanged` must become colour-aware so the sidebar repaints.
+- **Path-choosing revamp**: creating a new path should use the *same* drafting
+  flow as extending (anchored draft, hover preview, waypoints, chained
+  sections - POST the first section, PATCH subsequent ones) instead of the
+  current one-shot start/dest selection.
+- **Claim-engine revamp**:
+  - Initial claiming: on path creation, seed the start block and extend the
+    lookahead window synchronously (mirroring the `UpdatePath` fix) instead of
+    waiting for the next `Process()` tick.
+  - Editable claiming amount: a per-path "blocks ahead" value in the sidebar,
+    sent as `lookAhead` and actually used to bound that path's claim window
+    (the field is currently vestigial; `MaxAutoClaimAhead`/`MaxTrainClaimAhead`
+    rule today).
+  - Claimed sections ending right before signals: claiming proceeds only when
+    the whole section up to the next signal is good to claim. Details TBD when
+    picked up.
+- **Yard switches ignore short track sections between junctions** for Direct
+  occupancy: skip short `outBranch` tracks that have a junction at the far end
+  when checking switch-block occupancy (data already available via
+  `_trackEndpointJunctionsCache` + track span).
+- **Job active/inactive indicators**: Active vs Available only (uses the
+  existing `isActive` field), shown in the sidebar job list and on map-view
+  cars for cars on active jobs.
+- **Job start/complete buttons** in the sidebar job list: a new `canControlJobs`
+  permission flag; `POST /jobs/{id}/start` (`Job.TakeJob`) and
+  `POST /jobs/{id}/complete` (validate-first via
+  `JobsManager.TryToCompleteAJob`); main-thread marshalled, mirroring
+  `/car/{guid}/control`.
+- **`loco_list_RD` integration**: `../loco_list_RD` is a sibling directory
+  holding an older fork of this mod; integration means porting the relevant
+  functionality from that fork (feature to be identified when picked up).
 
 ---
 

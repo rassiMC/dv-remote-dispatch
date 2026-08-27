@@ -53,11 +53,6 @@ namespace DvMod.RemoteDispatch
         {
             lock (lockObj)
             {
-                _pathProgress.Clear();
-                _blockQueues.Clear();
-                _activeBlocks.Clear();
-                _retryTimes.Clear();
-
                 foreach (var path in paths)
                 {
                     var pathId = path.Value<string>("id");
@@ -66,6 +61,12 @@ namespace DvMod.RemoteDispatch
                     if (blocks == null || blocks.Count == 0) continue;
                     var blocksArr = blocks.ToObject<string[]>();
                     var lookAhead = path.Value<int?>("lookAhead") ?? DefaultLookAhead;
+
+                    // On a client reload the staging state is still live server-side,
+                    // so an already-tracked path keeps its claims exactly as they
+                    // were; only genuinely new paths are seeded below.
+                    if (_pathProgress.ContainsKey(pathId))
+                        continue;
 
                     var staging = new PathStaging(pathId, blocksArr, lookAhead);
                     _pathProgress[pathId] = staging;
@@ -77,13 +78,14 @@ namespace DvMod.RemoteDispatch
                             queue.Add(pathId);
                     }
 
-                    // Restore only the start block claim (mirroring AddPath) and defer
+                    // Seed only the start block claim (mirroring AddPath) and defer
                     // the first automatic extension by the full retry interval so a
-                    // reload does not blast the entire lookahead window on the next tick.
+                    // first activation does not blast the entire lookahead window on
+                    // the next tick. Seeding is conflict-aware (TryClaimSeed).
                     var occupancy = OccupancyData.GetOccupancyData();
                     if (blocksArr.Length > 0 && occupancy.TryGetValue(blocksArr[0], out var occ) && occ == true)
                     {
-                        ActivateBlock(blocksArr[0], staging);
+                        TryClaimSeed(blocksArr[0], staging);
                     }
                     _retryTimes[pathId] = DateTime.UtcNow + RetryInterval;
                 }
@@ -111,7 +113,7 @@ namespace DvMod.RemoteDispatch
                 var occupancy = OccupancyData.GetOccupancyData();
                 if (blocksArr.Length > 0 && occupancy.TryGetValue(blocksArr[0], out var occ) && occ == true)
                 {
-                    ActivateBlock(blocksArr[0], staging);
+                    TryClaimSeed(blocksArr[0], staging);
                 }
 
                 _retryTimes[pathId] = DateTime.UtcNow;
@@ -313,6 +315,35 @@ namespace DvMod.RemoteDispatch
             return b2Idx < b1Idx;
         }
 
+        /// <summary>
+        /// Returns true when another active path is upcoming or opposing at the
+        /// next claim-window start (ws). Mirrors the detection TryClaimFrom uses so
+        /// the automatic advance can re-run the conflict-aware claim (and let
+        /// CalcRange clear up to where opposing paths end) even when the lookahead
+        /// ceiling or the retry timer would otherwise skip the attempt - matching
+        /// the manual "Claim next" button.
+        /// </summary>
+        private static bool HasOpposingOrNewAhead(PathStaging staging, int ws)
+        {
+            if (ws <= 0 || ws >= staging.blocks.Length)
+                return false;
+
+            var b1BlockId = staging.blocks[ws - 1];
+            var b2BlockId = staging.blocks[ws];
+            var listA = new HashSet<string>(GetPathsWithBlockUpcoming(b1BlockId, staging.pathId));
+            var listB = new HashSet<string>(GetPathsWithBlockUpcoming(b2BlockId, staging.pathId));
+
+            foreach (var p in listA.Where(x => listB.Contains(x)))
+            {
+                if (!_pathProgress.TryGetValue(p, out var other))
+                    continue;
+                if (IsOpposing(staging, other, b1BlockId, b2BlockId))
+                    return true;
+            }
+
+            return listB.Any(x => !listA.Contains(x));
+        }
+
         private static void PrunePastBlocks(PathStaging staging)
         {
             int removeCount = staging.currentBlockIndex;
@@ -336,6 +367,24 @@ namespace DvMod.RemoteDispatch
             }
 
             PathingData.RemovePrefixFromPath(staging.pathId, removeCount);
+        }
+
+        /// <summary>
+        /// Seeds a newly created path's start block claim (the block the train is
+        /// currently standing on). Mirrors the conflict-aware claim entry point
+        /// (TryClaimFrom) instead of an unguarded ActivateBlock: it refuses to
+        /// steal the start block when another active path already holds it. The
+        /// start block is the train's own occupied block, so the occupancy break
+        /// does not apply and opposing/upcoming gating is left to the extension
+        /// pass.
+        /// </summary>
+        private static bool TryClaimSeed(string blockId, PathStaging staging)
+        {
+            if (_activeBlocks.TryGetValue(blockId, out var claimer) && claimer != staging.pathId)
+                return false;
+
+            ActivateBlock(blockId, staging);
+            return true;
         }
 
         private static void ActivateBlock(string blockId, PathStaging staging)
@@ -455,6 +504,8 @@ namespace DvMod.RemoteDispatch
         /// <summary>
         /// Conflict-aware claim attempt. Tries to claim blocks starting at
         /// startIndex, respecting opposing/upcoming paths and physical occupancy.
+        /// When new or opposing paths are detected ahead, CalcRange walks the
+        /// route and only claims up to the point where those conflicts have ended.
         /// When manualAdvance is true (the Claim Next block button) it claims a
         /// single block when nothing is in the way, and the full cleared range
         /// when clearing through opposing traffic. Otherwise it fills up to
@@ -488,7 +539,7 @@ namespace DvMod.RemoteDispatch
 
             var newPaths = new HashSet<string>(listB.Where(x => !listA.Contains(x)));
 
-            if (newPaths.Count > 0)
+            if (newPaths.Count > 0 || opposingPaths.Count > 0)
             {
                 foreach (var p in newPaths)
                 {
@@ -523,16 +574,6 @@ namespace DvMod.RemoteDispatch
                     return (false, 0);
 
                 return (true, claimCount);
-            }
-            else if (opposingPaths.Count > 0)
-            {
-                if (_activeBlocks.ContainsKey(b2BlockId))
-                    return (false, 0);
-                if (occupancy.TryGetValue(b2BlockId, out var occ) && occ == true)
-                    return (false, 0);
-
-                ActivateBlock(b2BlockId, staging);
-                return (true, 1);
             }
             else
             {
@@ -637,6 +678,8 @@ namespace DvMod.RemoteDispatch
                         // A path whose train just advanced claims immediately
                         // (capped at 6 ahead); otherwise the 20s timer paces
                         // extension up to 5 ahead.
+                        bool conflictingAhead = HasOpposingOrNewAhead(staging, ws);
+
                         bool canTry;
                         int maxBlocks;
 
@@ -654,9 +697,15 @@ namespace DvMod.RemoteDispatch
                             maxBlocks = MaxAutoClaimAhead - CountClaimedAhead(staging);
                         }
 
-                        if (canTry && maxBlocks > 0)
+                        // The automatic advance mirrors the manual "Claim next" path
+                        // for opposing traffic: when opposing/upcoming paths are
+                        // detected ahead, run the conflict-aware claim even if the
+                        // lookahead ceiling or the retry timer would otherwise skip
+                        // it, so CalcRange can clear up to where those paths end.
+                        if ((canTry && maxBlocks > 0) || conflictingAhead)
                         {
-                            var (claimed, _) = TryClaimFrom(staging, ws, maxBlocks, occupancy);
+                            int effectiveMax = conflictingAhead ? Math.Max(1, maxBlocks) : maxBlocks;
+                            var (claimed, _) = TryClaimFrom(staging, ws, effectiveMax, occupancy);
                             _retryTimes[staging.pathId] = DateTime.UtcNow + RetryInterval;
 
                             if (claimed)

@@ -88,11 +88,12 @@ A dispatcher looking at the switchboard should be able to, at a glance:
    opposing/upcoming traffic on a shared span, backing off and retrying).
    Live *resolution* of conflicts remains on hold; validate the prevention
    behaviour in real multi-train use before release.
-   **Known hole in prevention**: the *initial* claim of a path that faces
-   opposing traffic still claims past it - `TryClaimFrom`'s Case 2 branch
-   (`opposingPaths.Count > 0`) claims the single next block without the
-   `CalcRange` conflict walk (CURRENT-STATE item 16). Fix intent: route Case 2
-   through the same range/opposing gating as Case 1.
+   The **initial-claim hole** is closed: `TryClaimFrom`'s Case 2 branch
+   (`opposingPaths.Count > 0`) no longer claims the next block unconditionally
+   - it is merged into Case 1 and goes through the same `CalcRange` walk, so
+   an extension claims only up to the point where no more opposing paths are
+   detected (CURRENT-STATE item 16), and path seeding routes through the
+   conflict-aware `TryClaimSeed` (item 12).
 2. ~~**Occupied-block shortcut path win** (route-seeking)~~ - **resolved**: the
    switchboard route search now uses a **two-tier Dijkstra** in
    `PathingController.computeBlockPath` / `_ensurePathTree`:
@@ -118,21 +119,16 @@ A dispatcher looking at the switchboard should be able to, at a glance:
    lookahead window on the next tick - it seeds only the start block and arms
    the full 20s retry interval first. Residual: a train moving into a still-
    unclaimed block (before the seed window extends) stalls the path
-   deliberately - the dispatcher can delete/recreate it. **Known downside of the
-   restore fix**: `InitializeFromPaths` clears `_activeBlocks`, so a frontend
-   reload / re-activation *drops every previously claimed block* and they only
-   regrow on the auto-claim cadence afterwards (CURRENT-STATE item 15).
-4. **Path creation claims one block via an ad-hoc path** - `PathingData.AddPath`
-   seeds the new path by calling `StagingData.AddPath` (StagingData.cs:83-106),
-   which claims the first block directly through a private **direct** call to
-   `ActivateBlock`, bypassing the conflict-aware `TryClaimFrom` / `CalcRange`
-   machinery. (The comment in §4.4 says "seeds a new path with only its start
-   block claimed from `_retryTimes`" - the real code inlines that instead of
-   delegating to a seed/claim entry point.) Consequence: the claim happens without
-   the opposing/upcoming-traffic checks the rest of the engine applies. Fix intent:
-   have path creation route the first-block claim through the same function the
-   engine uses (`TryClaimFrom` with a "seed only" bound), so seeding gets the same
-   conflict-aware validation instead of an unguarded `ActivateBlock`.
+   deliberately - the dispatcher can delete/recreate it. **Reload preservation
+   (fixed)**: `InitializeFromPaths` no longer clears `_activeBlocks` - on a
+   reload, already-tracked paths keep their claims exactly as they were and
+   only genuinely new paths are seeded (CURRENT-STATE item 15).
+4. **Path creation claims one block via an ad-hoc path (fixed)** -
+   `PathingData.AddPath` seeds the new path through `StagingData.AddPath`, which
+   now routes the first-block claim through the conflict-aware `TryClaimSeed`
+   (StagingData.cs:352) instead of an unguarded `ActivateBlock`: it refuses to
+   steal the start block when another active path holds it, while keeping the
+   seed semantics (start block is the train's own occupied block).
 
 ### On hold / later
 - Full UI polish (WIP but not release-blocking).

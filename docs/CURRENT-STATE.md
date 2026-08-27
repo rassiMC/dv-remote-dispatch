@@ -294,10 +294,13 @@ branch-entry ("In") signals can be attributed to a junction.
   - prunes already-traversed blocks (removing them from the stored path too),
   - seeds a new path with only its start block claimed (from `_retryTimes`),
     then claims the lookahead window **conflict-aware** via `TryClaimFrom`.
+    Seeding itself is conflict-aware (`TryClaimSeed`, StagingData.cs:352): it
+    refuses to steal the start block when another active path holds it.
     Restoring existing paths (page reload / pathing re-activation via
-    `InitializeFromPaths`) mirrors that seed: it claims only the start block and
-    defers the first extension by the full 20s retry interval instead of
-    blasting the lookahead window on the next tick.
+    `InitializeFromPaths`) **preserves the live staging state**: already-tracked
+    paths keep their claims as they were, and only genuinely new paths are
+    seeded (start block + deferred full 20s retry interval instead of blasting
+    the lookahead window on the next tick).
   Claims are gated by `CalcRange`, which walks the route ahead and refuses to
   claim more than the range until all **opposing / upcoming** paths share the
   section have ended (`IsOpposing` detects reverse-direction travellers over a
@@ -649,12 +652,14 @@ Derived from reading the code; not a plan. The most fragile points:
     path jumped, pruned unclaimed blocks, and vacated its implicit window.
     Advancement is now gated on the next block being claimed by this path; an
     unclaimed-but-occupied next block is a hint to claim it, not to advance.
-12. **New-path seeding bypasses the claim engine**: `StagingData.AddPath` claims
-    the first block via a direct `ActivateBlock` call instead of the
-    conflict-aware `TryClaimFrom`/`CalcRange` path, so a newly created path's
-    seed claim skips the opposing/upcoming-traffic checks the rest of the engine
-    applies. (VISION blocker #4; fix intent: seed through the same claim entry
-    point the engine uses.)
+12. **New-path seeding bypassed the claim engine (fixed)**: `StagingData.AddPath`
+    used to claim the first block via a direct `ActivateBlock` call, skipping
+    the conflict-aware checks. It now seeds through `TryClaimSeed`
+    (StagingData.cs:352), which mirrors the `TryClaimFrom` entry point: it
+    refuses to steal the start block when another active path holds it, while
+    the occupancy break is relaxed because the seed block is the train's own
+    occupied block (opposing/upcoming gating stays in the extension pass).
+    (VISION blocker #4.)
 13. **Some signals are mapped to the wrong spot / wrong side in the switchboard**:
     the direction logic previously classified *all* signals on a multi-signal
     switch as `Out` (a single dot at the base) - **fixed** by reading the
@@ -691,25 +696,39 @@ Derived from reading the code; not a plan. The most fragile points:
     skipped them, and `SetSignalToStop` now additionally refuses to run on a
     `Distant` signal outright (they can't hold a stop aspect), so no future call
     site can force one under Manual control.
-15. **Frontend reload / re-activation drops a path's claimed parts.** When the
-    browser reloads (or pathing is re-activated), `POST /pathing/activate` runs
-    `StagingData.InitializeFromPaths`, which **clears `_activeBlocks`** and
-    re-seeds each path with only its start block claimed, deferring the first
-    extension by the full 20s retry interval. So any blocks that were already
-    claimed before the reload are released and only re-grown afterwards at the
-    auto-claim cadence - a reload never restores the live claimed window. (This
-    is the flip side of the "restored paths no longer blast the lookahead" fix
-    in item 10 / VISION blocker #3; the claims themselves are still not
-    persisted/restored.)
-16. **Initial claiming for paths with opposing traffic is broken.** The first
-    automatic extension of a newly created path that faces opposing traffic
-    claims incorrectly: in `StagingData.TryClaimFrom` the **Case 2** branch
-    (`opposingPaths.Count > 0`, StagingData.cs:527-536) claims the single next
-    block `b2` unconditionally (only checking it isn't active/occupied) instead
-    of running the `CalcRange`/conflict walk the Case 1 (`newPaths`) branch
-    uses. So on the very first extension a path can claim into a section that
-    opposing traffic should still hold. Fix intent: make the advancing function's
-    Case 2 path go through the same range/opposing-traffic gating as Case 1.
+15. **Frontend reload / re-activation dropped a path's claimed parts (fixed).**
+    `POST /pathing/activate` runs `StagingData.InitializeFromPaths`, which used
+    to **clear `_activeBlocks`** and re-seed each path with only its start
+    block claimed, deferring the first extension by the full 20s retry interval
+    - so a reload released every claimed block and only regrew them at the
+    auto-claim cadence. It now **preserves the live staging state**: on a
+    reload, already-tracked paths keep their claims exactly as they were, and
+    only genuinely new paths are seeded (start block + deferred 20s retry, via
+    `TryClaimSeed`). First activation / re-enable-after-disable still seeds
+    fresh because `DeactivatePathingMode` clears staging (`ClearAll`). Note:
+    a path removed by another dispatcher while this client is open lingers in
+    staging until the engine cleans it up, since reload no longer reclears.
+    (VISION §3 residual.)
+16. **Initial claiming for paths with opposing traffic is broken (fixed).** The
+    first automatic extension of a newly created path that faces opposing
+    traffic used to claim incorrectly: the **Case 2** branch of
+    `StagingData.TryClaimFrom` (`opposingPaths.Count > 0`) claimed the single
+    next block `b2` unconditionally (only checking it isn't active/occupied)
+    instead of running the `CalcRange`/conflict walk the Case 1 (`newPaths`)
+    branch used. Case 2 is now merged into Case 1, so an extension that
+    detects opposing traffic walks `CalcRange` and claims **only up to the
+    point where no more opposing paths are detected** (returning 0 and backing
+    off on the 20s retry when opposing holds the section). The manual "Claim
+    next" button (`ForceClaimNextBlock`) inherits the same gating - it clears
+    the full range up to where opposing paths end.
+17. **Manual signal control doesn't apply to in-game clients for every pack.**
+    Setting a signal's aspect/mode manually (via the switchboard or
+    `/signal/control`) takes effect for the web dispatcher but not for players
+    in-game, regardless of the active pack. Suspect: the packs don't reflect a
+    `FullManual` override / forced aspect the way expected, so the in-game
+    display re-evaluates to its automatic aspect. Needs investigation of how
+    the packs handle manual overrides vs the fork's `SetSignalAspect`/
+    `SetSignalMode` path (`RemoteDispatch.Signals/SignalsBridge.cs`).
 
 ### Release blockers (per maintainer, April 2026)
 
@@ -721,9 +740,10 @@ they are fair game for agent help:
    "Resolved" note below).
 2. **Path conflicts**: multi-train handling has no complete solution. For the
    upcoming release the plan is to *prevent* conflicts outright rather than
-   resolve them live, to avoid issues. The **initial-claim Case 2 bug** (item 16)
-   is a hole in the prevention: a new path's first extension can claim past
-   opposing traffic. See VISION blocker #1/#4.
+   resolve them live, to avoid issues. Conflict prevention now covers the
+   initial claim (seed via `TryClaimSeed`, item 12) and the first extension
+   into opposing traffic (Case 2 merged into the `CalcRange` walk, item 16).
+   Live conflict *resolution* remains on hold. See VISION blocker #1/#4.
 3. A **new DoubleTrack mod version** is planned; it will need a new
    switchboard layout, but work can only start once the scope of that release
    is known (coordinated with the maintainer).

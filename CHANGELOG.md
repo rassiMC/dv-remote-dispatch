@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pathing conflict prevention: the first automatic extension of a path facing
+  opposing traffic no longer claims into the section opposing traffic still
+  holds. `StagingData.TryClaimFrom`'s Case 2 branch is merged into the Case 1
+  `CalcRange` walk, so an extension claims only up to the point where no more
+  opposing paths are detected (backing off on the 20s retry otherwise). The
+  automatic advance re-evaluates opposing traffic even when the lookahead
+  ceiling or retry timer would otherwise skip it, and the manual "Claim next"
+  button inherits the same gating.
+- New-path seeding now routes through the conflict-aware `TryClaimSeed`
+  instead of an unguarded `ActivateBlock`: it refuses to steal the start block
+  when another active path already holds it.
+- Reload / re-activation no longer drops a path's claimed blocks.
+  `StagingData.InitializeFromPaths` preserves the live staging state, keeping
+  already-tracked paths' claims exactly as they were and seeding only genuinely
+  new paths.
 - Switchboard signal In/Out mapping: every switch with more than one signal
   previously displayed a single signal at its base (classified as `Out`).
   Direction is now read from the controller's facing

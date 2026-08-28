@@ -1159,7 +1159,7 @@ const PathingController = {
                     <div style="display:flex;align-items:center;gap:5px;margin-top:4px;">
                         <span style="color:#aaa">Ahead</span>
                         <button onclick="PathingController._changeLookAhead('${pid}', -1)" style="font-size:11px;padding:0 5px;cursor:pointer" title="Claim one less block ahead">\u2212</button>
-                        <span style="min-width:1.3em;text-align:center;font-weight:600;color:#fff">${p.lookAhead ?? 5}</span>
+                        <span style="min-width:1.3em;text-align:center;font-weight:600;color:#000">${p.lookAhead ?? 5}</span>
                         <button onclick="PathingController._changeLookAhead('${pid}', 1)" style="font-size:11px;padding:0 5px;cursor:pointer" title="Claim one more block ahead (immediate)">+</button>
                         <span style="color:#aaa;margin-left:4px">Hue</span>
                         <input type="range" min="0" max="360" step="1" value="${pathHue}"

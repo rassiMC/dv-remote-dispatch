@@ -368,7 +368,7 @@ branch-entry ("In") signals can be attributed to a junction.
   via `SignalsAPI.TurnOffSignal` was considered but dropped: the API leaves
   `Operation` in Automatic, so the next update re-lights them into a manual
   S1c "Expect caution + dispatch control lamp" state. Needs a Signals mod fix
-  first; see §7.)
+  first; see §7.1.)
    `DeactivatePathingMode()` is the clean teardown: it releases staging claims
    (`StagingData.ClearAll()`, which reverts each claimed block's guard signal to
    Manual+S1 while stored paths still exist), clears stored paths, then sweeps
@@ -380,7 +380,7 @@ branch-entry ("In") signals can be attributed to a junction.
      `Updater` main-thread component): `ActivatePathingMode` /
      `SweepSignalsToAutomatic` collect a `List<Action>` of per-signal mutations and
      apply ~24 of them per frame instead of mutating the whole map in one frame -
-     this removed the enable/disable game freeze (see §7 item 14, now resolved).
+     this removed the enable/disable game freeze (see §7.2 "No pathing freeze").
      `SetSignalToStop` additionally refuses to run against a Distant signal (they
      can't hold a stop aspect), so a future call site can never force one under
      Manual control.
@@ -510,7 +510,7 @@ path search behind this (`computeBlockPath` → `_ensurePathTree`) is a
    exempt) so a clear detour always wins over an occupied shortcut, and a
    **soft** tier (occupied-block penalty) is used only when the valid tier
    cannot reach the destination - so a dispatcher is never dead-ended while a
-   clear route is still preferred (see the VISION blocker note).
+   clear route is still preferred (see §7.2 "Two-tier route search").
 - **Extending a locked path** (⊕ button in the sidebar, `beginExtendPath`) is
   the **favoured way to grow a route**: the path's last block becomes the
   anchor, the same hover/A*/waypoint drafting draws a section from it, and
@@ -620,27 +620,27 @@ public surface:
 
 Derived from reading the code; not a plan. The most fragile points:
 
-1. **Maintainer-acknowledged WIP**: Direct occupancy is done; Hardcore mode is
-   a WIP gimmick (currently disabled, not needed for release); mapping is done
-   (the known J-issue below being the exception); path conflict handling is
-   undecided; UI is WIP.
+### 7.1 Still open / not addressed
+
+1. **Hardcore occupancy is a disabled WIP gimmick** (aspect-inferred occupancy).
+   Not needed for release; Direct mode is the supported path.
 2. **Frontend mapping is heuristic + hardcoded anchor**: `SwitchboardMapper`
-   previously leaned on `GRAPH_OVERRIDES` and hardcoded junction overrides; those
-   are now all removed (the graph endpoint produces correct topology, and
-   junction degree is capped at 3). It still relies on a hardcoded anchor
-   (`SWITCHBOARD_ANCHOR` = `s1677` → junction 0) to seed the fit, and there is
-   no coordinate-based ground truth, so residual mismatches remain possible.
-   The crossover swap bugs (double-slip legs swapped, e.g. MF J-632/J-546,
-   J-636/J-638) were fixed by reciprocal-edge eviction in `findMatches`
-   combined with the `repairMapping()` post-pass; see the mapping subsection in §5.
+   seeds the fit from `SWITCHBOARD_ANCHOR` (`s1677` → junction 0) with no
+   coordinate-based ground truth, so residual mismatches remain possible. (The
+   GF junction and the DoubleTrack crossover leg-swaps are fixed; the graph
+   endpoint produces correct topology and junction `degree` is capped at 3.
+   See §5.)
 3. **Static switchboard layouts** are baked JSON files
    (`ST_2.1-hotfix.json` single-track, `DT_2.1-hotfix.json` DoubleTrack) - the
-   board itself is *not* derived from the live game; only switch/when mapping
-   and occupancy are live. Layout edits require re-exporting these files (the
-   sources live under `switchboard/data/`), and `loadSampleTrackData` is
-   hardcoded to those two filenames.
+   board itself is *not* derived from the live game; only switch/junction
+   mapping and occupancy are live. Layout edits require re-exporting these
+   files (sources live under `switchboard/data/`), and `loadSampleTrackData` is
+   hardcoded to those two filenames. The **Bravo Yard section is still
+   misplaced** in the single-track layout and some Bravo switches plus the
+   "Double track long switch near SW" are wrong in the DT layout
+   (maintainer-owned, cosmetic).
 4. **Turning off undetected signals** (e.g. the #ROAD yard signals) on pathing
-   activation is **deferred for release**: `SignalsAPI.TurnOffSignal` sets
+   activation is **deferred**: `SignalsAPI.TurnOffSignal` sets
    `SetMode(Manual)` + `TurnOff()` but leaves the signal's `Operation` as
    Automatic, so on the next update it re-lights into the manual S1c "Expect
    caution" + dispatch-control-lamp state. Requires a Signals mod fix (set
@@ -649,226 +649,102 @@ Derived from reading the code; not a plan. The most fragile points:
 6. **Force-update hacks** in `SignalsBridge` depend on Signals internal types
    via reflection (`Signals.Game.SignalManager`, `BasicSignalController`) -
    brittle across Signals versions.
-7. **Multi-threading**: `StagingData`/`OccupancyData` are touched from the HTTP
-   thread and the main-thread coroutines; the code uses locks + `RunOnMainThread`
-   to stay safe, but the boundaries are easy to break. The path-set freeze (see
-   below) was the main violation; all HTTP-triggered Unity mutations are now
-   marshalled to the main thread and the `paths`/`lockObj` lock order is
-   consistent (see §4.4).
-8. `OccupancyData` direct-mode caches track geometry once at startup
-   (`EnsureTrackCache`) - if the world changes (scene load), stale cache can
-   persist; `ClearMapping` exists on teardown only. (On hold: hasn't surfaced
-   as a problem in practice; see VISION future plans.)
-9. **Route search two-tier occupancy** (fix landed): the switchboard search
-   (`PathingController.computeBlockPath` / `_ensurePathTree`) now runs a
-   **valid** tier that hard-blocks occupied through-blocks (source exempt) so a
-   clear detour always wins over an occupied shortcut, falling back to a
-   **soft** tier (occupied-block penalty) only when the valid tier cannot reach
-   the destination - so a dispatcher is never dead-ended but a clear route is
-   still preferred. `_finalizePath` legality (wrong-way switch rejection) is
-   unchanged and identical to before, so no new invalid paths are shown and
-   reachability does not regress. Residual: switch-port data is incomplete for
-   multi-switch blocks, so legibility enforcement is no better than before
-   (see VISION blocker #2 "resolved" note).
-10. **Restored paths claim the whole lookahead window at once** (fixed):
-    reloading the page / re-activating pathing rebuilds `PathStaging` via
-    `InitializeFromPaths`, which previously claimed nothing and cleared
-    `_retryTimes`, so the next 0.5s `Process()` tick claimed up to 5 blocks per
-    restored path instantly. It now seeds only the start block (mirroring
-    `AddPath`) and arms the full 20s retry interval before the first extension.
-11. **Staging advances on occupancy before a block is claimed first** (fixed):
-    `StagingData.Process` treated a next-block occupancy read as `trainAdvanced`
-    even when the path never claimed that block (seed claims only block 0). The
-    path jumped, pruned unclaimed blocks, and vacated its implicit window.
-    Advancement is now gated on the next block being claimed by this path; an
-    unclaimed-but-occupied next block is a hint to claim it, not to advance.
-12. **New-path seeding bypassed the claim engine (fixed)**: `StagingData.AddPath`
-    used to claim the first block via a direct `ActivateBlock` call, skipping
-    the conflict-aware checks. It now seeds through `TryClaimSeed`
-    (StagingData.cs:352), which mirrors the `TryClaimFrom` entry point: it
-    refuses to steal the start block when another active path holds it, while
-    the occupancy break is relaxed because the seed block is the train's own
-    occupied block (opposing/upcoming gating stays in the extension pass).
-    (VISION blocker #4.) *(Superseded: the seed is now folded into the single
-    `Advance` function - see §4.4 - which seeds the train's block and extends
-    the window in one synchronous startup check.)*
-13. **Some signals are mapped to the wrong spot / wrong side in the switchboard**:
-    the direction logic previously classified *all* signals on a multi-signal
-    switch as `Out` (a single dot at the base) - **fixed** by reading the
-    controller's facing `TrackSignalController.Direction` (see §4.2); the
-    left/right port now comes from the controller's `Junction.outBranches`
-    index (was `JunctionSignalGroup.BranchSignals` index, which shifts when
-    small tracks are skipped). Residual open suspects:
-    - **DoubleTrack + Signals flip cancellation** (maintainer hypothesis,
-      unconfirmed): the DoubleTrack mod and the Signals mod each mirror/flip
-      signals on the second track, and the two flips cancel each other out for
-      a subset of signals, leaving them with an inverted In/Out classification
-      before RD ever reads them. Needs investigation against both mods'
-      signal-placement behaviour.
-    - Signals whose controller isn't a `TrackSignalController` (e.g. Distant)
-      have no switchboard facing and fall back to `Out`; they carry no junction
-      so they never attach to a switch.
-    The `/signalpack` lamp table is built lazily from observed aspects, so a dot
-    whose aspect hasn't been captured yet falls back to the aspect-set
-    colouring, which can also make a mismatched signal harder to spot.
-    (The residual suspects above are **ignored for now** per maintainer; see
-    VISION future plans.)
-14. **Enabling / disabling pathing froze the game (fixed).** The path-*set*
-    freeze (HTTP thread vs staging lock) was fixed earlier; the enable/disable
-    toggle froze for a second reason - both `ActivatePathingMode` and
-    `DeactivatePathingMode` swept **every** non-distant signal in the world in a
-    single main-thread frame (hundreds of per-signal mode/aspect mutations, each
-    firing the aspect-changed callback). Two fixes removed it:
-    - the aspect-change callback no longer flushes the pack table to disk per
-      signal (`FlushThrottled`, 5s gate + one catch-up write, final flush on
-      teardown - the on-disk copy lags ≤5s; `/signalpack` reads the live
-      in-memory table);
-    - the full-map sweeps are now **paced across frames** (`PacedSignalSweep`:
-      mutations are collected up front and applied ~24 per frame on the main
-      thread - measured <1s total, no hitch).
-    Distant signals were never part of the freeze: all sweep paths already
-    skipped them, and `SetSignalToStop` now additionally refuses to run on a
-    `Distant` signal outright (they can't hold a stop aspect), so no future call
-    site can force one under Manual control.
-15. **Frontend reload / re-activation dropped a path's claimed parts (fixed).**
-    `POST /pathing/activate` runs `StagingData.InitializeFromPaths`, which used
-    to **clear `_activeBlocks`** and re-seed each path with only its start
-    block claimed, deferring the first extension by the full 20s retry interval
-    - so a reload released every claimed block and only regrew them at the
-    auto-claim cadence. It now **preserves the live staging state**: on a
-    reload, already-tracked paths keep their claims exactly as they were, and
-    only genuinely new paths are seeded (start block + deferred 20s retry, via
-    `TryClaimSeed`). First activation / re-enable-after-disable still seeds
-    fresh because `DeactivatePathingMode` clears staging (`ClearAll`). Note:
-    a path removed by another dispatcher while this client is open lingers in
-    staging until the engine cleans it up, since reload no longer reclears.
-    (VISION §3 residual.)
-16. **Initial claiming for paths with opposing traffic is broken (fixed).** The
-    first automatic extension of a newly created path that faces opposing
-    traffic used to claim incorrectly: the **Case 2** branch of
-    `StagingData.TryClaimFrom` (`opposingPaths.Count > 0`) claimed the single
-    next block `b2` unconditionally (only checking it isn't active/occupied)
-    instead of running the `CalcRange`/conflict walk the Case 1 (`newPaths`)
-    branch used. Case 2 is now merged into Case 1, so an extension that
-    detects opposing traffic walks `CalcRange` and claims **only up to the
-    point where no more opposing paths are detected** (returning 0 and backing
-    off on the retry when opposing holds the section). The conflict-aware
-    gating applies to the lookahead grow (`+` button) the same way - it clears
-    the full range up to where opposing paths end. (The manual "Claim next"
-    button/endpoint that used to back this was removed in favour of the `+`
-    stepper.)
-17. **Manual signal control doesn't apply to in-game clients for every pack.**
-    Setting a signal's aspect/mode manually (via the switchboard or
-    `/signal/control`) takes effect for the web dispatcher but not for players
-    in-game, regardless of the active pack. Suspect: the packs don't reflect a
-    `FullManual` override / forced aspect the way expected, so the in-game
-    display re-evaluates to its automatic aspect. Needs investigation of how
-    the packs handle manual overrides vs the fork's `SetSignalAspect`/
-    `SetSignalMode` path (`RemoteDispatch.Signals/SignalsBridge.cs`).
-    **(Resolved)** - this was a bug in the Signals mod itself, fixed there; no
-    change was needed in Remote Dispatch.
+7. **Occupancy geometry cache** is built once at startup (`EnsureTrackCache`);
+   a scene load can leave it stale (`ClearMapping` runs on teardown only). On
+   hold - hasn't surfaced in practice; see VISION future plans.
+8. **Residual signal suspects** (ignored for now per maintainer; see VISION
+   future plans):
+   - **DoubleTrack + Signals flip cancellation** (maintainer hypothesis,
+     unconfirmed): the DoubleTrack mod and the Signals mod each mirror/flip
+     signals on the second track, and the two flips cancel each other out for a
+     subset of signals, leaving them with an inverted In/Out classification
+     before RD ever reads them.
+   - Signals whose controller isn't a `TrackSignalController` (e.g. Distant)
+     have no switchboard facing, fall back to `Out`, and carry no junction so
+     they never attach to a switch.
+   - The `/signalpack` lamp table is built lazily, so an aspect that hasn't been
+     captured yet falls back to the aspect-set colouring and can hide a
+     mismatched signal.
+9. **Multi-threading caution**: `StagingData`/`OccupancyData` are touched from
+   the HTTP thread and the main-thread coroutines; the boundaries are easy to
+   break. All HTTP-triggered Unity mutations are marshalled to the main thread
+   and the `paths`/`lockObj` lock order is consistent (see §4.4).
+
+### 7.2 Previously resolved
+
+Fixed in this fork; kept as one-liners so the bugs are not reintroduced.
+
+- **Two-tier route search**: the switchboard search hard-blocks occupied
+  through-blocks (valid tier) and only falls back to an occupied-block penalty
+  (soft tier) when no clear route reaches the destination, so a clear detour
+  always wins and the dispatcher is never dead-ended.
+- **Reload preserves claims**: `InitializeFromPaths` no longer clears
+  `_activeBlocks` or blasts the lookahead window; already-tracked paths keep
+  their claims and only genuinely new paths are seeded (startup check).
+- **Advance is claim-gated**: the engine only moves a path's current block
+  forward when the next block is claimed by this path *and* occupied; an
+  unclaimed-but-occupied next block is a hint to claim it, not to advance.
+- **Conflict-aware seeding**: new-path seeding routes through the claim engine
+  (now the single `Advance`, §4.4) instead of an unguarded `ActivateBlock`; it
+  refuses to steal the start block from another active path.
+- **Initial claim vs opposing traffic**: `TryClaimFrom`'s old unconditional
+  Case-2 claim is merged into the `CalcRange` walk, so a first extension claims
+  only up to where opposing paths end (backing off on the retry otherwise).
+- **Signal direction/ports**: In/Out facing comes from
+  `TrackSignalController.Direction`, and the left/right port from the
+  controller's `Junction.outBranches` index (`RequiredBranch`), not the group's
+  `BranchSignals` list. See §4.2.
+- **Signal identity**: new-fork signals are keyed by the unique per-run
+  `Signal.Id` instead of the display `Name`, so identically-named signals across
+  yards no longer overwrite each other in `/signals`.
+- **No pathing freeze**: enabling/disabling pathing no longer freezes the game -
+  full-map signal sweeps are paced across frames (`PacedSignalSweep`) and the
+  pack-table flush is throttled (5s gate + catch-up write).
+- **In-game manual signal control**: the "manual control doesn't apply to
+  in-game clients" issue was a bug in the Signals mod, fixed there; no change
+  was needed in Remote Dispatch.
+- **Path-set freeze**: setting a path no longer freezes the game - all
+  HTTP-triggered Unity mutations run via `Updater.RunOnMainThread` and the
+  `paths`/`lockObj` lock order is consistent. See §4.4.
+- **Lamp-based dot colours**: switchboard signal dots are coloured from the
+  lamps actually lit by the current aspect (via `/signalpack`), not a
+  single-aspect stop/caution/clear mapping.
+- **Unified block colours**: `TrackRenderer.resolveBlockColor` is the single
+  source of truth; occupied always reads as red and wins over path colouring.
+- **Mapping fixes**: the GF junction that broke a station's mapping and the
+  DoubleTrack crossover leg-swaps are fixed (position-proximity endpoint
+  matching, junction `degree` capped at 3, reciprocal-edge eviction +
+  `repairMapping()`); the mapping is a clean 641/641 bijection.
+- **Clean disable/re-enable**: `PathingActivation.DeactivatePathingMode()`
+  releases claims and reverts guard signals to Automatic; the map ⇄ switchboard
+  view toggle keeps pathing running in the background.
 
 ### Release blockers (per maintainer, April 2026)
 
 Known before a wide release; unless explicitly marked "owner = maintainer",
 they are fair game for agent help:
 
-1. ~~**Block colouring mismatch**~~ - resolved: `resolveBlockColor` is the
-   single source of truth and occupied always reads as occupied (see the
-   "Resolved" note below).
-2. **Path conflicts**: multi-train handling has no complete solution. For the
-   upcoming release the plan is to *prevent* conflicts outright rather than
-   resolve them live, to avoid issues. Conflict prevention now covers the
-   initial claim (seed via `TryClaimSeed`, item 12) and the first extension
-   into opposing traffic (Case 2 merged into the `CalcRange` walk, item 16).
-   Live conflict *resolution* remains on hold. See VISION blocker #1/#4.
-3. A **new DoubleTrack mod version** is planned; it will need a new
+1. **Path conflicts**: multi-train handling has no complete live-resolution.
+   For the upcoming release the plan is to *prevent* conflicts outright rather
+   than resolve them live; the conflict-aware claim engine (§4.4) already
+   covers the initial claim, lookahead growth, and the first extension into
+   opposing traffic. Live conflict *resolution* remains on hold. See VISION
+   blocker #1.
+2. A **new DoubleTrack mod version** is planned; it will need a new
    switchboard layout, but work can only start once the scope of that release
    is known (coordinated with the maintainer).
-4. **Upstream signal-integration work is not finished.** Upstream
+3. **Upstream signal-integration work is not finished.** Upstream
    (domroutley/dv-remote-dispatch) is still actively merging Signals work, and
    this fork's signal handling (bridges, `RequiredBranch`, pack capture,
    `/signalpack`) must stay in parity with it. Frequent checks of upstream
    progress and **parity merges** are required before release - do not assume
    the 1.7.0 merge-base is the final signal surface.
-5. **Exhaustive testing of all currently available signal packs** is required
+4. **Exhaustive testing of all currently available signal packs** is required
    before release: default pack plus every custom pack this fork should
    support, covering lamp capture (`/signalpack`), lit-lamp dot colouring,
    per-type stop-aspect configuration (Settings stop-aspect rows), and the
    pathing-mode sweeps - especially on DoubleTrack where the signal flip
-   interaction (item 13) is suspected.
-
-> Resolved: block colouring is unified. `TrackRenderer.resolveBlockColor` is
-> now the single source of truth for block colours. Each locked path gets a
-> stable random blue-dominant colour; blocks show the path colour (blended for
-> overlaps), **claimed** blocks get a green-boosted variant of the path colour,
-> and **occupied** blocks are always red and win over path colouring.
-> `PathingController.getOverridesForSegment` / `getSwitchRimColor` were removed;
-> locked-path colouring now flows through `resolveBlockColor`, and the sidebar
-> path chips use the same result.
-
-> Resolved: pathing disable/re-enable is now a **clean operation** from a
-> state/signal standpoint (`PathingActivation.DeactivatePathingMode()`), and the
-> map ⇄ switchboard view toggle no longer tears down active pathing - it keeps
-> running in the background. Corresponding VISION blockers removed. **However,
-> the enable/disable toggle still freezes the game** because both activation and
-> deactivation sweep every non-distant signal on the main thread (see known
-> limit #14); the "clean" here refers to signal-state teardown, not performance.
->
-> Resolved: the junction that broke a station's switch mapping in both
-> single-track and DoubleTrack (GF) is fixed. `BuildTrackGraph`/`TraceToJunctions`
-> now match track endpoints by position proximity instead of exact (rounded)
-> coordinate strings, and the J26 `GRAPH_OVERRIDES` entry was removed. The
-> single-track/DoubleTrack switchboard layouts were re-exported as the
-> `ST_2.1-hotfix.json` / `DT_2.1-hotfix.json` files.
->
-> Resolved: the DoubleTrack crossover swap - on the hotfix layout, at track
-> crossovers/double-slips both legs of a switch collapsed onto the same distant
-> switch id, and the old degree fallback swapped the two legs ("switches on one
-> side correct, the other two swapped"). Fixed by recording the target's entry
-> node (`entryNodeId`/`entryPort` in `buildSwitchGraph`) and replacing the
-> degree fallback with **reciprocal-edge eviction** in `findMatches`, removing
-> the now-redundant `GRAPH_OVERRIDES` clusters (J539-542, J404/J403/J18/J370,
-> J125), capping junction `degree` at 3 in `/graph` (dense crossovers like
-> DT-SJX1 otherwise report a spurious fourth continuation), and adding the
-> `repairMapping()` post-pass for residual leg-swaps (e.g. the MF J-632/J-546
-> and J-636/J-638 pairs). The mapping is now a clean 641/641 bijection with
-> zero consistency violations.
->
-> Resolved: with the new Signals fork, signal names stopped carrying the old
-> `{junctionId}:F/:B1/:B2` suffix, so `createSwitchSignals` could no longer
-> attach most signals to their junction (direction/junction were parsed from the
-> name). The new-fork bridge now derives direction from the controller's
-> facing `TrackSignalController.Direction` (junction signals = Out, branch
-> signals = In - a fork divergence from upstream's junction-controller
-> comparison, which can't classify branch controllers), the owning junction
-> from `GroupJunction`, and the In-signal left/right port from `RequiredBranch`
-> (the controller's index in `Junction.outBranches`, matched by `StartingTrack`
-> - the group's `BranchSignals` index shifts when small tracks are skipped),
-> all surfaced through `MinimalSignalData`. The frontend keys off those fields
-> with the old name-suffix parse kept only as an `-mp` fallback. See §4.2.
->
-> Resolved: new-fork signals were previously keyed by `Signal.Name`, so
-> identically-named entry signals across yards (e.g. "A"/"B") overwrote each
-> other in the `/signals` dictionary and some were missing from the board
-> entirely. Parity with upstream `b230c83` now keys the projection by the unique
-> per-run `Signal.Id` (with `Name` and `YardId` as payload fields), so every
-> signal appears exactly once. See §4.2.
->
-> Resolved: setting a path in the switchboard froze the game. `POST /path`
-> mutated Unity objects (`Junction.Switch`, signal aspects) from the HTTP
-> threadpool thread while the main-thread staging loop held the staging lock, and
-> `GetPathsJson` took the `paths` lock then the staging lock (inverting the order
-> used by the main-thread `Process`). All HTTP-triggered path/signal mutations
-> are now routed through `Updater.RunOnMainThread`, `GetPathsJson` snapshots
-> staging data before taking the `paths` lock, and both bridges warn+no-op on
-> off-main-thread signal mutation. See §4.4.
->
-> Resolved: switchboard signal dots are now coloured from the lamps actually lit
-> by the signal's current aspect (via the `/signalpack` table) instead of a
-> single-aspect stop/caution/clear mapping, so multi-lamp aspects show the
-> highest-precedence lit colour (red > blue > green > white > yellow). See the
-> "Switchboard signal dots" subsection in §5.
+   interaction (item 8 in §7.1) is suspected.
 
 Softer / held: full UI polish is WIP but not blocking; Hardcore occupancy is
 disabled and not blocking; everything else is on hold.

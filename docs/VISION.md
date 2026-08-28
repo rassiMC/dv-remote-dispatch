@@ -75,9 +75,9 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 - Clean pathing enable/disable **state handling**: toggling `enablePathing` off
   releases claims and reverts all guard signals to Automatic; the map ⇄
   switchboard view toggle keeps active pathing running and server-synced in the
-  background. (Note: the enable/disable *sweep itself still freezes the game* -
-  every non-distant signal is mutated on the main thread in one frame; see
-  CURRENT-STATE item 14. The teardown logic is clean, the performance is not.)
+  background. (The enable/disable signal sweeps are paced across frames, so the
+  toggle no longer freezes the game - see CURRENT-STATE §7.2 "No pathing
+  freeze".)
 - Block colouring unified: occupied always reads as occupied regardless of path
   membership (single-source `resolveBlockColor` table; see §2a). The GF
   mapping fix and the crossover leg-swap fixes are done too.
@@ -86,50 +86,22 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 1. **Path conflicts** between trains: no complete live-resolution exists yet.
    Conflict *prevention* is implemented in the claim engine (`StagingData`
    `TryClaimFrom` / `CalcRange` / `IsOpposing`: a path refuses to claim past
-   opposing/upcoming traffic on a shared span, backing off and retrying).
-   Live *resolution* of conflicts remains on hold; validate the prevention
-   behaviour in real multi-train use before release.
-   The **initial-claim hole** is closed: `TryClaimFrom`'s Case 2 branch
-   (`opposingPaths.Count > 0`) no longer claims the next block unconditionally
-   - it is merged into Case 1 and goes through the same `CalcRange` walk, so
-   an extension claims only up to the point where no more opposing paths are
-   detected (CURRENT-STATE item 16), and path seeding routes through the
-   conflict-aware `TryClaimSeed` (item 12).
+   opposing/upcoming traffic on a shared span, backing off and retrying), and
+   covers the initial claim, lookahead growth, and the first extension into
+   opposing traffic. Live *resolution* of conflicts remains on hold; validate
+   the prevention behaviour in real multi-train use before release.
 2. ~~**Occupied-block shortcut path win** (route-seeking)~~ - **resolved**: the
-   switchboard route search now uses a **two-tier Dijkstra** in
-   `PathingController.computeBlockPath` / `_ensurePathTree`:
-   - **Valid tier** - occupied through-blocks are **hard-blocked** (except the
-     source block itself) so a clear detour *always wins* over an occupied
-     shortcut, however long the detour is.
-   - **Soft tier** - same graph with the occupied-block penalty (extends the
-     old `OCCUPIED_PENALTY` cost), used only when the valid tier cannot reach
-     the destination (occupied destination, or genuinely no clear route), so a
-     dispatcher is never dead-ended.
-   The search still validates switch legality exactly as before (`_finalizePath`
-   rejects wrong-way traversals), so no new invalid paths are shown. Both tiers
-   share the per-source memoized cache and are invalidated together on
-   occupancy change (`invalidatePathTree`). Known residual: switch-port data is
-   incomplete for multi-switch blocks, so legibility enforcement is no worse
-   than before (see CURRENT-STATE corresponding note).
-3. **Occupancy is treated as "advance" before a block is ever claimed** -
-   **fixed**: the staging engine's `Process()` now advances a path's
-   `currentBlockIndex` only when the *next* block was **claimed by this path**
-   and reads occupied; an unclaimed-but-occupied next block is treated as a hint
-   to claim it, not to advance. Related restore bug also fixed: reloading /
-   re-activating pathing (`InitializeFromPaths`) no longer blasts the whole
-   lookahead window on the next tick - it seeds only the start block and arms
-   the full 20s retry interval first. Residual: a train moving into a still-
-   unclaimed block (before the seed window extends) stalls the path
-   deliberately - the dispatcher can delete/recreate it. **Reload preservation
-   (fixed)**: `InitializeFromPaths` no longer clears `_activeBlocks` - on a
-   reload, already-tracked paths keep their claims exactly as they were and
-   only genuinely new paths are seeded (CURRENT-STATE item 15).
-4. **Path creation claims one block via an ad-hoc path (fixed)** -
-   `PathingData.AddPath` seeds the new path through `StagingData.AddPath`, which
-   now routes the first-block claim through the conflict-aware `TryClaimSeed`
-   (StagingData.cs:352) instead of an unguarded `ActivateBlock`: it refuses to
-   steal the start block when another active path holds it, while keeping the
-   seed semantics (start block is the train's own occupied block).
+   switchboard route search uses a two-tier Dijkstra (valid tier hard-blocks
+   occupied through-blocks so a clear detour always wins; a soft tier with an
+   occupied-block penalty is used only when no clear route reaches the
+   destination). See CURRENT-STATE §7.2.
+3. ~~**Occupancy treated as "advance" before a block is claimed**~~ - **fixed**:
+   advancement is gated on the next block being claimed by this path, and
+   reload/re-activation preserves live claims (no lookahead blast). See
+   CURRENT-STATE §7.2.
+4. ~~**Path creation claims one block via an ad-hoc path**~~ - **fixed**: new
+   paths seed through the conflict-aware claim engine (the single `Advance`).
+   See CURRENT-STATE §7.2.
 
 ### On hold / later
 - Full UI polish (WIP but not release-blocking).
@@ -148,37 +120,29 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 
 ### Future plans (agreed backlog, not yet scheduled)
 
-- **Custom path colours**: a colour picker per locked path in the sidebar
-  (`renderPathList`), persisted server-side (a `color` field on the path
-  payload + a `PATCH /path/{id}/color` endpoint mirroring the note endpoint);
-  `pathsSignatureChanged` must become colour-aware so the sidebar repaints.
-  **(Done, hue-only for now)** - a per-path **hue slider** in the sidebar
-  (`PATCH /path/{id}/color`, stored in the `color` field, survives reloads,
-  `pathsSignatureChanged` is colour-aware); a full arbitrary-colour picker
-  (e.g. saturation/lightness) is future work.
+- **Custom path colours**: **(Done, hue-only for now)** - a per-path **hue
+  slider** in the sidebar (`PATCH /path/{id}/color`, stored in the `color`
+  field, survives reloads, `pathsSignatureChanged` is colour-aware); a full
+  arbitrary-colour picker (e.g. saturation/lightness) is future work.
 - **Path-choosing revamp**: creating a new path should use the *same* drafting
   flow as extending (anchored draft, hover preview, waypoints, chained
   sections - POST the first section, PATCH subsequent ones) instead of the
   current one-shot start/dest selection.
 - **Claim-engine revamp**:
-  - Initial claiming: on path creation, seed the start block and extend the
-    lookahead window synchronously (mirroring the `UpdatePath` fix) instead of
-    waiting for the next `Process()` tick. **(Done)** - a single `Advance`
-    function now handles seed + window extension and runs synchronously from
-    `AddPath` / `InitializeFromPaths` (startup check), `UpdatePath`, the
-    lookahead grow (`+`), and the periodic `Process()` check; the 5s
-    `ClaimInterval` timer only paces the ordinary automatic extension.
-  - Editable claiming amount: a per-path "blocks ahead" value in the sidebar,
-    sent as `lookAhead` and actually used to bound that path's claim window.
-    **(Done)** - the sidebar `− N +` stepper (`PATCH /path/{id}/lookahead`)
-    sets `lookAhead` per path (default 5, min 0 = no claims, no upper cap beyond
-    the route length); the `+` button claims immediately (skipping the timer)
-    while the `−` only lowers the threshold at which *new* blocks are claimed
-    (it never releases held claims - that is the delete button's first press,
-    which calls `POST /path/{id}/unclaim` to pull the clearance and set
-    `lookAhead` 0, leaving the path active and re-clearable via `+`). The
-    initial claim of a new/restored path is one section ahead only
-    (`claimCap 1`), with the 5s cooldown filling the rest of the window.
+  - Initial claiming: **(Done)** - a single `Advance` function handles seed +
+    window extension and runs synchronously from `AddPath` /
+    `InitializeFromPaths` (startup check), `UpdatePath`, the lookahead grow
+    (`+`), and the periodic `Process()` check; the 5s `ClaimInterval` timer
+    only paces the ordinary automatic extension. The initial claim of a
+    new/restored path is one section ahead only (`claimCap 1`).
+  - Editable claiming amount: **(Done)** - the sidebar `− N +` stepper
+    (`PATCH /path/{id}/lookahead`) sets `lookAhead` per path (default 5,
+    min 0 = no claims, no upper cap beyond the route length); the `+` button
+    claims immediately (skipping the timer) while the `−` only lowers the
+    threshold at which *new* blocks are claimed (it never releases held claims -
+    that is the delete button's first press, which calls
+    `POST /path/{id}/unclaim` to pull the clearance and set `lookAhead` 0,
+    leaving the path active and re-clearable via `+`).
   - Claimed sections ending right before signals: claiming proceeds only when
     the whole section up to the next signal is good to claim. Details TBD when
     picked up.
@@ -231,9 +195,9 @@ on the board.
 1. **Ship** the release: fix the blockers above, keep pathing conflict-free by
    prevention, disable Hardcore mode. Before shipping: verify **parity with
    upstream's signal-integration work** (still in flux upstream - frequent
-   progress checks + parity merges, CURRENT-STATE release blocker #4) and run
+   progress checks + parity merges, CURRENT-STATE release blocker #3) and run
    **exhaustive testing across all currently available signal packs**
-   (CURRENT-STATE release blocker #5), including DoubleTrack where the signal
+   (CURRENT-STATE release blocker #4), including DoubleTrack where the signal
    flip interaction is suspected.
 2. **Make the switchboard layout an asset.** Move the anchor (and, eventually,
    more mapping metadata) *into the layout file*, so community members can

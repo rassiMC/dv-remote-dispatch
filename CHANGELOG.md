@@ -12,14 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-path **claim-ahead stepper** in the switchboard sidebar: a `− N +`
   control sets how many blocks a path claims ahead of itself
   (`PATCH /path/{id}/lookahead`). The `+` button grows the window and claims it
-  immediately (skipping the 5s pacing timer, replacing the removed "Claim
-  next" button); `−` releases claims beyond the window (guard signals revert
-  to stop). `lookAhead` is persisted per path (default 5, min 0 = fully
-  manual, no upper cap beyond the route length) and now actually bounds the
-  claim engine's window (previously vestigial).
+  immediately (skipping the 5s pacing timer); the `−` only lowers the
+  threshold at which *new* blocks are claimed and never releases held claims.
+  `lookAhead` is persisted per path (default 5, min 0 = no claims, no upper cap
+  beyond the route length) and now actually bounds the claim engine's window
+  (previously vestigial). The initial claim of a new/restored path is **one
+  section ahead only**, with the 5s cooldown filling the rest of the window.
 - Per-path **colour hue slider** in the switchboard sidebar: rotates the hue of
   the path's colour (`PATCH /path/{id}/color`, stored in the `color` field so
   it survives reloads/extensions); block colouring and sidebar chips use it.
+- **Two-stage delete button**: the first `✕` press on a path that holds claims
+  only removes its clearance (`POST /path/{id}/unclaim` - a fallback to pull
+  the claims without deleting the route; `lookAhead` drops to 0 so the path
+  does not reclaim itself and stays re-clearable via `+`); a second press (no
+  claims left) deletes the path for good.
 - Removed the **print-to-console** button and the **"Claim next" / advance**
   button/endpoint (`/path/{id}/advance`, `ForceClaimNextBlock`), now covered by
   the `+` stepper.

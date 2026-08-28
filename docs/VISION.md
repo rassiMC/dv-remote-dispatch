@@ -171,10 +171,14 @@ A dispatcher looking at the switchboard should be able to, at a glance:
   - Editable claiming amount: a per-path "blocks ahead" value in the sidebar,
     sent as `lookAhead` and actually used to bound that path's claim window.
     **(Done)** - the sidebar `− N +` stepper (`PATCH /path/{id}/lookahead`)
-    sets `lookAhead` per path (default 5, min 0 = fully manual, no upper cap
-    beyond the route length); the claim engine bounds the window by it and the
-    `+` button claims immediately (skipping the timer), replacing the old
-    "Claim next" button.
+    sets `lookAhead` per path (default 5, min 0 = no claims, no upper cap beyond
+    the route length); the `+` button claims immediately (skipping the timer)
+    while the `−` only lowers the threshold at which *new* blocks are claimed
+    (it never releases held claims - that is the delete button's first press,
+    which calls `POST /path/{id}/unclaim` to pull the clearance and set
+    `lookAhead` 0, leaving the path active and re-clearable via `+`). The
+    initial claim of a new/restored path is one section ahead only
+    (`claimCap 1`), with the 5s cooldown filling the rest of the window.
   - Claimed sections ending right before signals: claiming proceeds only when
     the whole section up to the next signal is good to claim. Details TBD when
     picked up.

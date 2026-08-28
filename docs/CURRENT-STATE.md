@@ -147,8 +147,9 @@ Server: `Server/HttpServer.cs` (port from `Main.settings.serverPort`, default
 | `/occupancy` | GET/POST | OccupancyData | occupancy JSON; POST sets mapping/mode |
 | `/path` | GET/POST/PATCH/DELETE | PathingData/StagingData | path CRUD |
 | `/path/{id}/note` | PATCH | PathingData | set a path's note text |
-| `/path/{id}/lookahead` | PATCH | PathingData/StagingData | set a path's claim-ahead amount (+/- stepper; releases/claims blocks) |
+| `/path/{id}/lookahead` | PATCH | PathingData/StagingData | set a path's claim-ahead threshold (+/- stepper; + claims immediately, - only lowers the threshold) |
 | `/path/{id}/color` | PATCH | PathingData | set a path's display colour (hue slider) |
+| `/path/{id}/unclaim` | POST | PathingData/StagingData | release a path's clearance (first delete press; sets lookAhead 0) |
 | `/staging` | GET | StagingData | path staging state JSON |
 | `/pathing/activate` | POST | PathingActivation | enter pathing mode + seed staging |
 | `/signal/control` | POST | SignalsShim | set signal aspect/mode (permission-gated) |
@@ -316,15 +317,24 @@ branch-entry ("In") signals can be attributed to a junction.
   The **5s pacing timer** (`ClaimInterval` on `_retryTimes`) only paces the
   ordinary automatic extension so it does not all happen at once. The per-path
   **`lookAhead` value bounds the window** (default 5, set by the sidebar `+`/`-`
-  stepper; `0` claims nothing ahead - fully manual): auto-extension claims up
-  to `lookAhead` blocks and the train-advance extension re-fills to it, with no
-  hard upper cap beyond the route length. A train **advancing** onto the next
-  block, a detected conflict probe (`conflictingAhead`, only within the
-  lookahead window), or a **growing** lookahead (`+`, which clears the timer and
-  claims synchronously) run **immediately**, bypassing the timer; conflict
-  probes do not refresh the timer, so a path whose opposing traffic clears is
-  never locked out for a full interval. `SetLookAhead` on a **shrinking** `-`
-  releases every claim beyond the new window (guard signals revert to stop).
+  stepper; `0` claims nothing ahead): auto-extension claims up to `lookAhead`
+  blocks and the train-advance extension re-fills to it, with no hard upper cap
+  beyond the route length. A train **advancing** onto the next block, a detected
+  conflict probe (`conflictingAhead`, only within the lookahead window), or a
+  **growing** lookahead (`+`, which clears the timer and claims synchronously)
+  run **immediately**, bypassing the timer; conflict probes do not refresh the
+  timer, so a path whose opposing traffic clears is never locked out for a full
+  interval. The `-` button only **lowers the threshold** at which *new* blocks
+  are claimed - it never releases already-held claims (those stay until the
+  train passes them); removing a clearance is done by the **delete button's
+  first press**, which calls `UnclaimPath` (`POST /path/{id}/unclaim`): it
+  releases every claim the path holds (guard signals revert to stop) and sets
+  its `lookAhead` to 0 so it does not reclaim itself, leaving the path active
+  and re-clearable with the `+` button; a second delete press removes it.
+  The **initial claim** of a new/restored path is deliberately **one section
+  ahead only** (`Advance(staging, claimCap: 1)` from `AddPath` /
+  `InitializeFromPaths`) - the rest of the window is filled by the 5s cooldown
+  instead of being blasted at creation.
   Each `ActivateBlock` sets the block's guard signal to **Automatic** and throws
   its switch to the needed branch (`junction.Switch(REGULAR)`); releasing sets
   the signal back to **Manual+S1**.
@@ -334,7 +344,8 @@ branch-entry ("In") signals can be attributed to a junction.
     mutates Unity objects (`junction.Switch`, DVSignals `ChangeOperationMode`/
     `ChangeAspect`), so every HTTP-triggered entry point - `POST /path`
     (`AddPath`), `PATCH /path/{id}` (`UpdatePath`), `PATCH /path/{id}/lookahead`
-    (`SetLookAhead`, which can release/claim blocks), `DELETE /path`
+    (`SetLookAhead`, which can release/claim blocks), `POST /path/{id}/unclaim`
+    (`UnclaimPath`, which releases claims), `DELETE /path`
     (`ClearPaths`/`RemovePath` + `RevertRouteSignals`) and `/signal/control`
     (`SetSignalMode`/`SetSignalAspect`) - now `await Updater.RunOnMainThread(...)`
     before touching the staging/pathing state (matching the activation endpoint).
@@ -521,12 +532,15 @@ path search behind this (`computeBlockPath` → `_ensurePathTree`) is a
   as the board builds its mapping.
 - The sidebar `#pathList` renders each locked path with block chips, a note
   field, a **− N +** **claim-ahead stepper** (`PATCH /path/{id}/lookahead`: the
-  `+` grows the window and claims it immediately, skipping the 5s pacing timer,
-  so it replaces the old "Claim next" button; `−` releases claims beyond the
-  window), a **hue slider** for the path colour (`PATCH /path/{id}/color`,
+  `+` grows the threshold and claims it immediately, skipping the 5s pacing
+  timer; the `−` only lowers the threshold at which *new* blocks are claimed
+  and never releases held claims), a **hue slider** for the path colour
+  (`PATCH /path/{id}/color`,
   `PathingController._changePathHue` - rotates the hue of the path's colour,
-  kept server-side in the `color` field so it survives reloads), a delete
-  button, and a ⊕ **extend** button. The row being extended is highlighted with
+  kept server-side in the `color` field so it survives reloads), a **two-stage
+  delete** button (first press with claims calls `POST /path/{id}/unclaim` to
+  pull the clearance and set `lookAhead` 0; second press deletes the path), and
+  a ⊕ **extend** button. The row being extended is highlighted with
   a green border.
 
 ### Switchboard performance notes

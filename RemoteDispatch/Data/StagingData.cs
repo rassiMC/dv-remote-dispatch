@@ -81,11 +81,12 @@ namespace DvMod.RemoteDispatch
                     }
 
                     // Startup check for a genuinely new path: run the single
-                    // advancing function once (seeds the train's block and extends
-                    // the lookahead window synchronously), then start the 5s pacing
-                    // timer for subsequent auto-extension. Already-tracked paths keep
-                    // their live claims above, untouched.
-                    Advance(staging);
+                    // advancing function once. It seeds the train's block and
+                    // claims ONE section ahead only (claimCap 1) - the rest of the
+                    // lookahead window is filled after the 5s pacing cooldown, so a
+                    // fresh path never blasts the whole window at once. Already-
+                    // tracked paths keep their live claims above, untouched.
+                    Advance(staging, claimCap: 1);
                     _retryTimes[pathId] = DateTime.UtcNow + ClaimInterval;
                 }
 
@@ -109,10 +110,10 @@ namespace DvMod.RemoteDispatch
                         queue.Add(pathId);
                 }
 
-                // Startup check: seed the train's block and extend the lookahead
-                // window synchronously via the same advancing function used by the
-                // periodic check, then start the 5s pacing timer.
-                Advance(staging);
+                // Startup check: seed the train's block and claim ONE section ahead
+                // only via the same advancing function used by the periodic check,
+                // then start the 5s pacing timer for the rest of the window.
+                Advance(staging, claimCap: 1);
                 _retryTimes[pathId] = DateTime.UtcNow + ClaimInterval;
             }
         }
@@ -131,11 +132,13 @@ namespace DvMod.RemoteDispatch
         }
 
         /// <summary>
-        /// Changes how many blocks a path claims ahead of its current block (the
-        /// + / - stepper in the switchboard sidebar). Shrinking releases claims
-        /// beyond the new window (guard signals revert to stop); growing clears the
-        /// pacing timer and claims the extra window immediately, so the + button
-        /// acts like the old "Claim next" without waiting for the 5s timer.
+        /// Changes a path's claim-ahead threshold (the + / - stepper in the
+        /// switchboard sidebar). The + button grows the window and claims it
+        /// immediately (skipping the 5s pacing timer, so it acts like the old
+        /// "Claim next" button). The - button only lowers the threshold at which
+        /// NEW blocks are claimed - it never releases already-held claims (use
+        /// UnclaimPath / the delete button for that); held claims simply stop
+        /// being extended until the train passes them.
         /// </summary>
         public static void SetLookAhead(string pathId, int value)
         {
@@ -150,20 +153,6 @@ namespace DvMod.RemoteDispatch
                 if (clamped == staging.lookAhead)
                     return;
 
-                if (clamped < staging.lookAhead)
-                {
-                    // Shrink: release every block this path claims at or beyond the
-                    // new window edge (walking from the far end). The train's own
-                    // current block is always kept.
-                    int limit = staging.currentBlockIndex + Math.Max(clamped, 1);
-                    for (int i = staging.blocks.Length - 1; i >= limit; i--)
-                    {
-                        var blockId = staging.blocks[i];
-                        if (_activeBlocks.TryGetValue(blockId, out var claimer) && claimer == staging.pathId)
-                            ReleaseBlock(blockId);
-                    }
-                }
-
                 staging.lookAhead = clamped;
 
                 if (clamped > 0)
@@ -173,6 +162,32 @@ namespace DvMod.RemoteDispatch
                     _retryTimes.Remove(pathId);
                     Advance(staging);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Removes a path's clearance (the first press of the delete button, used
+        /// as a fallback when a dispatcher wants to pull the claims without
+        /// deleting the route). Releases every block the path claims (guard
+        /// signals revert to stop) and sets its lookAhead to 0 so it does not
+        /// reclaim itself - the path stays active and can be re-cleared with the
+        /// + button; the second delete press removes it entirely.
+        /// </summary>
+        public static void UnclaimPath(string pathId)
+        {
+            lock (lockObj)
+            {
+                if (!_pathProgress.TryGetValue(pathId, out var staging))
+                    return;
+
+                foreach (var kvp in _activeBlocks.ToList())
+                {
+                    if (kvp.Value == pathId)
+                        ReleaseBlock(kvp.Key);
+                }
+
+                staging.lookAhead = 0;
+                Sessions.AddTag("paths");
             }
         }
 
@@ -431,10 +446,12 @@ namespace DvMod.RemoteDispatch
         /// The ClaimInterval timer only paces the ordinary automatic extension so
         /// it does not all happen at once; a train advance or a conflict probe
         /// always runs immediately. The per-path lookAhead bounds the window
-        /// (0 claims nothing ahead - fully manual).
+        /// (0 claims nothing ahead - the path only claims again with the + button).
+        /// claimCap limits a single extension (the startup check passes 1 so a new
+        /// path claims one section and then waits for the pacing timer).
         /// Returns true when the train advanced or a block was claimed.
         /// </summary>
-        private static bool Advance(PathStaging staging)
+        private static bool Advance(PathStaging staging, int claimCap = int.MaxValue)
         {
             var occupancy = OccupancyData.GetOccupancyData();
             bool changed = false;
@@ -472,15 +489,20 @@ namespace DvMod.RemoteDispatch
 
             // Seed: ensure the train's own block is claimed. It is the train's
             // occupied block, so the occupancy break does not apply; we only
-            // refuse to steal it from another active path.
-            int cur = staging.currentBlockIndex;
-            if (cur < staging.blocks.Length)
+            // refuse to steal it from another active path. Skipped when the path
+            // has no claim-ahead (lookAhead 0 - e.g. unclaimed via the delete
+            // button), so an unclaimed path does not reclaim itself.
+            if (staging.lookAhead > 0)
             {
-                var curBlock = staging.blocks[cur];
-                if (occupancy.TryGetValue(curBlock, out var curOcc) && curOcc == true)
+                int cur = staging.currentBlockIndex;
+                if (cur < staging.blocks.Length)
                 {
-                    if (!_activeBlocks.TryGetValue(curBlock, out var curClaimer))
-                        ActivateBlock(curBlock, staging);
+                    var curBlock = staging.blocks[cur];
+                    if (occupancy.TryGetValue(curBlock, out var curOcc) && curOcc == true)
+                    {
+                        if (!_activeBlocks.TryGetValue(curBlock, out var curClaimer))
+                            ActivateBlock(curBlock, staging);
+                    }
                 }
             }
 
@@ -507,7 +529,7 @@ namespace DvMod.RemoteDispatch
                 if (canTry && _retryTimes.TryGetValue(staging.pathId, out var retryTime)
                     && DateTime.UtcNow < retryTime)
                     canTry = false;
-                maxBlocks = staging.lookAhead - CountClaimedAhead(staging);
+                maxBlocks = Math.Min(staging.lookAhead - CountClaimedAhead(staging), claimCap);
             }
 
             // A conflict probe extends up to where opposing/upcoming paths end, but

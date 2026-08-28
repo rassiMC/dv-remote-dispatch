@@ -1003,6 +1003,27 @@ const PathingController = {
     },
 
     _deletePath(pathId) {
+        // Two-stage delete: if the path currently has claims, the first press only
+        // removes the clearance (fallback to pull the claims without deleting the
+        // route - the server drops lookAhead to 0 so it stays unclaimed); a second
+        // press (no claims left) deletes the path for good.
+        const p = this.lockedPaths.find(x => x.id === pathId);
+        const hasClaims = p && p.blocks && p.blockStates
+            && p.blocks.some(b => p.blockStates[b] === 'claimed');
+        if (hasClaims) {
+            fetch(new URL(`/path/${pathId}/unclaim`, location), { method: 'POST' })
+                .then(resp => {
+                    if (resp.ok) {
+                        fetch(new URL('/path', location))
+                            .then(r => r.json())
+                            .then(data => this.syncFromServer(data));
+                        this.updateStatus('Path clearance removed - press \u2716 again to delete.');
+                    } else {
+                        this.updateStatus('Failed to remove path clearance.');
+                    }
+                });
+            return;
+        }
         fetch(new URL(`/path/${pathId}`, location), { method: 'DELETE' })
             .then(resp => {
                 if (!resp.ok) return;

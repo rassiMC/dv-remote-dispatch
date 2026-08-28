@@ -237,6 +237,25 @@ namespace DvMod.RemoteDispatch
             Sessions.AddTag("paths");
         }
 
+        /// <summary>
+        /// Removes a path's clearance without deleting it (first press of the delete
+        /// button): releases the staging claims and drops the persisted lookAhead to
+        /// 0 so the path does not reclaim itself; it stays active and can be
+        /// re-cleared with the + button, and a second delete removes it entirely.
+        /// The paths lock is released before touching staging (lockObj -> paths).
+        /// </summary>
+        public static void UnclaimPath(string id)
+        {
+            lock (paths)
+            {
+                var p = paths.FirstOrDefault(x => x.Value<string>("id") == id);
+                if (p == null) return;
+                p["lookAhead"] = 0;
+            }
+            StagingData.UnclaimPath(id);
+            Sessions.AddTag("paths");
+        }
+
         public static void RemovePrefixFromPath(string id, int count)
         {
             lock (paths)

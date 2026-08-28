@@ -862,6 +862,16 @@ namespace DvMod.RemoteDispatch
 				return;
 			}
 
+			if (method == "POST" && segments.Length >= 4 && segments[3].TrimEnd('/') == "unclaim")
+			{
+				var pathId = segments[2].TrimEnd('/');
+				// UnclaimPath releases the path's claimed blocks (reverting signal
+				// aspects) on the main thread.
+				await Updater.RunOnMainThread(() => PathingData.UnclaimPath(pathId)).ConfigureAwait(false);
+				RenderEmpty(context, 204);
+				return;
+			}
+
 			if (method == "PATCH" && segments.Length >= 3)
 			{
 				try

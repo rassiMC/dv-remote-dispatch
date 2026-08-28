@@ -82,6 +82,41 @@ const TrackRenderer = {
         return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
     },
 
+    // #rrggbb -> HSL. h in [0,360), s/l in [0,1]. Returns null on bad input.
+    hexToHsl(hex) {
+        const c = this.parseHex(hex);
+        if (!c) return null;
+        const r = c.r / 255, g = c.g / 255, b = c.b / 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h = 0, s = 0;
+        const l = (max + min) / 2;
+        if (max !== min) {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+            else if (max === g) h = (b - r) / d + 2;
+            else h = (r - g) / d + 4;
+            h *= 60;
+        }
+        return { h, s, l };
+    },
+
+    // HSL (h in [0,360), s/l in [0,1]) -> #rrggbb.
+    hslToHex(h, s, l) {
+        const hue = ((h % 360) + 360) % 360;
+        const c = (1 - Math.abs(2 * l - 1)) * s;
+        const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+        const m = l - c / 2;
+        let r = 0, g = 0, b = 0;
+        if (hue < 60) { r = c; g = x; }
+        else if (hue < 120) { r = x; g = c; }
+        else if (hue < 180) { g = c; b = x; }
+        else if (hue < 240) { g = x; b = c; }
+        else if (hue < 300) { r = x; b = c; }
+        else { r = c; b = x; }
+        return `#${this.hex2((r + m) * 255)}${this.hex2((g + m) * 255)}${this.hex2((b + m) * 255)}`;
+    },
+
     getNextColor() {
         const color = this.blockColors[this.colorIndex % this.blockColors.length];
         this.colorIndex++;

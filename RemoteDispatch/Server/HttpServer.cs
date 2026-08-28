@@ -806,6 +806,62 @@ namespace DvMod.RemoteDispatch
 				return;
 			}
 
+			if (method == "PATCH" && segments.Length >= 4 && segments[3].TrimEnd('/') == "lookahead")
+			{
+				try
+				{
+					const int maxBodySize = 524288;
+					using var stream = context.Request.InputStream;
+					using var ms = new System.IO.MemoryStream();
+					stream.CopyTo(ms);
+					if (ms.Length > maxBodySize)
+						throw new Exception("Request body too large");
+					string bodyText = Encoding.UTF8.GetString(ms.ToArray());
+					var lookaheadObj = JObject.Parse(bodyText);
+					var value = lookaheadObj.Value<int?>("lookAhead");
+					if (value == null)
+					{
+						RenderEmpty(context, 400);
+						return;
+					}
+					var pathId = segments[2].TrimEnd('/');
+					// SetLookAhead can release/claim blocks (signal/switch mutations),
+					// so it must run on the main thread.
+					await Updater.RunOnMainThread(() => PathingData.UpdatePathLookAhead(pathId, value.Value)).ConfigureAwait(false);
+					RenderEmpty(context, 204);
+				}
+				catch (Exception e)
+				{
+					Main.Warning($"Failed to parse path lookahead request: {e.Message}");
+					RenderEmpty(context, 400);
+				}
+				return;
+			}
+
+			if (method == "PATCH" && segments.Length >= 4 && segments[3].TrimEnd('/') == "color")
+			{
+				try
+				{
+					const int maxBodySize = 524288;
+					using var stream = context.Request.InputStream;
+					using var ms = new System.IO.MemoryStream();
+					stream.CopyTo(ms);
+					if (ms.Length > maxBodySize)
+						throw new Exception("Request body too large");
+					string bodyText = Encoding.UTF8.GetString(ms.ToArray());
+					var colorObj = JObject.Parse(bodyText);
+					var pathId = segments[2].TrimEnd('/');
+					PathingData.UpdatePathColor(pathId, colorObj.Value<string>("color"));
+					RenderEmpty(context, 204);
+				}
+				catch (Exception e)
+				{
+					Main.Warning($"Failed to parse path color request: {e.Message}");
+					RenderEmpty(context, 400);
+				}
+				return;
+			}
+
 			if (method == "PATCH" && segments.Length >= 3)
 			{
 				try
@@ -829,22 +885,6 @@ namespace DvMod.RemoteDispatch
 					Main.Warning($"Failed to parse path patch request: {e.Message}");
 					RenderEmpty(context, 400);
 				}
-				return;
-			}
-
-			if (method == "POST" && segments.Length >= 4 && segments[3].TrimEnd('/') == "advance")
-			{
-				var pathId = segments[2].TrimEnd('/');
-				if (!Main.settings.permissions.HasPathingPermission(username))
-				{
-					RenderEmpty(context, 403);
-					return;
-				}
-				bool ok = await Updater.RunOnMainThread(() => StagingData.ForceClaimNextBlock(pathId)).ConfigureAwait(false);
-				if (ok)
-					Render200(context, ContentTypes.Json, new JObject { ["ok"] = true }.ToString());
-				else
-					Render200(context, ContentTypes.Json, new JObject { ["ok"] = false, ["error"] = "No claimable block found" }.ToString());
 				return;
 			}
 

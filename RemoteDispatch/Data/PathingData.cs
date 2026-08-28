@@ -1,6 +1,8 @@
 using Newtonsoft.Json.Linq;
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace DvMod.RemoteDispatch
 {
@@ -121,13 +123,16 @@ namespace DvMod.RemoteDispatch
         {
             var id = $"p{nextId++}";
             pathEntry["id"] = id;
+            // Store the (defaulted) claim-ahead amount on the path so it round-trips
+            // through /path GET and survives reloads/extensions.
+            pathEntry["lookAhead"] = pathEntry.Value<int?>("lookAhead") ?? 5;
             lock (paths)
             {
                 paths.Add((JObject)pathEntry.DeepClone());
             }
             var blocks = pathEntry["blocks"] as JArray;
             if (blocks != null)
-                StagingData.AddPath(id, blocks, pathEntry.Value<int?>("lookAhead") ?? 2);
+                StagingData.AddPath(id, blocks, pathEntry.Value<int?>("lookAhead") ?? 5);
             Sessions.AddTag("paths");
             return id;
         }
@@ -162,6 +167,10 @@ namespace DvMod.RemoteDispatch
                     oldPath = (JObject)existing.DeepClone();
                     if (oldPath["note"] != null && pathEntry.Property("note") == null)
                         pathEntry["note"] = oldPath["note"];
+                    if (oldPath["lookAhead"] != null && pathEntry.Property("lookAhead") == null)
+                        pathEntry["lookAhead"] = oldPath["lookAhead"];
+                    if (oldPath["color"] != null && pathEntry.Property("color") == null)
+                        pathEntry["color"] = oldPath["color"];
                     paths[paths.IndexOf(existing)] = (JObject)pathEntry.DeepClone();
                 }
             }
@@ -184,6 +193,46 @@ namespace DvMod.RemoteDispatch
                     p.Remove("note");
                 else
                     p["note"] = note;
+            }
+            Sessions.AddTag("paths");
+        }
+
+        /// <summary>
+        /// Sets a path's claim-ahead amount (the + / - stepper). The paths lock is
+        /// released before touching staging so lock ordering stays lockObj -> paths.
+        /// </summary>
+        public static void UpdatePathLookAhead(string id, int lookAhead)
+        {
+            int clamped = Math.Max(0, lookAhead);
+            lock (paths)
+            {
+                var p = paths.FirstOrDefault(x => x.Value<string>("id") == id);
+                if (p == null) return;
+                p["lookAhead"] = clamped;
+            }
+            StagingData.SetLookAhead(id, clamped);
+            Sessions.AddTag("paths");
+        }
+
+        /// <summary>
+        /// Sets a path's display colour (the switchboard hue slider). Cosmetic only -
+        /// no staging interaction, so it does not need the main thread.
+        /// </summary>
+        public static void UpdatePathColor(string id, string? color)
+        {
+            if (!string.IsNullOrEmpty(color) && !Regex.IsMatch(color, "^#[0-9a-fA-F]{6}$"))
+            {
+                Main.Warning($"PathingData: rejecting invalid path color '{color}' for {id}");
+                return;
+            }
+            lock (paths)
+            {
+                var p = paths.FirstOrDefault(x => x.Value<string>("id") == id);
+                if (p == null) return;
+                if (string.IsNullOrEmpty(color))
+                    p.Remove("color");
+                else
+                    p["color"] = color;
             }
             Sessions.AddTag("paths");
         }

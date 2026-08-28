@@ -7,26 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-path **claim-ahead stepper** in the switchboard sidebar: a `− N +`
+  control sets how many blocks a path claims ahead of itself
+  (`PATCH /path/{id}/lookahead`). The `+` button grows the window and claims it
+  immediately (skipping the 5s pacing timer, replacing the removed "Claim
+  next" button); `−` releases claims beyond the window (guard signals revert
+  to stop). `lookAhead` is persisted per path (default 5, min 0 = fully
+  manual, no upper cap beyond the route length) and now actually bounds the
+  claim engine's window (previously vestigial).
+- Per-path **colour hue slider** in the switchboard sidebar: rotates the hue of
+  the path's colour (`PATCH /path/{id}/color`, stored in the `color` field so
+  it survives reloads/extensions); block colouring and sidebar chips use it.
+- Removed the **print-to-console** button and the **"Claim next" / advance**
+  button/endpoint (`/path/{id}/advance`, `ForceClaimNextBlock`), now covered by
+  the `+` stepper.
+
 ### Fixed
 
 - Initial claiming is no longer separate from normal advancing: a single
   `StagingData.Advance` function now handles the seed, train movement, and the
   conflict-aware lookahead extension, and runs synchronously as a startup check
   from path creation/restore (`AddPath` / `InitializeFromPaths`) as well as from
-  route extension, the periodic check, and the manual "Claim next" button. The
+  route extension, the periodic check, and the lookahead grow (`+` button). The
   auto-extension pacing timer is 5s instead of 20s and only paces the ordinary
-  automatic extension - train advances, conflict probes, and manual claims run
-  immediately, and conflict probes no longer keep the timer alive (which
-  previously locked a path out for a full interval right after opposing traffic
-  cleared).
+  automatic extension - train advances and conflict probes run immediately, and
+  conflict probes no longer keep the timer alive (which previously locked a
+  path out for a full interval right after opposing traffic cleared).
 - Pathing conflict prevention: the first automatic extension of a path facing
   opposing traffic no longer claims into the section opposing traffic still
   holds. `StagingData.TryClaimFrom`'s Case 2 branch is merged into the Case 1
   `CalcRange` walk, so an extension claims only up to the point where no more
-  opposing paths are detected (backing off on the 20s retry otherwise). The
+  opposing paths are detected (backing off on the retry otherwise). The
   automatic advance re-evaluates opposing traffic even when the lookahead
-  ceiling or retry timer would otherwise skip it, and the manual "Claim next"
-  button inherits the same gating.
+  ceiling or retry timer would otherwise skip it, and the lookahead grow
+  (`+`) inherits the same gating.
 - New-path seeding now routes through the conflict-aware `TryClaimSeed`
   instead of an unguarded `ActivateBlock`: it refuses to steal the start block
   when another active path already holds it.

@@ -145,8 +145,10 @@ Server: `Server/HttpServer.cs` (port from `Main.settings.serverPort`, default
 | `/updates/{sessionId}` | GET | Sessions | long-polling update push |
 | `/signals` | GET | Sessions/SignalsShim | all-signals data (gated by `enableSignals`) |
 | `/occupancy` | GET/POST | OccupancyData | occupancy JSON; POST sets mapping/mode |
-| `/path` | GET/POST/PATCH/DELETE | PathingData/StagingData | path CRUD + `…/advance` |
+| `/path` | GET/POST/PATCH/DELETE | PathingData/StagingData | path CRUD |
 | `/path/{id}/note` | PATCH | PathingData | set a path's note text |
+| `/path/{id}/lookahead` | PATCH | PathingData/StagingData | set a path's claim-ahead amount (+/- stepper; releases/claims blocks) |
+| `/path/{id}/color` | PATCH | PathingData | set a path's display colour (hue slider) |
 | `/staging` | GET | StagingData | path staging state JSON |
 | `/pathing/activate` | POST | PathingActivation | enter pathing mode + seed staging |
 | `/signal/control` | POST | SignalsShim | set signal aspect/mode (permission-gated) |
@@ -301,8 +303,7 @@ branch-entry ("In") signals can be attributed to a junction.
     check**: `AddPath` and `InitializeFromPaths` run `Advance` once
     synchronously so a new path's seed *and* lookahead window are claimed
     immediately, not on the next tick), from route extension (`UpdatePath`),
-    and from the manual "Claim next" button (`ForceClaimNextBlock`, which passes
-    a `manualAdvance` flag).
+    and from a **growing** lookahead (`SetLookAhead`, the `+` button).
     Restoring existing paths (page reload / pathing re-activation via
     `InitializeFromPaths`) **preserves the live staging state**: already-tracked
     paths keep their claims as they were, and only genuinely new paths get the
@@ -313,16 +314,17 @@ branch-entry ("In") signals can be attributed to a junction.
   shared span). Non-opposing paths dequeue as they pass through; physical
   occupancy blocks a claim only for that block (walk continues past it).
   The **5s pacing timer** (`ClaimInterval` on `_retryTimes`) only paces the
-  ordinary automatic extension so it does not all happen at once, and is
-  stopped once **5** blocks are claimed ahead (`MaxAutoClaimAhead`). A train
-  **advancing** onto the next block, a detected conflict probe
-  (`conflictingAhead`), or a manual claim run **immediately**, bypassing the
-  timer (up to **6** ahead, `MaxTrainClaimAhead`); conflict probes do not
-  refresh the timer, so a path whose opposing traffic clears is never locked
-  out for a full interval.
-  `ForceClaimNextBlock` backs the manual "advance" button
-  (`POST /path/{id}/advance`) - it claims the next single block when clear, or
-  the full cleared range when clearing through opposing traffic.
+  ordinary automatic extension so it does not all happen at once. The per-path
+  **`lookAhead` value bounds the window** (default 5, set by the sidebar `+`/`-`
+  stepper; `0` claims nothing ahead - fully manual): auto-extension claims up
+  to `lookAhead` blocks and the train-advance extension re-fills to it, with no
+  hard upper cap beyond the route length. A train **advancing** onto the next
+  block, a detected conflict probe (`conflictingAhead`, only within the
+  lookahead window), or a **growing** lookahead (`+`, which clears the timer and
+  claims synchronously) run **immediately**, bypassing the timer; conflict
+  probes do not refresh the timer, so a path whose opposing traffic clears is
+  never locked out for a full interval. `SetLookAhead` on a **shrinking** `-`
+  releases every claim beyond the new window (guard signals revert to stop).
   Each `ActivateBlock` sets the block's guard signal to **Automatic** and throws
   its switch to the needed branch (`junction.Switch(REGULAR)`); releasing sets
   the signal back to **Manual+S1**.
@@ -331,11 +333,12 @@ branch-entry ("In") signals can be attributed to a junction.
   - **All Unity-touching mutations run on the main thread.** `ActivateBlock`
     mutates Unity objects (`junction.Switch`, DVSignals `ChangeOperationMode`/
     `ChangeAspect`), so every HTTP-triggered entry point - `POST /path`
-    (`AddPath`), `PATCH /path/{id}` (`UpdatePath`), `POST /path/{id}/advance`
-    (`ForceClaimNextBlock`), `DELETE /path` (`ClearPaths`/`RemovePath` +
-    `RevertRouteSignals`) and `/signal/control` (`SetSignalMode`/
-    `SetSignalAspect`) - now `await Updater.RunOnMainThread(...)` before touching
-    the staging/pathing state (matching the activation endpoint). The `Process()`
+    (`AddPath`), `PATCH /path/{id}` (`UpdatePath`), `PATCH /path/{id}/lookahead`
+    (`SetLookAhead`, which can release/claim blocks), `DELETE /path`
+    (`ClearPaths`/`RemovePath` + `RevertRouteSignals`) and `/signal/control`
+    (`SetSignalMode`/`SetSignalAspect`) - now `await Updater.RunOnMainThread(...)`
+    before touching the staging/pathing state (matching the activation endpoint).
+    The `Process()`
     staging loop already runs on the main thread via `CheckStagingCoro`. This
     fixed a game freeze when setting a path: `AddPath` used to run `Junction.Switch`
     from the HTTP threadpool thread while the main thread waited on the staging
@@ -389,7 +392,7 @@ and finally `main.js?v=...` (cache-busted with a date).
 | `switchboard-mapper.js` | `SwitchboardMapper` | fetch `/graph`, build switchboard graph, `runParallelWalk` to map switchboard switches → ingame junctions (strict port matching + reciprocal crossover eviction, no degree fallback) |
 | `switchboard-signals.js` | `SwitchboardSignals` | per-switch signal mapping, `VirtualSignal` forward/composition of aspects, lamp-based dot colouring |
 | `switchboard-occupation.js` | `SwitchboardOccupancy` | occupancy mode (direct/hardcore) → POST `/occupancy` |
-| `switchboard-pathing.js` | `PathingController` | interactive path select + A*-style block routing on frontend, then POST `/path`; displays locked paths, block chips, advance/delete; colours claimed/waiting blocks |
+| `switchboard-pathing.js` | `PathingController` | interactive path select + A*-style block routing on frontend, then POST `/path`; displays locked paths, block chips, claim-ahead stepper + colour hue slider, delete/extend; colours claimed/waiting blocks |
 | `main.js` | - | map set-up, sidebar tabs, jobs/cars tables, and switchboard bootstrap (`initSwitchboard`, `loadSampleTrackData`, `buildSwitchMapping`, `sendBlockOccupancyMapping`) |
 
 ### Switchboard view
@@ -510,17 +513,21 @@ path search behind this (`computeBlockPath` → `_ensurePathTree`) is a
   primary routing UX.
 - **Path notes**: each locked path has a sidebar note field ("locomotive /
   destination / note") saved via `PATCH /path/{id}/note`
-  (`PathingData.UpdatePathNote`), preserved across path updates, and echoed in
-  the console `_printPath` output.
+  (`PathingData.UpdatePathNote`) and preserved across path updates.
 - `PathingController` is armed by the `enablePathing` flag via the `modconfig`
   tag (not by the view toggle). Activation (`POST /pathing/activate`) is only
   sent once a real switch→junction mapping exists; if the flag is on before the
   switchboard is ever opened, `enableFromMapping()` fires the activation as soon
   as the board builds its mapping.
 - The sidebar `#pathList` renders each locked path with block chips, a note
-  field, a ⊕ **extend** button, a print-to-console button, a delete button, and
-  a ▶**advance** button (backed by `/path/{id}/advance`). The row being extended
-  is highlighted with a green border.
+  field, a **− N +** **claim-ahead stepper** (`PATCH /path/{id}/lookahead`: the
+  `+` grows the window and claims it immediately, skipping the 5s pacing timer,
+  so it replaces the old "Claim next" button; `−` releases claims beyond the
+  window), a **hue slider** for the path colour (`PATCH /path/{id}/color`,
+  `PathingController._changePathHue` - rotates the hue of the path's colour,
+  kept server-side in the `color` field so it survives reloads), a delete
+  button, and a ⊕ **extend** button. The row being extended is highlighted with
+  a green border.
 
 ### Switchboard performance notes
 - The switchboard map uses `preferCanvas: true` (§ "Switchboard view"), so all
@@ -731,9 +738,11 @@ Derived from reading the code; not a plan. The most fragile points:
     branch used. Case 2 is now merged into Case 1, so an extension that
     detects opposing traffic walks `CalcRange` and claims **only up to the
     point where no more opposing paths are detected** (returning 0 and backing
-    off on the 20s retry when opposing holds the section). The manual "Claim
-    next" button (`ForceClaimNextBlock`) inherits the same gating - it clears
-    the full range up to where opposing paths end.
+    off on the retry when opposing holds the section). The conflict-aware
+    gating applies to the lookahead grow (`+` button) the same way - it clears
+    the full range up to where opposing paths end. (The manual "Claim next"
+    button/endpoint that used to back this was removed in favour of the `+`
+    stepper.)
 17. **Manual signal control doesn't apply to in-game clients for every pack.**
     Setting a signal's aspect/mode manually (via the switchboard or
     `/signal/control`) takes effect for the web dispatcher but not for players

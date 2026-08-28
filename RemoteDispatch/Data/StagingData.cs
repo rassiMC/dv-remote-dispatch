@@ -12,12 +12,10 @@ namespace DvMod.RemoteDispatch
         private static readonly object lockObj = new object();
 
         private const int DefaultLookAhead = 5;
-        private const int MaxAutoClaimAhead = 5;
-        private const int MaxTrainClaimAhead = 6;
 
         // Paces the ordinary automatic lookahead extension so it does not all
-        // happen at once. Train advances, conflict probes, and manual claims run
-        // immediately regardless of this timer.
+        // happen at once. Train advances, conflict probes, and a growing lookahead
+        // (+ button) run immediately regardless of this timer.
         private static readonly TimeSpan ClaimInterval = TimeSpan.FromSeconds(5);
 
         private class PathStaging
@@ -33,7 +31,7 @@ namespace DvMod.RemoteDispatch
                 this.pathId = pathId;
                 this.blocks = blocks;
                 this.currentBlockIndex = 0;
-                this.lookAhead = lookAhead;
+                this.lookAhead = Math.Max(0, lookAhead);
                 this.status = "Active";
             }
         }
@@ -132,36 +130,49 @@ namespace DvMod.RemoteDispatch
             }
         }
 
-        public static bool ForceClaimNextBlock(string pathId)
+        /// <summary>
+        /// Changes how many blocks a path claims ahead of its current block (the
+        /// + / - stepper in the switchboard sidebar). Shrinking releases claims
+        /// beyond the new window (guard signals revert to stop); growing clears the
+        /// pacing timer and claims the extra window immediately, so the + button
+        /// acts like the old "Claim next" without waiting for the 5s timer.
+        /// </summary>
+        public static void SetLookAhead(string pathId, int value)
         {
             lock (lockObj)
             {
                 if (!_pathProgress.TryGetValue(pathId, out var staging))
-                    return false;
+                    return;
                 if (staging.status != "Active")
-                    return false;
+                    return;
 
-                var (_, _, b2Index) = GetClaimWindowEnd(staging);
-                if (b2Index >= staging.blocks.Length)
-                    return false;
+                int clamped = Math.Max(0, value);
+                if (clamped == staging.lookAhead)
+                    return;
 
-                if (Advance(staging, manualAdvance: true))
+                if (clamped < staging.lookAhead)
                 {
-                    var (claimed, claimedEnd, _) = GetClaimWindowEnd(staging);
-                    if (claimed)
+                    // Shrink: release every block this path claims at or beyond the
+                    // new window edge (walking from the far end). The train's own
+                    // current block is always kept.
+                    int limit = staging.currentBlockIndex + Math.Max(clamped, 1);
+                    for (int i = staging.blocks.Length - 1; i >= limit; i--)
                     {
-                        int needed = claimedEnd - staging.currentBlockIndex;
-                        if (needed > staging.lookAhead)
-                            staging.lookAhead = needed;
+                        var blockId = staging.blocks[i];
+                        if (_activeBlocks.TryGetValue(blockId, out var claimer) && claimer == staging.pathId)
+                            ReleaseBlock(blockId);
                     }
-
-                    _retryTimes.Remove(pathId);
-                    Sessions.AddTag("paths");
-                    return true;
                 }
 
-                _retryTimes[pathId] = DateTime.UtcNow + ClaimInterval;
-                return false;
+                staging.lookAhead = clamped;
+
+                if (clamped > 0)
+                {
+                    // Grow: skip the pacing timer so the extra window is claimed
+                    // synchronously, mirroring the + button's "claim next" role.
+                    _retryTimes.Remove(pathId);
+                    Advance(staging);
+                }
             }
         }
 
@@ -362,8 +373,7 @@ namespace DvMod.RemoteDispatch
         /// next claim-window start (ws). Mirrors the detection TryClaimFrom uses so
         /// the automatic advance can re-run the conflict-aware claim (and let
         /// CalcRange clear up to where opposing paths end) even when the lookahead
-        /// ceiling or the retry timer would otherwise skip the attempt - matching
-        /// the manual "Claim next" button.
+        /// ceiling or the retry timer would otherwise skip the attempt.
         /// </summary>
         private static bool HasOpposingOrNewAhead(PathStaging staging, int ws)
         {
@@ -417,13 +427,14 @@ namespace DvMod.RemoteDispatch
         /// occupied), ensures the train's own block is claimed (the seed), and
         /// extends the lookahead window conflict-aware. Used by the periodic
         /// Process() check, path creation/restore (startup check), route
-        /// extension, and the manual "Claim next" button (manualAdvance).
+        /// extension, and the lookahead grow (+ button) path.
         /// The ClaimInterval timer only paces the ordinary automatic extension so
-        /// it does not all happen at once; a train advance, a conflict probe, or a
-        /// manual advance always runs immediately.
+        /// it does not all happen at once; a train advance or a conflict probe
+        /// always runs immediately. The per-path lookAhead bounds the window
+        /// (0 claims nothing ahead - fully manual).
         /// Returns true when the train advanced or a block was claimed.
         /// </summary>
-        private static bool Advance(PathStaging staging, bool manualAdvance = false)
+        private static bool Advance(PathStaging staging)
         {
             var occupancy = OccupancyData.GetOccupancyData();
             bool changed = false;
@@ -488,35 +499,33 @@ namespace DvMod.RemoteDispatch
             if (trainAdvanced)
             {
                 canTry = true;
-                maxBlocks = MaxTrainClaimAhead - CountClaimedAhead(staging);
+                maxBlocks = staging.lookAhead - CountClaimedAhead(staging);
             }
             else
             {
-                canTry = CountClaimedAhead(staging) < MaxAutoClaimAhead;
+                canTry = CountClaimedAhead(staging) < staging.lookAhead;
                 if (canTry && _retryTimes.TryGetValue(staging.pathId, out var retryTime)
                     && DateTime.UtcNow < retryTime)
                     canTry = false;
-                maxBlocks = MaxAutoClaimAhead - CountClaimedAhead(staging);
+                maxBlocks = staging.lookAhead - CountClaimedAhead(staging);
             }
 
-            if (manualAdvance)
-            {
-                canTry = true;
-                maxBlocks = int.MaxValue;
-            }
+            // A conflict probe extends up to where opposing/upcoming paths end, but
+            // only within the path's own lookahead window (0 = nothing ahead).
+            bool canProbe = conflictingAhead && staging.lookAhead > 0;
 
-            if ((canTry && maxBlocks > 0) || conflictingAhead || manualAdvance)
+            if ((canTry && maxBlocks > 0) || canProbe)
             {
-                int effectiveMax = (conflictingAhead || manualAdvance) ? Math.Max(1, maxBlocks) : maxBlocks;
-                var (claimed, _) = TryClaimFrom(staging, ws, effectiveMax, occupancy, manualAdvance);
+                int effectiveMax = canProbe ? Math.Max(1, maxBlocks) : maxBlocks;
+                var (claimed, _) = TryClaimFrom(staging, ws, effectiveMax, occupancy);
                 if (claimed)
                     changed = true;
 
                 // The timer only paces the ordinary automatic extension. A conflict
-                // probe (or a manual advance) must not keep it alive - refreshing it
-                // there previously locked a path out for a full interval right after
-                // the opposing traffic cleared.
-                if (!conflictingAhead && !manualAdvance)
+                // probe must not keep it alive - refreshing it there previously
+                // locked a path out for a full interval right after the opposing
+                // traffic cleared.
+                if (!canProbe)
                     _retryTimes[staging.pathId] = DateTime.UtcNow + ClaimInterval;
             }
 
@@ -642,18 +651,14 @@ namespace DvMod.RemoteDispatch
         /// startIndex, respecting opposing/upcoming paths and physical occupancy.
         /// When new or opposing paths are detected ahead, CalcRange walks the
         /// route and only claims up to the point where those conflicts have ended.
-        /// When manualAdvance is true (the Claim Next block button) it claims a
-        /// single block when nothing is in the way, and the full cleared range
-        /// when clearing through opposing traffic. Otherwise it fills up to
-        /// maxBlocks (the automatic lookahead window).
+        /// Otherwise it fills up to maxBlocks (the path's lookahead window).
         /// Returns (success, claimedCount); claimedCount == 0 means nothing claimed.
         /// </summary>
         private static (bool, int) TryClaimFrom(
             PathStaging staging,
             int startIndex,
             int maxBlocks,
-            Dictionary<string, bool?> occupancy,
-            bool manualAdvance = false)
+            Dictionary<string, bool?> occupancy)
         {
             if (startIndex >= staging.blocks.Length)
                 return (false, 0);
@@ -713,7 +718,7 @@ namespace DvMod.RemoteDispatch
             }
             else
             {
-                int bound = manualAdvance ? 1 : maxBlocks;
+                int bound = maxBlocks;
                 int claimCount = 0;
 
                 for (int i = startIndex; i < staging.blocks.Length; i++)
@@ -771,7 +776,8 @@ namespace DvMod.RemoteDispatch
                     // The single advancing function handles train movement, the
                     // seed, and the conflict-aware lookahead extension. Its 5s
                     // pacing timer keeps the automatic extension from all happening
-                    // at once; advances/probes/manual claims are immediate.
+                    // at once; train advances, conflict probes, and a growing
+                    // lookahead (+ button) are immediate.
                     if (Advance(staging))
                         changed = true;
                 }

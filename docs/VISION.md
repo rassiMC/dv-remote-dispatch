@@ -50,7 +50,8 @@ A dispatcher looking at the switchboard should be able to, at a glance:
   aligning switches block-by-block as the train advances, holding a look-ahead
   window, and releasing claimed blocks behind the train.
 - Watch the train progress along the route with the claimed/occupied/waiting
-  states updating, and override manually (claim-next / delete / advance).
+  states updating, and override manually (grow/shrink the claim-ahead window
+  with the sidebar `−`/`+` stepper, delete, or extend).
 
 ### Principles the switchboard must honour
 - **No freezes** - in-game or web. Performance (both the game thread and the
@@ -151,6 +152,10 @@ A dispatcher looking at the switchboard should be able to, at a glance:
   (`renderPathList`), persisted server-side (a `color` field on the path
   payload + a `PATCH /path/{id}/color` endpoint mirroring the note endpoint);
   `pathsSignatureChanged` must become colour-aware so the sidebar repaints.
+  **(Done, hue-only for now)** - a per-path **hue slider** in the sidebar
+  (`PATCH /path/{id}/color`, stored in the `color` field, survives reloads,
+  `pathsSignatureChanged` is colour-aware); a full arbitrary-colour picker
+  (e.g. saturation/lightness) is future work.
 - **Path-choosing revamp**: creating a new path should use the *same* drafting
   flow as extending (anchored draft, hover preview, waypoints, chained
   sections - POST the first section, PATCH subsequent ones) instead of the
@@ -160,13 +165,16 @@ A dispatcher looking at the switchboard should be able to, at a glance:
     lookahead window synchronously (mirroring the `UpdatePath` fix) instead of
     waiting for the next `Process()` tick. **(Done)** - a single `Advance`
     function now handles seed + window extension and runs synchronously from
-    `AddPath` / `InitializeFromPaths` (startup check), `UpdatePath`, the manual
-    claim button, and the periodic `Process()` check; the 5s `ClaimInterval`
-    timer only paces the ordinary automatic extension.
+    `AddPath` / `InitializeFromPaths` (startup check), `UpdatePath`, the
+    lookahead grow (`+`), and the periodic `Process()` check; the 5s
+    `ClaimInterval` timer only paces the ordinary automatic extension.
   - Editable claiming amount: a per-path "blocks ahead" value in the sidebar,
-    sent as `lookAhead` and actually used to bound that path's claim window
-    (the field is currently vestigial; `MaxAutoClaimAhead`/`MaxTrainClaimAhead`
-    rule today).
+    sent as `lookAhead` and actually used to bound that path's claim window.
+    **(Done)** - the sidebar `− N +` stepper (`PATCH /path/{id}/lookahead`)
+    sets `lookAhead` per path (default 5, min 0 = fully manual, no upper cap
+    beyond the route length); the claim engine bounds the window by it and the
+    `+` button claims immediately (skipping the timer), replacing the old
+    "Claim next" button.
   - Claimed sections ending right before signals: claiming proceeds only when
     the whole section up to the next signal is good to claim. Details TBD when
     picked up.

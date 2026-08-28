@@ -1092,7 +1092,7 @@ const switchboardRepaint = {
 		if (!p) return false;
 		let sig = '';
 		for (const path of p) {
-			sig += (path.id || '') + ':' + (path.startBlock || '') + ':' + (path.destBlock || '') + ':' + (path.note || '') + ';';
+			sig += (path.id || '') + ':' + (path.startBlock || '') + ':' + (path.destBlock || '') + ':' + (path.note || '') + ':' + (path.lookAhead ?? '') + ':' + (path.color || '') + ';';
 			const states = path.blockStates || {};
 			for (const b of (path.blocks || [])) sig += b + (states[b] || 'u') + ',';
 			sig += '|';

@@ -625,14 +625,16 @@ const PathingController = {
             const assigned = new Set();
             for (const p of this.lockedPaths) {
                 if (!p || !p.id) continue;
-                let color = this._pathColors.get(p.id);
+                // A server-persisted colour (user-set via the hue slider) wins, then
+                // the in-session _pathColors map, then a fresh random blue-dominant one.
+                let color = p.color || this._pathColors.get(p.id);
                 if (!color) {
                     let tries = 0;
                     do {
                         color = switchboardRenderer.randomPathColor();
                     } while (color && usedColors.has(color) && ++tries < 32);
-                    this._pathColors.set(p.id, color);
                 }
+                this._pathColors.set(p.id, color);
                 usedColors.add(color);
                 if (assigned.has(p.id)) continue;
                 assigned.add(p.id);
@@ -1000,19 +1002,6 @@ const PathingController = {
         }
     },
 
-    _printPath(pathId) {
-        const p = this.lockedPaths.find(x => x.id === pathId);
-        if (!p) { console.warn('[Pathing] Path not found:', pathId); return; }
-        console.log(`=== Path ${pathId}: ${p.startBlock || '?'} → ${p.destBlock || '?'}${p.note ? ` [${p.note}]` : ''} ===`);
-        console.log(`Blocks (${(p.blocks || []).length}):`);
-        for (const b of (p.blocks || [])) {
-            const state = (p.blockStates && p.blockStates[b]) || 'unclaimed';
-            console.log(`  ${b}: ${state}`);
-        }
-        console.log('Switch assignments:', JSON.stringify(p.switchAssignments));
-        console.log('Signal IDs:', p.signalIds);
-    },
-
     _deletePath(pathId) {
         fetch(new URL(`/path/${pathId}`, location), { method: 'DELETE' })
             .then(resp => {
@@ -1020,20 +1009,6 @@ const PathingController = {
                 fetch(new URL('/path', location))
                     .then(r => r.json())
                     .then(data => this.syncFromServer(data));
-            });
-    },
-
-    _advancePath(pathId) {
-        fetch(new URL(`/path/${pathId}/advance`, location), { method: 'POST' })
-            .then(resp => resp.json())
-            .then(data => {
-                if (data && data.ok) {
-                    fetch(new URL('/path', location))
-                        .then(r => r.json())
-                        .then(serverData => this.syncFromServer(serverData));
-                } else {
-                    console.warn('[Pathing] Advance failed:', data && data.error);
-                }
             });
     },
 
@@ -1054,6 +1029,67 @@ const PathingController = {
                     return;
                 }
                 p.note = note || undefined;
+            });
+    },
+
+    // + / - stepper for how many blocks this path claims ahead of itself. The
+    // + button grows the window and the server claims it immediately (skipping
+    // the 5s pacing timer), so it behaves like the old "Claim next" button.
+    _changeLookAhead(pathId, delta) {
+        const p = this.lockedPaths.find(x => x.id === pathId);
+        if (!p) return;
+        const current = (typeof p.lookAhead === 'number') ? p.lookAhead : 5;
+        const next = Math.max(0, current + delta);
+        if (next === current) return;
+        fetch(new URL(`/path/${pathId}/lookahead`, location), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lookAhead: next })
+        })
+            .then(resp => {
+                if (!resp.ok) {
+                    console.warn('[Pathing] Failed to set lookahead for', pathId);
+                    return;
+                }
+                p.lookAhead = next;
+                this.renderPathList(true);
+            });
+    },
+
+    _hueOf(color) {
+        if (typeof switchboardRenderer !== 'undefined' && switchboardRenderer.hexToHsl) {
+            const hsl = switchboardRenderer.hexToHsl(color || '#4080c0');
+            if (hsl) return Math.round(hsl.h);
+        }
+        return 180;
+    },
+
+    // Hue slider for the path colour: keeps the current saturation/lightness and
+    // only rotates the hue (no blue-dominant restriction).
+    _changePathHue(pathId, hue) {
+        const p = this.lockedPaths.find(x => x.id === pathId);
+        if (!p) return;
+        const h = Number(hue) || 0;
+        const base = (typeof switchboardRenderer !== 'undefined' && switchboardRenderer.hexToHsl)
+            ? switchboardRenderer.hexToHsl(p.color || '#4080c0')
+            : null;
+        const color = switchboardRenderer.hslToHex(h, base ? base.s : 0.6, base ? base.l : 0.55);
+        fetch(new URL(`/path/${pathId}/color`, location), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ color: color })
+        })
+            .then(resp => {
+                if (!resp.ok) {
+                    console.warn('[Pathing] Failed to save colour for', pathId);
+                    return;
+                }
+                p.color = color;
+                if (this._pathColors) this._pathColors.set(pathId, color);
+                if (p.blocks && typeof switchboardRepaint !== 'undefined' && switchboardRepaint && switchboardRepaint.markBlocks) {
+                    switchboardRepaint.markBlocks(p.blocks);
+                }
+                this.renderPathList(true);
             });
     },
 
@@ -1087,6 +1123,7 @@ const PathingController = {
                     return `<span style="display:inline-block;background:${color};color:#000;font-size:11px;padding:1px 5px;margin:1px;border-radius:3px;${extra}font-weight:600">${b}</span>`;
                 }).join('');
                 const pid = p.id;
+                const pathHue = this._hueOf(p.color);
                 const isExtending = this.state === 'extendingPath' && this.extendPathId === pid;
                 const rowStyle = isExtending
                     ? 'margin:6px 0;padding:4px;border:1px solid #2fbf4f;border-radius:4px;'
@@ -1095,10 +1132,18 @@ const PathingController = {
                     <div style="display:flex;align-items:center;gap:6px;">
                         <span style="color:#4c4;font-size:14px">\u2713</span>
                         <span style="font-size:13px;font-weight:600;flex:1">${label}</span>
-                        <button onclick="PathingController._printPath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer" title="Print path to F12 console">\u{1F4DD}</button>
                         <button onclick="PathingController._deletePath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#c44" title="Delete this path">\u2716</button>
-                        <button onclick="PathingController._advancePath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#48f" title="Claim next block">\u25B6</button>
                         <button onclick="PathingController.beginExtendPath('${pid}')" style="font-size:10px;padding:1px 5px;cursor:pointer;color:#2fbf4f" title="Add unclaimed sections to this path">\u2295</button>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:5px;margin-top:4px;">
+                        <span style="color:#aaa">Ahead</span>
+                        <button onclick="PathingController._changeLookAhead('${pid}', -1)" style="font-size:11px;padding:0 5px;cursor:pointer" title="Claim one less block ahead">\u2212</button>
+                        <span style="min-width:1.3em;text-align:center;font-weight:600;color:#fff">${p.lookAhead ?? 5}</span>
+                        <button onclick="PathingController._changeLookAhead('${pid}', 1)" style="font-size:11px;padding:0 5px;cursor:pointer" title="Claim one more block ahead (immediate)">+</button>
+                        <span style="color:#aaa;margin-left:4px">Hue</span>
+                        <input type="range" min="0" max="360" step="1" value="${pathHue}"
+                            oninput="PathingController._changePathHue('${pid}', this.value)"
+                            title="Path colour hue" style="flex:1;min-width:70px;"/>
                     </div>
                     <input id="note-${pid}" type="text" placeholder="Locomotive / destination / note" value="${note}"
                         style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:3px 6px;font-size:13px;background:#ddd;color:#000;border:1px solid #aaa;border-radius:3px;"

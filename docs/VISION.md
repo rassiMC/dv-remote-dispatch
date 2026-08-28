@@ -158,7 +158,11 @@ A dispatcher looking at the switchboard should be able to, at a glance:
 - **Claim-engine revamp**:
   - Initial claiming: on path creation, seed the start block and extend the
     lookahead window synchronously (mirroring the `UpdatePath` fix) instead of
-    waiting for the next `Process()` tick.
+    waiting for the next `Process()` tick. **(Done)** - a single `Advance`
+    function now handles seed + window extension and runs synchronously from
+    `AddPath` / `InitializeFromPaths` (startup check), `UpdatePath`, the manual
+    claim button, and the periodic `Process()` check; the 5s `ClaimInterval`
+    timer only paces the ordinary automatic extension.
   - Editable claiming amount: a per-path "blocks ahead" value in the sidebar,
     sent as `lookAhead` and actually used to bound that path's claim window
     (the field is currently vestigial; `MaxAutoClaimAhead`/`MaxTrainClaimAhead`

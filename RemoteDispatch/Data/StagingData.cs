@@ -15,6 +15,11 @@ namespace DvMod.RemoteDispatch
         private const int MaxAutoClaimAhead = 5;
         private const int MaxTrainClaimAhead = 6;
 
+        // Paces the ordinary automatic lookahead extension so it does not all
+        // happen at once. Train advances, conflict probes, and manual claims run
+        // immediately regardless of this timer.
+        private static readonly TimeSpan ClaimInterval = TimeSpan.FromSeconds(5);
+
         private class PathStaging
         {
             public string pathId;
@@ -37,7 +42,6 @@ namespace DvMod.RemoteDispatch
         private static Dictionary<string, List<string>> _blockQueues = new Dictionary<string, List<string>>();
         private static Dictionary<string, string> _activeBlocks = new Dictionary<string, string>();
         private static Dictionary<string, DateTime> _retryTimes = new Dictionary<string, DateTime>();
-        private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(20);
 
         private static List<string> GetQueue(string blockId)
         {
@@ -78,16 +82,13 @@ namespace DvMod.RemoteDispatch
                             queue.Add(pathId);
                     }
 
-                    // Seed only the start block claim (mirroring AddPath) and defer
-                    // the first automatic extension by the full retry interval so a
-                    // first activation does not blast the entire lookahead window on
-                    // the next tick. Seeding is conflict-aware (TryClaimSeed).
-                    var occupancy = OccupancyData.GetOccupancyData();
-                    if (blocksArr.Length > 0 && occupancy.TryGetValue(blocksArr[0], out var occ) && occ == true)
-                    {
-                        TryClaimSeed(blocksArr[0], staging);
-                    }
-                    _retryTimes[pathId] = DateTime.UtcNow + RetryInterval;
+                    // Startup check for a genuinely new path: run the single
+                    // advancing function once (seeds the train's block and extends
+                    // the lookahead window synchronously), then start the 5s pacing
+                    // timer for subsequent auto-extension. Already-tracked paths keep
+                    // their live claims above, untouched.
+                    Advance(staging);
+                    _retryTimes[pathId] = DateTime.UtcNow + ClaimInterval;
                 }
 
                 if (_pathProgress.Count > 0)
@@ -110,13 +111,11 @@ namespace DvMod.RemoteDispatch
                         queue.Add(pathId);
                 }
 
-                var occupancy = OccupancyData.GetOccupancyData();
-                if (blocksArr.Length > 0 && occupancy.TryGetValue(blocksArr[0], out var occ) && occ == true)
-                {
-                    TryClaimSeed(blocksArr[0], staging);
-                }
-
-                _retryTimes[pathId] = DateTime.UtcNow;
+                // Startup check: seed the train's block and extend the lookahead
+                // window synchronously via the same advancing function used by the
+                // periodic check, then start the 5s pacing timer.
+                Advance(staging);
+                _retryTimes[pathId] = DateTime.UtcNow + ClaimInterval;
             }
         }
 
@@ -146,21 +145,22 @@ namespace DvMod.RemoteDispatch
                 if (b2Index >= staging.blocks.Length)
                     return false;
 
-                var occupancy = OccupancyData.GetOccupancyData();
-                var (ok, count) = TryClaimFrom(staging, b2Index, int.MaxValue, occupancy, manualAdvance: true);
-                if (ok)
+                if (Advance(staging, manualAdvance: true))
                 {
-                    int claimedEnd = b2Index + count - 1;
-                    int needed = claimedEnd - staging.currentBlockIndex;
-                    if (needed > staging.lookAhead)
-                        staging.lookAhead = needed;
+                    var (claimed, claimedEnd, _) = GetClaimWindowEnd(staging);
+                    if (claimed)
+                    {
+                        int needed = claimedEnd - staging.currentBlockIndex;
+                        if (needed > staging.lookAhead)
+                            staging.lookAhead = needed;
+                    }
 
                     _retryTimes.Remove(pathId);
                     Sessions.AddTag("paths");
                     return true;
                 }
 
-                _retryTimes[pathId] = DateTime.UtcNow + RetryInterval;
+                _retryTimes[pathId] = DateTime.UtcNow + ClaimInterval;
                 return false;
             }
         }
@@ -261,23 +261,11 @@ namespace DvMod.RemoteDispatch
                         queue.Add(pathId);
                 }
 
-                // Restore the train's own block claim (mirrors AddPath seeding), then
-                // immediately re-extend the lookahead clearance. Both run under lockObj
-                // on the main thread, so no Process() tick can observe released blocks.
-                var occupancy = OccupancyData.GetOccupancyData();
-                int cur = staging.currentBlockIndex;
-                if (cur < staging.blocks.Length)
-                {
-                    var curBlock = staging.blocks[cur];
-                    if (!_activeBlocks.ContainsKey(curBlock))
-                        TryClaimSeed(curBlock, staging);
-                }
-
-                int ws = staging.currentBlockIndex + 1;
-                if (ws < staging.blocks.Length)
-                {
-                    TryClaimFrom(staging, ws, MaxAutoClaimAhead, occupancy);
-                }
+                // Restore the train's own block claim and re-extend the lookahead
+                // clearance synchronously via the single advancing function. Runs
+                // under lockObj on the main thread, so no Process() tick can observe
+                // released blocks.
+                Advance(staging);
             }
         }
 
@@ -424,21 +412,115 @@ namespace DvMod.RemoteDispatch
         }
 
         /// <summary>
-        /// Seeds a newly created path's start block claim (the block the train is
-        /// currently standing on). Mirrors the conflict-aware claim entry point
-        /// (TryClaimFrom) instead of an unguarded ActivateBlock: it refuses to
-        /// steal the start block when another active path already holds it. The
-        /// start block is the train's own occupied block, so the occupancy break
-        /// does not apply and opposing/upcoming gating is left to the extension
-        /// pass.
+        /// The single advancing entry point for a path. Handles train movement
+        /// (advancing currentBlockIndex when the next claimed block becomes
+        /// occupied), ensures the train's own block is claimed (the seed), and
+        /// extends the lookahead window conflict-aware. Used by the periodic
+        /// Process() check, path creation/restore (startup check), route
+        /// extension, and the manual "Claim next" button (manualAdvance).
+        /// The ClaimInterval timer only paces the ordinary automatic extension so
+        /// it does not all happen at once; a train advance, a conflict probe, or a
+        /// manual advance always runs immediately.
+        /// Returns true when the train advanced or a block was claimed.
         /// </summary>
-        private static bool TryClaimSeed(string blockId, PathStaging staging)
+        private static bool Advance(PathStaging staging, bool manualAdvance = false)
         {
-            if (_activeBlocks.TryGetValue(blockId, out var claimer) && claimer != staging.pathId)
-                return false;
+            var occupancy = OccupancyData.GetOccupancyData();
+            bool changed = false;
+            bool trainAdvanced = false;
 
-            ActivateBlock(blockId, staging);
-            return true;
+            int nextIdx = staging.currentBlockIndex + 1;
+            if (nextIdx < staging.blocks.Length)
+            {
+                var nextBlockId = staging.blocks[nextIdx];
+                bool nextClaimedByUs = _activeBlocks.TryGetValue(nextBlockId, out var nextClaimer) && nextClaimer == staging.pathId;
+                if (nextClaimedByUs && occupancy.TryGetValue(nextBlockId, out var occ) && occ == true)
+                {
+                    var prevBlockId = staging.blocks[staging.currentBlockIndex];
+                    if (_activeBlocks.TryGetValue(prevBlockId, out var cp) && cp == staging.pathId)
+                        _activeBlocks.Remove(prevBlockId);
+
+                    trainAdvanced = true;
+                    if (prevBlockId != nextBlockId)
+                        SetSignalToStop(prevBlockId, staging.pathId);
+
+                    staging.currentBlockIndex = nextIdx;
+                    if (nextIdx >= staging.blocks.Length - 1)
+                    {
+                        staging.status = "Completed";
+                        Main.DebugLog($"StagingData: path {staging.pathId} completed, cleaning up");
+                    }
+                    PrunePastBlocks(staging);
+                    changed = true;
+                    Main.DebugLog($"StagingData: path {staging.pathId} advanced to block {nextBlockId} (index {nextIdx})");
+                }
+            }
+
+            if (staging.status != "Active")
+                return changed;
+
+            // Seed: ensure the train's own block is claimed. It is the train's
+            // occupied block, so the occupancy break does not apply; we only
+            // refuse to steal it from another active path.
+            int cur = staging.currentBlockIndex;
+            if (cur < staging.blocks.Length)
+            {
+                var curBlock = staging.blocks[cur];
+                if (occupancy.TryGetValue(curBlock, out var curOcc) && curOcc == true)
+                {
+                    if (!_activeBlocks.TryGetValue(curBlock, out var curClaimer))
+                        ActivateBlock(curBlock, staging);
+                }
+            }
+
+            // Extend the lookahead window.
+            var (_, b1Index, _) = GetClaimWindowEnd(staging);
+            int ws = b1Index + 1;
+
+            if (ws >= staging.blocks.Length)
+                return changed;
+
+            bool conflictingAhead = HasOpposingOrNewAhead(staging, ws);
+
+            bool canTry;
+            int maxBlocks;
+
+            if (trainAdvanced)
+            {
+                canTry = true;
+                maxBlocks = MaxTrainClaimAhead - CountClaimedAhead(staging);
+            }
+            else
+            {
+                canTry = CountClaimedAhead(staging) < MaxAutoClaimAhead;
+                if (canTry && _retryTimes.TryGetValue(staging.pathId, out var retryTime)
+                    && DateTime.UtcNow < retryTime)
+                    canTry = false;
+                maxBlocks = MaxAutoClaimAhead - CountClaimedAhead(staging);
+            }
+
+            if (manualAdvance)
+            {
+                canTry = true;
+                maxBlocks = int.MaxValue;
+            }
+
+            if ((canTry && maxBlocks > 0) || conflictingAhead || manualAdvance)
+            {
+                int effectiveMax = (conflictingAhead || manualAdvance) ? Math.Max(1, maxBlocks) : maxBlocks;
+                var (claimed, _) = TryClaimFrom(staging, ws, effectiveMax, occupancy, manualAdvance);
+                if (claimed)
+                    changed = true;
+
+                // The timer only paces the ordinary automatic extension. A conflict
+                // probe (or a manual advance) must not keep it alive - refreshing it
+                // there previously locked a path out for a full interval right after
+                // the opposing traffic cleared.
+                if (!conflictingAhead && !manualAdvance)
+                    _retryTimes[staging.pathId] = DateTime.UtcNow + ClaimInterval;
+            }
+
+            return changed;
         }
 
         private static void ActivateBlock(string blockId, PathStaging staging)
@@ -676,7 +758,6 @@ namespace DvMod.RemoteDispatch
 
         public static void Process()
         {
-            var occupancy = OccupancyData.GetOccupancyData();
             bool changed = false;
 
             lock (lockObj)
@@ -687,87 +768,12 @@ namespace DvMod.RemoteDispatch
                     if (staging.status != "Active")
                         continue;
 
-                    bool trainAdvanced = false;
-
-                    int nextIdx = staging.currentBlockIndex + 1;
-                    if (nextIdx < staging.blocks.Length)
-                    {
-                        var nextBlockId = staging.blocks[nextIdx];
-                        bool nextClaimedByUs = _activeBlocks.TryGetValue(nextBlockId, out var nextClaimer) && nextClaimer == staging.pathId;
-                        if (nextClaimedByUs && occupancy.TryGetValue(nextBlockId, out var occ) && occ == true)
-                        {
-                            var prevBlockId = staging.blocks[staging.currentBlockIndex];
-
-                            if (_activeBlocks.TryGetValue(prevBlockId, out var cp) && cp == staging.pathId)
-                                _activeBlocks.Remove(prevBlockId);
-
-                            trainAdvanced = true;
-                            if (prevBlockId != nextBlockId)
-                                SetSignalToStop(prevBlockId, staging.pathId);
-
-                            staging.currentBlockIndex = nextIdx;
-                            PrunePastBlocks(staging);
-                            changed = true;
-                            Main.DebugLog($"StagingData: path {staging.pathId} advanced to block {nextBlockId} (index {nextIdx})");
-
-                            int windowStart = staging.currentBlockIndex + 1;
-                            if (windowStart >= staging.blocks.Length)
-                            {
-                                staging.status = "Completed";
-                                Main.DebugLog($"StagingData: path {staging.pathId} completed, cleaning up");
-                                changed = true;
-                                continue;
-                            }
-                        }
-                    }
-
-                    if (staging.status != "Active")
-                        continue;
-
-                    var (_, b1Index, _) = GetClaimWindowEnd(staging);
-                    int ws = b1Index + 1;
-
-                    if (ws < staging.blocks.Length)
-                    {
-                        // A path whose train just advanced claims immediately
-                        // (capped at 6 ahead); otherwise the 20s timer paces
-                        // extension up to 5 ahead.
-                        bool conflictingAhead = HasOpposingOrNewAhead(staging, ws);
-
-                        bool canTry;
-                        int maxBlocks;
-
-                        if (trainAdvanced)
-                        {
-                            canTry = true;
-                            maxBlocks = MaxTrainClaimAhead - CountClaimedAhead(staging);
-                        }
-                        else
-                        {
-                            canTry = CountClaimedAhead(staging) < MaxAutoClaimAhead;
-                            if (canTry && _retryTimes.TryGetValue(staging.pathId, out var retryTime)
-                                && DateTime.UtcNow < retryTime)
-                                canTry = false;
-                            maxBlocks = MaxAutoClaimAhead - CountClaimedAhead(staging);
-                        }
-
-                        // The automatic advance mirrors the manual "Claim next" path
-                        // for opposing traffic: when opposing/upcoming paths are
-                        // detected ahead, run the conflict-aware claim even if the
-                        // lookahead ceiling or the retry timer would otherwise skip
-                        // it, so CalcRange can clear up to where those paths end.
-                        if ((canTry && maxBlocks > 0) || conflictingAhead)
-                        {
-                            int effectiveMax = conflictingAhead ? Math.Max(1, maxBlocks) : maxBlocks;
-                            var (claimed, _) = TryClaimFrom(staging, ws, effectiveMax, occupancy);
-                            _retryTimes[staging.pathId] = DateTime.UtcNow + RetryInterval;
-
-                            if (claimed)
-                            {
-                                changed = true;
-                            }
-                        }
-                    }
+                    // The single advancing function handles train movement, the
+                    // seed, and the conflict-aware lookahead extension. Its 5s
+                    // pacing timer keeps the automatic extension from all happening
+                    // at once; advances/probes/manual claims are immediate.
+                    if (Advance(staging))
+                        changed = true;
                 }
 
                 var completed = _pathProgress.Where(kvp => kvp.Value.status == "Completed").Select(kvp => kvp.Key).ToList();

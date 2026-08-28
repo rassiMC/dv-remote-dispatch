@@ -292,26 +292,34 @@ branch-entry ("In") signals can be attributed to a junction.
     **and** becomes occupied (an unclaimed-but-occupied next block is a hint to
     claim it, not to advance),
   - prunes already-traversed blocks (removing them from the stored path too),
-  - seeds a new path with only its start block claimed (from `_retryTimes`),
-    then claims the lookahead window **conflict-aware** via `TryClaimFrom`.
-    Seeding itself is conflict-aware (`TryClaimSeed`, StagingData.cs:352): it
-    refuses to steal the start block when another active path holds it.
+  - runs the **single advancing function** (`Advance`, StagingData.cs:426) for
+    every active path. `Advance` is the one entry point for all claiming: it
+    detects train movement, ensures the train's own block is claimed (the seed,
+    refusing to steal it from another active path), and extends the lookahead
+    window **conflict-aware** via `TryClaimFrom`/`CalcRange`. It is called from
+    the periodic `Process()` check, from path creation/restore (the **startup
+    check**: `AddPath` and `InitializeFromPaths` run `Advance` once
+    synchronously so a new path's seed *and* lookahead window are claimed
+    immediately, not on the next tick), from route extension (`UpdatePath`),
+    and from the manual "Claim next" button (`ForceClaimNextBlock`, which passes
+    a `manualAdvance` flag).
     Restoring existing paths (page reload / pathing re-activation via
     `InitializeFromPaths`) **preserves the live staging state**: already-tracked
-    paths keep their claims as they were, and only genuinely new paths are
-    seeded (start block + deferred full 20s retry interval instead of blasting
-    the lookahead window on the next tick).
+    paths keep their claims as they were, and only genuinely new paths get the
+    startup `Advance`.
   Claims are gated by `CalcRange`, which walks the route ahead and refuses to
   claim more than the range until all **opposing / upcoming** paths share the
   section have ended (`IsOpposing` detects reverse-direction travellers over a
   shared span). Non-opposing paths dequeue as they pass through; physical
   occupancy blocks a claim only for that block (walk continues past it).
-  Failed claims back off for **20s** (`_retryTimes`) before retrying; the
-  automatic extension is paced by that timer on **every** attempt (not the
-  0.5s tick) and stopped once **5** blocks are claimed ahead
-  (`MaxAutoClaimAhead`). When a train **advances** onto the next block, the
-  same `TryClaimFrom` advance runs **immediately**, bypassing the timer and the
-  auto ceiling (up to **6** ahead, `MaxTrainClaimAhead`).
+  The **5s pacing timer** (`ClaimInterval` on `_retryTimes`) only paces the
+  ordinary automatic extension so it does not all happen at once, and is
+  stopped once **5** blocks are claimed ahead (`MaxAutoClaimAhead`). A train
+  **advancing** onto the next block, a detected conflict probe
+  (`conflictingAhead`), or a manual claim run **immediately**, bypassing the
+  timer (up to **6** ahead, `MaxTrainClaimAhead`); conflict probes do not
+  refresh the timer, so a path whose opposing traffic clears is never locked
+  out for a full interval.
   `ForceClaimNextBlock` backs the manual "advance" button
   (`POST /path/{id}/advance`) - it claims the next single block when clear, or
   the full cleared range when clearing through opposing traffic.
@@ -660,7 +668,9 @@ Derived from reading the code; not a plan. The most fragile points:
     refuses to steal the start block when another active path holds it, while
     the occupancy break is relaxed because the seed block is the train's own
     occupied block (opposing/upcoming gating stays in the extension pass).
-    (VISION blocker #4.)
+    (VISION blocker #4.) *(Superseded: the seed is now folded into the single
+    `Advance` function - see §4.4 - which seeds the train's block and extends
+    the window in one synchronous startup check.)*
 13. **Some signals are mapped to the wrong spot / wrong side in the switchboard**:
     the direction logic previously classified *all* signals on a multi-signal
     switch as `Out` (a single dot at the base) - **fixed** by reading the

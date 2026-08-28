@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Initial claiming is no longer separate from normal advancing: a single
+  `StagingData.Advance` function now handles the seed, train movement, and the
+  conflict-aware lookahead extension, and runs synchronously as a startup check
+  from path creation/restore (`AddPath` / `InitializeFromPaths`) as well as from
+  route extension, the periodic check, and the manual "Claim next" button. The
+  auto-extension pacing timer is 5s instead of 20s and only paces the ordinary
+  automatic extension - train advances, conflict probes, and manual claims run
+  immediately, and conflict probes no longer keep the timer alive (which
+  previously locked a path out for a full interval right after opposing traffic
+  cleared).
 - Pathing conflict prevention: the first automatic extension of a path facing
   opposing traffic no longer claims into the section opposing traffic still
   holds. `StagingData.TryClaimFrom`'s Case 2 branch is merged into the Case 1

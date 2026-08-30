@@ -117,6 +117,23 @@ const PathingController = {
         return this._blockSwitchPorts.get(`${blockId}@${switchBlockId}`) || null;
     },
 
+    // State keys for the state-space search: a plain block id when there is no
+    // entry port (non-switch blocks, and the source), otherwise blockId@port.
+    // Block ids are of the form "b{n}" and never contain '@'.
+    _stateKey(blockId, inPort) {
+        return inPort ? `${blockId}@${inPort}` : blockId;
+    },
+
+    _blockOfState(stateKey) {
+        const at = stateKey.indexOf('@');
+        return at === -1 ? stateKey : stateKey.slice(0, at);
+    },
+
+    _inPortOfState(stateKey) {
+        const at = stateKey.indexOf('@');
+        return at === -1 ? null : stateKey.slice(at + 1);
+    },
+
     computeBlockPath(fromBlockId, toBlockId) {
         if (!this._blockGraph) this.buildBlockGraph();
         const graph = this._blockGraph;
@@ -137,21 +154,36 @@ const PathingController = {
         return null;
     },
 
-    // Reconstructs the plain block sequence from a tree.
-    _tracePath(tree, toBlockId, fromBlockId) {
-        const path = [];
-        let node = toBlockId;
-        while (node !== undefined) {
-            path.unshift(node);
-            if (node === fromBlockId) break;
-            node = tree.get(node);
+    // Reconstructs a plain block sequence from a state-space tree, starting at
+    // the cheapest settled state for the target block and walking parent states
+    // back to the source state. A block has at most three settled states (one
+    // per switch port), so it tries each cheapest-first and only accepts a
+    // simple route: a path that would have to re-enter a block (a reversal /
+    // shunting move) is rejected so a route never contains a block twice.
+    // Returns null if no simple route reaches the target.
+    _tracePath(treeData, toBlockId, fromBlockId) {
+        const tree = treeData.tree;
+        const startKey = this._stateKey(fromBlockId, null);
+        const terminalStates = treeData.best.get(toBlockId) || [];
+        for (const terminalKey of terminalStates) {
+            const path = [];
+            let key = terminalKey;
+            while (key !== undefined) {
+                path.unshift(this._blockOfState(key));
+                if (key === startKey) break;
+                key = tree.get(key);
+            }
+            if (path[0] !== fromBlockId) continue;
+            if (new Set(path).size !== path.length) continue;
+            return path;
         }
-        if (path[0] !== fromBlockId) return null;
-        return path;
+        return null;
     },
 
-    // Derives switch assignments for a plain block sequence, rejecting illegal
-    // (wrong-way) traversals. Returns null if the sequence is not drivable.
+    // Derives switch assignments for a plain block sequence. The search
+    // (_ensurePathTree) already guarantees every switch is traversed legally
+    // (through its common port), so this never rejects a route - it only maps
+    // each switch's entry/exit ports to the branch (0 = left, 1 = right).
     _finalizePath(path) {
         const switchAssignments = {};
         for (let i = 1; i < path.length - 1; i++) {
@@ -165,14 +197,10 @@ const PathingController = {
             const outPort = this._getPortForBlockAtSwitch(nextBlock, blockId);
             if (!inPort || !outPort) continue;
 
-            const branch = inPort === 'common' && outPort === 'left' ? 0 :
-                inPort === 'common' && outPort === 'right' ? 1 :
-                outPort === 'common' && inPort === 'left' ? 0 :
-                outPort === 'common' && inPort === 'right' ? 1 : null;
-            if (branch !== null)
-                switchAssignments[blockId] = branch;
-            else
-                return null;
+            // Exactly one of in/out is 'common' (guaranteed by the search); the
+            // other is the branch taken.
+            const branch = inPort === 'right' || outPort === 'right' ? 1 : 0;
+            switchAssignments[blockId] = branch;
         }
         return { blocks: path, switchAssignments };
     },
@@ -208,6 +236,15 @@ const PathingController = {
     //   tier 'soft'  - occupied blocks are routable but penalised.
     // Both tiers are memoized per (source, tier, occupancy generation) and are
     // invalidated together on occupancy change (see invalidatePathTree).
+    //
+    // The search runs over a small state space (block, entry port) so it can
+    // refuse to traverse a switch "backwards": a switch may only be passed
+    // through its common port (common <-> left or common <-> right). The entry
+    // port only matters for switch blocks; the source block starts with no
+    // entry port, so a train may depart from any port. Returns { tree, best }
+    // where tree maps each state key to its parent state and best maps each
+    // block to its settled states in increasing cost (used by _tracePath to
+    // pick the cheapest simple route to a plain block id).
     _ensurePathTree(source, tier) {
         if (!this._blockGraph) this.buildBlockGraph();
         const graph = this._blockGraph;
@@ -215,7 +252,7 @@ const PathingController = {
         const key = `${source}#${tier}#${this._pathTreeCount}`;
         const cached = tier === 'valid' ? this._pathTreeValid : this._pathTreeSoft;
         if (cached && cached.key === key) {
-            return cached.tree;
+            return cached;
         }
 
         const blocked = tier === 'valid'
@@ -226,11 +263,13 @@ const PathingController = {
             }
             : () => false;
 
+        const startKey = this._stateKey(source, null);
         const cameFrom = new Map();
-        cameFrom.set(source, undefined);
-        const gScore = new Map([[source, 0]]);
-        const heap = [{ id: source, g: 0 }];
+        cameFrom.set(startKey, undefined);
+        const gScore = new Map([[startKey, 0]]);
+        const heap = [{ key: startKey, g: 0 }];
         const closed = new Set();
+        const best = new Map();
 
         const heapPush = item => {
             const h = heap;
@@ -265,32 +304,52 @@ const PathingController = {
         };
 
         while (heap.length > 0) {
-            const current = heapPop().id;
-            if (closed.has(current)) continue;
-            closed.add(current);
-            const curG = gScore.get(current);
+            const { key: curKey, g: curG } = heapPop();
+            if (closed.has(curKey)) continue;
+            closed.add(curKey);
+            const curBlockId = this._blockOfState(curKey);
+            const settled = best.get(curBlockId);
+            if (settled) settled.push(curKey);
+            else best.set(curBlockId, [curKey]);
+            const curInPort = this._inPortOfState(curKey);
 
-            const entry = graph.get(current);
+            const entry = graph.get(curBlockId);
             if (!entry) continue;
 
             for (const neighbor of entry.neighbors) {
                 const nbrId = neighbor.blockId;
-                if (closed.has(nbrId)) continue;
                 if (blocked(nbrId)) continue;
+
+                const outPort = neighbor.port;
+                // Refuse to traverse the current block backwards: a switch may
+                // only be passed through its common port. The source state has
+                // no entry port, so its departure is unconstrained.
+                if (this._switchBlockIds.has(curBlockId) && curInPort &&
+                    (curInPort === 'common') === (outPort === 'common')) {
+                    continue;
+                }
+
+                const nbrInPort = this._switchBlockIds.has(nbrId)
+                    ? this._getPortForBlockAtSwitch(curBlockId, nbrId)
+                    : null;
+                const nbrKey = this._stateKey(nbrId, nbrInPort);
+                if (closed.has(nbrKey)) continue;
+
                 const tentG = curG + this._edgeCost(nbrId, tier);
-                if (tentG < (gScore.get(nbrId) ?? Infinity)) {
-                    gScore.set(nbrId, tentG);
-                    cameFrom.set(nbrId, current);
-                    heapPush({ id: nbrId, g: tentG });
+                if (tentG < (gScore.get(nbrKey) ?? Infinity)) {
+                    gScore.set(nbrKey, tentG);
+                    cameFrom.set(nbrKey, curKey);
+                    heapPush({ key: nbrKey, g: tentG });
                 }
             }
         }
 
+        const result = { tree: cameFrom, best };
         if (tier === 'valid')
-            this._pathTreeValid = { key, tree: cameFrom };
+            this._pathTreeValid = { key, tree: cameFrom, best };
         else
-            this._pathTreeSoft = { key, tree: cameFrom };
-        return cameFrom;
+            this._pathTreeSoft = { key, tree: cameFrom, best };
+        return result;
     },
 
     // Cost of entering a block. In the valid tier every step costs 1 (hard

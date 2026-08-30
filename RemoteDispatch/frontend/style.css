@@ -445,6 +445,12 @@ body.switchboard-active #map {
 	border: none;
 }
 
+.sig-sprite {
+	display: block;
+	object-fit: contain;
+	image-rendering: auto;
+}
+
 @keyframes sigBlink {
 	0%, 100% { opacity: 1; }
 	50% { opacity: 0.15; }

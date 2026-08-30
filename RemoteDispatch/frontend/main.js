@@ -4,6 +4,32 @@ const metersToDegrees = 360 / earthCircumference;
 
 var loggingEnabled = false;
 
+// On-screen error reporter: surfaces uncaught JS errors so a broken frontend is
+// diagnosable without opening the devtools console. Dismissible; harmless otherwise.
+(function () {
+	function report(msg) {
+		try {
+			let overlay = document.getElementById('js-error-overlay');
+			if (!overlay) {
+				overlay = document.createElement('div');
+				overlay.setAttribute('id', 'js-error-overlay');
+				overlay.style.cssText =
+					'position:fixed;left:8px;bottom:8px;z-index:99999;max-width:70vw;max-height:40vh;overflow:auto;' +
+					'background:rgba(30,10,10,0.95);color:#ff8;font:12px/1.4 monospace;padding:8px 10px;' +
+					'border:1px solid #f66;border-radius:4px;white-space:pre-wrap;';
+				overlay.addEventListener('click', () => overlay.remove());
+				document.body.appendChild(overlay);
+			}
+			overlay.appendChild(document.createTextNode('\n' + msg));
+		} catch (_) { /* overlay itself failed; ignore */ }
+	}
+	window.addEventListener('error', e => report('Error: ' + (e.message || e.error)));
+	window.addEventListener('unhandledrejection', e => {
+		const r = e.reason;
+		report('Unhandled rejection: ' + (r && r.stack ? r.stack.split('\n')[0] : r));
+	});
+})();
+
 /////////////////////
 // map
 
@@ -95,6 +121,30 @@ document.getElementById('playerNameCheckbox')
 			playerLabel.getElement().style.display = playerTooltipEnabled ? '' : 'none';
 		});
 	});
+
+// Signal display style: "lamps" (SVG faces) or "pictures" (in-game HUD sprites).
+let signalStyle = 'lamps';
+
+// The dropdown only exists when index.html has it; never let a missing element
+// abort the whole script (everything else depends on this file running to the end).
+const signalStyleDropdown = document.getElementById('signalStyleDropdown');
+if (signalStyleDropdown) {
+	signalStyleDropdown.addEventListener('change', e => {
+		signalStyle = e.target.value;
+		applySignalStyle();
+	});
+}
+
+function applySignalStyle() {
+	try {
+		signalMarkers.forEach(entry => {
+			entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, entry.type, entry.entry));
+		});
+		renderSignalTypePreviews();
+	} catch (err) {
+		console.error('applySignalStyle failed:', err);
+	}
+}
 
 /////////////////////
 // sidebar
@@ -446,7 +496,8 @@ const junctionsReady = tracksReady
 			marker: createJunctionMarker(data.position, index, data.id), // id here is the "real" ID of the Junction, the index is just how the frontend handles them internally
 			branches: data.branches,
 		}))
-	);
+	)
+	.catch(err => console.error('Failed to load junctions:', err));
 
 function toggleJunction(junctionId) {
 	return fetch(new URL(`/junction/${junctionId}/toggle`, location), { method: 'POST' })
@@ -496,13 +547,17 @@ function createJunctionOverlay(junctionId) {
 
 function updateJunctionOverlay(junctionId, selectedBranch) {
 	const junction = junctions[junctionId]
+	if (!junction || !junction.marker || !junction.marker.getElement()) return;
 	junction.marker.getElement().innerHTML = createJunctionShape(selectedBranch) + createJunctionLabel(junctionId);
-	const selectedTrackId = junction.branches[selectedBranch]
-	trackPolyLines.get(selectedTrackId).setStyle({ color: 'steelblue', dashArray: null });
-	const unselectedTrackPolyLine = trackPolyLines.get(junction.branches[1 - selectedBranch]);
-	unselectedTrackPolyLine
-		.setStyle({ color: 'lightsteelblue', dashArray: "6 12" })
-		.bringToBack();
+	const branches = junction.branches || [];
+	const selectedTrackId = branches[selectedBranch]
+	const selectedPolyLine = trackPolyLines.get(selectedTrackId);
+	if (selectedPolyLine) selectedPolyLine.setStyle({ color: 'steelblue', dashArray: null });
+	const unselectedTrackPolyLine = trackPolyLines.get(branches[1 - selectedBranch]);
+	if (unselectedTrackPolyLine)
+		unselectedTrackPolyLine
+			.setStyle({ color: 'lightsteelblue', dashArray: "6 12" })
+			.bringToBack();
 }
 
 function getJunctionOverlayBounds(position) {
@@ -554,6 +609,100 @@ function refreshPackTable(data) {
 		entry.marker.setIcon(getSignalIcon(entry.aspect, entry.mode, entry.type, entry.entry));
 	});
 	renderSignalTypePreviews();
+}
+
+// In-game HUD sprite manifest, served by GET /signal/sprites:
+// { Aspects: { "<aspectId>": "/signal/sprite/<aspectId>", ... },
+//   Off:     { "<Type>": "/signal/sprite/off/<Type>", ... } }
+let spriteManifest = { Aspects: {}, Off: {} };
+let lastSpriteManifestJson = '{}';
+
+function refreshSpriteManifest(data) {
+	try {
+		spriteManifest = (data && data.Aspects) ? data : { Aspects: {}, Off: {} };
+		lastSpriteManifestJson = JSON.stringify(spriteManifest);
+		applySignalStyle();
+	} catch (err) {
+		console.error('refreshSpriteManifest failed:', err);
+	}
+}
+
+// Re-fetches the sprite manifest so live sprites appear once the backend has captured
+// them (throttled; a no-op when nothing changed). Runs alongside the update loop.
+const spriteManifestFetchInterval = 15000;
+let lastSpriteManifestFetch = 0;
+
+function refreshSpriteManifestIfStale() {
+	const now = Date.now();
+	if (now - lastSpriteManifestFetch < spriteManifestFetchInterval) return Promise.resolve();
+	lastSpriteManifestFetch = now;
+	return fetch(new URL('/signal/sprites', location))
+		.then(resp => (resp.ok ? resp.json() : { Aspects: {}, Off: {} }))
+		.catch(() => ({ Aspects: {}, Off: {} }))
+		.then(data => {
+			try {
+				const json = JSON.stringify(data || {});
+				if (json !== lastSpriteManifestJson) refreshSpriteManifest(data);
+			} catch (err) {
+				console.error('refreshSpriteManifestIfStale failed:', err);
+			}
+		});
+}
+
+// Static fallback pictures bundled with the frontend (signals/*.webp), used when the
+// live sprite for an aspect isn't available yet. Best-effort mapping of an aspect id
+// (e.g. "S2", "Ms6", "Ds1") to the closest pre-drawn face by signal type + number.
+// Bundled main-signal files are named s{n}_automatic.webp / s{n}_manual.webp;
+// distant files are ds{n}.webp.
+function staticSignalSpriteUrl(aspectId, type) {
+	const distant = String(type).toLowerCase() === 'distant';
+	const base = 'res/signals/';
+	const offFile = distant ? 'distant_off.webp' : 'off.webp';
+	if (!aspectId || aspectId === 'OFF') return base + offFile;
+
+	const match = String(aspectId).match(/(\d+)/);
+	if (!match) return base + (distant ? 'distant_all.webp' : 'all.webp');
+	const num = match[1];
+	const lower = String(aspectId).toLowerCase();
+
+	if (distant) {
+		if (['1', '2', '3', '4'].includes(num)) return base + `ds${num}.webp`;
+		return base + 'distant_all.webp';
+	}
+
+	const file = (lower.includes('c') && num === '1') ? 's1c_automatic.webp'
+		: (['1', '2', '4', '6'].includes(num) ? `s${num}_automatic.webp` : null);
+	return file ? base + file : base + 'all.webp';
+}
+
+// Resolves the sprite entry for an aspect/type: live manifest sprite, then the live
+// off-state sprite, then the static webp fallback. Returns { url, w?, h? } (natural
+// pixel dims when the manifest has them) or null if none match.
+function spriteEntryFor(aspectId, type) {
+	const key = aspectId || 'OFF';
+	const aspectEntry = (key !== 'OFF' && spriteManifest.Aspects) ? spriteManifest.Aspects[key] : null;
+	if (aspectEntry) return normalizeSpriteEntry(aspectEntry);
+	const typeKey = String(type);
+	const offEntry = spriteManifest.Off ? spriteManifest.Off[typeKey] : null;
+	if (offEntry) return normalizeSpriteEntry(offEntry);
+	const staticUrl = staticSignalSpriteUrl(key, typeKey);
+	return staticUrl ? { url: staticUrl } : null;
+}
+
+// Normalizes a manifest entry (string URL or { u, w, h }) into { url, w?, h? }.
+function normalizeSpriteEntry(entry) {
+	if (typeof entry === 'string') return { url: entry };
+	const url = entry && entry.u;
+	if (!url) return null;
+	const result = { url };
+	if (entry.w > 0 && entry.h > 0) { result.w = entry.w; result.h = entry.h; }
+	return result;
+}
+
+// Resolves just the sprite URL (used where only the src is needed, e.g. sidebar previews).
+function spriteUrlFor(aspectId, type) {
+	const entry = spriteEntryFor(aspectId, type);
+	return entry ? entry.url : null;
 }
 
 function makeSafeSignalId(id) {
@@ -638,6 +787,25 @@ function getSignalIconSize(type, lamps) {
 		Math.round(w * signalRenderScale * factor * s),
 		Math.round(h * signalRenderScale * factor * s),
 	];
+}
+
+// Uniform sprite render scale: CSS pixels per sprite pixel. A 160x640 HUD sprite
+// therefore renders at 40x160px (tall faces stay tall, larger sprites show larger).
+const signalSpriteScale = 0.13;
+
+// Rendered size of a sprite icon, preserving its natural aspect ratio. When the
+// natural dimensions are unknown (e.g. static fallback) a fixed square is used.
+function getSignalSpriteSize(w, h, type) {
+	const factor = signalTypeScale[String(type).toLowerCase()] || signalTypeScale.normal;
+	const zoom = map.getZoom();
+	const scale = zoom < initialZoom - 4 ? 1 / (2 ** (initialZoom - 4 - zoom)) : 1;
+	const minScale = 1 / signalIconMaxScale; // floor so they don't vanish entirely
+	const s = Math.max(scale, minScale) * factor * signalSpriteScale;
+	if (w > 0 && h > 0) {
+		return [Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))];
+	}
+	const size = Math.max(1, Math.round(36 * Math.max(scale, minScale) * factor));
+	return [size, size];
 }
 
 // Escapes a string for safe embedding in SVG/HTML.
@@ -725,6 +893,20 @@ function createNeutralSignalSvg() {
 }
 
 function getSignalIcon(aspect, mode, type, entry) {
+	if (signalStyle === 'pictures') {
+		const sprite = spriteEntryFor(aspect, type);
+		const iconSize = getSignalSpriteSize(sprite ? sprite.w : 0, sprite ? sprite.h : 0, type);
+		const html = sprite
+			? `<img class="sig-sprite" src="${escapeXml(sprite.url)}" alt="" style="width:${iconSize[0]}px;height:${iconSize[1]}px">`
+			: (entry ? createSignalFaceSvg(entry, aspect) : createNeutralSignalSvg());
+		return L.divIcon({
+			html: html,
+			className: 'signal-divicon',
+			iconSize: iconSize,
+			iconAnchor: [Math.round(iconSize[0] / 2), signalIconAnchorY],
+		});
+	}
+
 	const lamps = (entry && entry.Lamps) ? entry.Lamps : null;
 	const iconSize = getSignalIconSize(type, lamps);
 	const html = entry ? createSignalFaceSvg(entry, aspect) : createNeutralSignalSvg();
@@ -1923,54 +2105,58 @@ function updateOnce() {
 		})
 		.then(updateData => {
 			Object.entries(updateData).forEach(([tag, data]) => {
-				const _t0 = performance.now();
-				switch (tag) {
-					case 'cars':
-						updateAllCars(data);
+				try {
+					const _t0 = performance.now();
+					switch (tag) {
+						case 'cars':
+							updateAllCars(data);
+							break;
+						case 'jobs':
+							updateAllJobs(data);
+							break;
+						case 'junctions':
+							updateAllJunctions(data);
+							break;
+						case 'player':
+							updatePlayerOverlays(data);
+							break;
+					case 'signals':
+						updateAllSignals(data);
 						break;
-					case 'jobs':
-						updateAllJobs(data);
+					case 'signalpack':
+						refreshPackTable(data);
 						break;
-					case 'junctions':
-						updateAllJunctions(data);
-						break;
-					case 'player':
-						updatePlayerOverlays(data);
-						break;
-				case 'signals':
-					updateAllSignals(data);
-					break;
-				case 'signalpack':
-					refreshPackTable(data);
-					break;
-		case 'occupancy':
-			updateBlockOccupancy(data);
-			break;
-		case 'paths':
-			if (typeof PathingController !== 'undefined') {
-				PathingController.syncFromServer(data);
-			}
-			break;
-		case 'modconfig':
-			if (data && typeof data.enablePathing === 'boolean') {
-				enablePathing = data.enablePathing;
-				if (data.enablePathing) {
-					if (typeof PathingController !== 'undefined') PathingController.enable();
-				} else {
-					if (typeof PathingController !== 'undefined') PathingController.disable();
+			case 'occupancy':
+				updateBlockOccupancy(data);
+				break;
+			case 'paths':
+				if (typeof PathingController !== 'undefined') {
+					PathingController.syncFromServer(data);
 				}
-			}
-			break;
-				default:
-						const segments = tag.split('-');
-						switch (segments[0]) {
-							case 'trainset': updateCars(data); break;
-							case 'carguid': updateCar(data.id, data); break;
-						}
+				break;
+			case 'modconfig':
+				if (data && typeof data.enablePathing === 'boolean') {
+					enablePathing = data.enablePathing;
+					if (data.enablePathing) {
+						if (typeof PathingController !== 'undefined') PathingController.enable();
+					} else {
+						if (typeof PathingController !== 'undefined') PathingController.disable();
+					}
 				}
-				const _elapsed = performance.now() - _t0;
-				if (_elapsed > 100) {
-					console.warn(`[PERF] ${tag} handler took ${_elapsed.toFixed(0)}ms`);
+				break;
+					default:
+							const segments = tag.split('-');
+							switch (segments[0]) {
+								case 'trainset': updateCars(data); break;
+								case 'carguid': updateCar(data.id, data); break;
+							}
+					}
+					const _elapsed = performance.now() - _t0;
+					if (_elapsed > 100) {
+						console.warn(`[PERF] ${tag} handler took ${_elapsed.toFixed(0)}ms`);
+					}
+				} catch (err) {
+					console.error(`Update tag '${tag}' failed:`, err);
 				}
 			});
 		})
@@ -1981,15 +2167,27 @@ function updateOnce() {
 }
 
 function updateLoop() {
-	updateOnce()
+	// Promise.resolve() turns any synchronous throw inside updateOnce into a rejected
+	// promise, so a single bad update can never permanently stop the loop.
+	Promise.resolve()
+		.then(() => updateOnce())
 		.catch(err => {
 			console.error('Update failed:', err);
 		})
-		.then(_ => {
+		.finally(() => {
 			const timeToNextUpdate = (updateStart + updateInterval) - performance.now();
-			setTimeout(updateLoop, timeToNextUpdate);
+			setTimeout(updateLoop, Math.max(0, timeToNextUpdate));
 		});
 }
+
+// The update loop must never depend on signals initialization completing — a stalled
+// signals fetch must not freeze car/player/junction updates. Start it immediately.
+updateLoop();
+
+// Refresh the sprite manifest on its own schedule so live sprites appear once the
+// backend has captured them, independent of the update loop (and its errors).
+refreshSpriteManifestIfStale();
+setInterval(refreshSpriteManifestIfStale, spriteManifestFetchInterval);
 
 /////////////////////
 // signal visibility
@@ -2158,6 +2356,22 @@ function previewFaceSize(type, lamps) {
 	];
 }
 
+// Preview face size for the sidebar "Signal types" list (pictures mode).
+const previewSpriteSize = 48;
+
+// Renders one sidebar preview face, honouring the current signal style.
+// In pictures mode an aspect's in-game sprite is shown (the off sprite for "none");
+// in lamps mode the lamp SVG is used ("none" lights every lamp to show colours).
+function renderPreviewFaceHtml(type, layout, aspect, isNone) {
+	if (signalStyle === 'pictures') {
+		const url = spriteUrlFor(isNone ? 'OFF' : (aspect || 'OFF'), type);
+		return url
+			? `<img class="sig-sprite" src="${escapeXml(url)}" alt="" style="width:100%;height:100%;object-fit:contain">`
+			: '<div class="sig-type-face-empty">No sprite yet.</div>';
+	}
+	return createSignalFaceSvg(layout.entry, aspect, isNone);
+}
+
 function renderSignalTypePreviews() {
 	setLayoutCancelVisible();
 	const container = document.getElementById('sig-type-list');
@@ -2189,9 +2403,13 @@ function renderSignalTypePreviews() {
 					</div>`;
 			}
 
-			const [w, h] = layout.hasFace ? previewFaceSize(group.type, layout.entry.Lamps) : [0, 0];
+			const [w, h] = layout.hasFace
+				? (signalStyle === 'pictures'
+					? [previewSpriteSize, previewSpriteSize]
+					: previewFaceSize(group.type, layout.entry.Lamps))
+				: [0, 0];
 			const face = layout.hasFace
-				? createSignalFaceSvg(layout.entry, null, true) // "none": every lamp lit to show colours
+				? renderPreviewFaceHtml(group.type, layout, null, true) // default "none" preview
 				: '<div class="sig-type-face-empty">No pack data yet.</div>';
 			const faceStyle = layout.hasFace ? `width:${w}px;height:${h}px` : '';
 			const sub = layout.hasFace ? String(layout.signals) : '';
@@ -2234,7 +2452,7 @@ function renderSignalTypePreviews() {
 				const key = faceEl.dataset.layout;
 				const layout = layoutInGroup(groupEl, key);
 				if (!layout || key === layoutEditorKey) return; // editor face renders its own
-				faceEl.innerHTML = createSignalFaceSvg(layout.entry, aspect, isNone);
+				faceEl.innerHTML = renderPreviewFaceHtml(group.type, layout, aspect, isNone);
 			});
 		});
 	});
@@ -3141,6 +3359,9 @@ function buildSignalsSidebar(installed) {
 
 let signalsInstalled = false;
 
+// Critical signals init: pack table + signal markers. The sprite manifest fetch is
+// deliberately NOT in this chain — a stalled /signal/sprites must never freeze the
+// signals tab or the rest of the frontend (it is re-fetched periodically instead).
 const signalsReady = junctionsReady
 	.then(_ => fetch(new URL('/signalpack', location)))
 	.then(resp => (resp.ok ? resp.json() : {}))
@@ -3171,10 +3392,36 @@ const signalsReady = junctionsReady
 		}
 	});
 
-signalsReady.then(_ => {
-	buildSignalsSidebar(signalsInstalled);
-	updateLoop();
-});
+// Opportunistic sprite manifest load; on failure the static pictures remain in use.
+fetch(new URL('/signal/sprites', location))
+	.then(resp => (resp.ok ? resp.json() : { Aspects: {}, Off: {} }))
+	.catch(err => {
+		console.error('Failed to load signal sprite manifest:', err);
+		return { Aspects: {}, Off: {} };
+	})
+	.then(manifest => {
+		refreshSpriteManifest(manifest);
+	});
+
+// The sidebar must always be built once signals init settles (even on failure), but
+// never gate the update loop on it — updates are already running independently.
+const signalsInitTimeout = 20000;
+
+Promise.race([
+	signalsReady,
+	new Promise(resolve => setTimeout(resolve, signalsInitTimeout)),
+])
+	.catch(err => {
+		console.error('Signals init failed:', err);
+		return null;
+	})
+	.then(_ => {
+		try {
+			buildSignalsSidebar(signalsInstalled);
+		} catch (err) {
+			console.error('buildSignalsSidebar failed:', err);
+		}
+	});
 
 // Switchboard functionality
 let switchboardMap;

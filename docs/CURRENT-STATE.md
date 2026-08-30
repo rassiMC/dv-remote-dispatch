@@ -153,6 +153,10 @@ Server: `Server/HttpServer.cs` (port from `Main.settings.serverPort`, default
 | `/staging` | GET | StagingData | path staging state JSON |
 | `/pathing/activate` | POST | PathingActivation | enter pathing mode + seed staging |
 | `/signal/control` | POST | SignalsShim | set signal aspect/mode (permission-gated) |
+| `/signal/sprites` | GET | SignalsShim | HUD-sprite manifest (`{Aspects:{id:{u,w,h}}, Off:{type:{u,w,h}}}`; gated by `enableSignals`) |
+| `/signal/sprite/{aspectId}` | GET | SignalsShim | PNG of that aspect's in-game HUD sprite (404 if absent) |
+| `/signal/sprite/off/{type}` | GET | SignalsShim | PNG of that signal type's off-state sprite (404 if absent) |
+| `/signalpack` | GET | SignalsShim | pack table (lamp/aspect layout) JSON |
 | `/modconfig` | GET | HttpServer | config flags for frontend (`doubleTrack`, `enablePathing`) |
 
 Unknown paths return 404. Large POST bodies capped at 512 KiB; GET responses
@@ -247,6 +251,21 @@ RemoteDispatch (Shims/SignalsShim)
     left/right port assignment - the frontend uses it to assign `LeftIn`/
     `RightIn`. (The group's `BranchSignals` list can skip small tracks, so its
     index is *not* the port index.)
+  - **HUD sprite pictures (new in this port):** the new-fork bridge also captures
+    the in-game hover pictures the Signals mod draws over each signal - every
+    aspect's `AspectBaseDefinition.HUDSprite` (keyed by aspect id) and each
+    signal type's `OffStateHUDSprite` (keyed by RD type) - into a thread-safe
+    `SignalSpriteCache` (PNG bytes, read off the HTTP threads). Capture runs on
+    the main thread: at bridge init, on aspect change, on the throttled
+    `GetAllSignals` sweep, and on demand when `/signal/sprites` is hit
+    (`RefreshSprites` scheduled via `Updater.RunOnMainThread`). Pack changes
+    reset the cache; sprites too large to read back (`>1024px` per side, or a
+    `>4096²` source atlas) are skipped and the frontend falls back to static
+    pictures. Served by `/signal/sprites` (manifest with natural `w`/`h`) and
+    `/signal/sprite/{aspectId}` / `/signal/sprite/off/{type}` (PNG). The
+    frontend's **Signal style** dropdown (Settings) toggles lamp-SVG faces vs
+    these pictures; the fallback chain is live sprite → off-state sprite →
+    bundled `frontend/signals/*.webp` → lamp SVG.
   - Both bridges guard `SetSignalAspect`/`SetSignalMode` with a **main-thread
     check** (thread id captured in `Register`); off-thread calls warn and no-op
     instead of touching Unity state.

@@ -4,9 +4,12 @@
 > ("signals: key signals by unique Signal.Id, keep preview labels compact").
 > This fork additionally carries on top of it: switchboard signal dots with
 > In-branch attribution (`RequiredBranch`), per-type stop aspects in
-> pathing mode, main-thread guards in both bridges, and Id-keyed
-> `signalpacks/*.json` tables (no name-keyed migration needed — unreleased).
-> The commit list at the end records the upstream source commits.
+> pathing mode, main-thread guards in both bridges, Id-keyed
+> `signalpacks/*.json` tables (no name-keyed migration needed — unreleased),
+> and the HUD sprite picture style (`2b15ef2`→`5d71ead` in upstream: in-game
+> signal pictures served over `/signal/sprites`, selectable via the Settings
+> "Signal style" dropdown). The commit list at the end records the upstream
+> source commits.
 >
 > **Divergence (deliberate):** direction. Upstream's `GetDirection` compares
 > `signal.Controller == junctionController`, which only ever matches the Out
@@ -101,6 +104,14 @@ All rendering lives in `RemoteDispatch/frontend/main.js`:
   signals at **0.75×** the normal scale.
 - The box height is driven by the **lamp count**: a 2-lamp signal renders shorter
   than 5- or 6-lamp main signals, so the rectangle wraps the actual face.
+- **Pictures style (fork addition, ported from upstream `2b15ef2`→`5d71ead`):**
+  the Settings **Signal style** dropdown switches between the lamp-SVG faces and
+  the in-game HUD sprite pictures captured by the bridge. The frontend resolves
+  each signal's picture through a fallback chain - live sprite from the
+  `/signal/sprites` manifest (sized to its natural `w`/`h`), then the type's
+  off-state sprite, then a bundled `frontend/signals/*.webp` static picture,
+  then the lamp SVG. The manifest is re-fetched on its own 15s schedule,
+  independent of the update loop.
 
 ## Aspect control
 
@@ -121,6 +132,9 @@ All rendering lives in `RemoteDispatch/frontend/main.js`:
 | `/signals`     | All signals (id, type, mode, aspect, position, aspects) |
 | `/signalpack`  | Current pack table JSON (lamp/aspect layout)         |
 | `/signal/control` | POST to set a signal's mode or aspect             |
+| `/signal/sprites` | HUD sprite manifest (`{Aspects:{id:{u,w,h}}, Off:{type:{u,w,h}}}`) |
+| `/signal/sprite/{aspectId}` | PNG of an aspect's in-game HUD sprite    |
+| `/signal/sprite/off/{type}` | PNG of a signal type's off-state sprite  |
 | `/updates`     | SSE stream; emits `signals` and `signalpack` tags    |
 
 The `signals` and `signalpack` update tags push aspect changes and pack-table

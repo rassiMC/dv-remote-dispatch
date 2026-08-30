@@ -3202,12 +3202,9 @@ function initSwitchboard() {
 				// Right-click on empty map cancels selection; right-click on a
 				// segment/switch toggles a waypoint and is stopped upstream so it
 				// does not reach this map-level handler.
-				const wasExtending = PathingController.state === 'extendingPath';
 				PathingController._resetSelection();
 				PathingController.rerender();
-				PathingController.updateStatus(wasExtending
-					? 'Extending cancelled.'
-					: 'Cancelled. Click an occupied block to begin.');
+				PathingController.updateStatus('Drafting cancelled. Click an occupied block to start a path, or use \u2295 to extend one.');
 			}
 		});
 

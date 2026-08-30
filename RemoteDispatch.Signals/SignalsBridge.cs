@@ -341,14 +341,18 @@ namespace DvMod.RemoteDispatch.Signals
             try
             {
                 // Resolve the aspect index by ID, then set FullManual + override so the
-                // aspect sticks (mirrors old SetAspectById behaviour).
+                // aspect sticks (mirrors old SetAspectById behaviour). ChangeAspect must
+                // run BEFORE SetAspectOverride: SetAspectOverride fires OverrideChanged,
+                // which the Signals MP layer turns into an OverridePacket that reads
+                // CurrentAspectIndex - so it would carry the stale aspect if the change
+                // hadn't happened yet.
                 for (int i = 0; i < signal.AllAspects.Length; i++)
                 {
                     if (string.Equals(signal.AllAspects[i].Id, aspect, StringComparison.OrdinalIgnoreCase))
                     {
                         signal.ChangeOperationMode(SignalOperationMode.FullManual);
-                        signal.SetAspectOverride(i);
                         var changed = signal.ChangeAspect(i);
+                        signal.SetAspectOverride(i);
                         signal.UpdateDisplays(changed);
                         signal.UpdateIndicators();
                         return true;

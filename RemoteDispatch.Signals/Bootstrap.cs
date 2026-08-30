@@ -30,6 +30,29 @@ namespace DvMod.RemoteDispatch.Signals
         public static object? CaptureSignal(string signalName) => _bridge?.CaptureSignal(signalName);
 
         /// <summary>
+        /// Returns the HUD sprite manifest: { Aspects: { id: { W, H } }, Off: { type: { W, H } } }
+        /// listing the aspect ids and signal types whose sprites are currently cached, with their
+        /// natural pixel sizes.
+        /// </summary>
+        public static object? GetSpriteManifest() => _bridge?.GetSpriteManifest();
+
+        /// <summary>
+        /// Returns the cached PNG bytes for an aspect id, or null if unavailable.
+        /// </summary>
+        public static byte[]? GetSpritePng(string aspectId) => _bridge?.GetSpritePng(aspectId);
+
+        /// <summary>
+        /// Returns the cached PNG bytes for a signal type's off-state sprite, or null.
+        /// </summary>
+        public static byte[]? GetOffSpritePng(string type) => _bridge?.GetOffSpritePng(type);
+
+        /// <summary>
+        /// Runs a throttled sprite capture pass on the current thread (must be the main
+        /// thread). Called by the HTTP layer so the sprite cache populates on demand.
+        /// </summary>
+        public static void RefreshSprites() => _bridge?.RefreshSpriteCache();
+
+        /// <summary>
         /// Initialize the bridge and set up logging. This should be called by the main mod during its initialization.
         /// </summary>
         /// <param name="log"></param>

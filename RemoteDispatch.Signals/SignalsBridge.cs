@@ -54,6 +54,8 @@ namespace DvMod.RemoteDispatch.Signals
 
             SubscribeToExistingSignals();
 
+            RefreshSpriteCache();
+
             LoggingReturn.DebugLog?.Invoke("Signals bridge registered.");
         }
 
@@ -116,6 +118,7 @@ namespace DvMod.RemoteDispatch.Signals
         private void OnSignalAspectChanged(SgSignal signal, IAspect? aspect)
         {
             if (signal.Definition == null) return;
+            CaptureSignalSprites(signal);
             _onAspectChanged?.Invoke(signal.Id.ToString(), aspect?.Id ?? "OFF");
         }
 
@@ -191,6 +194,9 @@ namespace DvMod.RemoteDispatch.Signals
                 // already opened the subscription map for event-driven pushes.
                 if (_mainThreadId == System.Threading.Thread.CurrentThread.ManagedThreadId)
                     ForceUpdateAllSignalAspects();
+
+                // Also refresh the sprite cache on the main thread (throttled).
+                RefreshSpriteCache();
 
                 foreach (var controller in SignalManager.Instance.AllControllers)
                 {
@@ -593,6 +599,305 @@ namespace DvMod.RemoteDispatch.Signals
             {
                 LoggingReturn.DebugLog?.Invoke($"ForceUpdateAllSignalAspects failed: {ex.Message}");
             }
+        }
+
+        // ---------------------------------------------------------------------
+        // HUD sprite capture (the in-game hover pictures).
+        //
+        // The Signals mod shows a picture of a signal when hovered: the current
+        // aspect's HUDSprite (AspectBaseDefinition.HUDSprite) or, when off, the
+        // signal's OffStateHUDSprite. These are static per signal pack, so we
+        // extract each unique one once and cache the PNG bytes, then serve them
+        // to the frontend over HTTP as an alternative to the lamp faces.
+        // ---------------------------------------------------------------------
+
+        private static string? _spriteCacheKey;
+        private static DateTime _lastSpriteRefresh = DateTime.MinValue;
+        private static readonly TimeSpan _spriteRefreshInterval = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// Throttled full sweep: (re)captures HUD sprites for every signal in the
+        /// current pack, resetting the cache when the pack changes. Main thread only.
+        /// Exposed via Bootstrap so the HTTP layer can trigger a capture pass on demand.
+        /// </summary>
+        internal void RefreshSpriteCache()
+        {
+            if (_mainThreadId != System.Threading.Thread.CurrentThread.ManagedThreadId) return;
+
+            var key = GetPackKey();
+            if (!string.Equals(key, _spriteCacheKey, StringComparison.Ordinal))
+            {
+                SignalSpriteCache.Reset();
+                _spriteCacheKey = key;
+                _lastSpriteRefresh = DateTime.MinValue;
+            }
+
+            var now = DateTime.UtcNow;
+            if (now - _lastSpriteRefresh < _spriteRefreshInterval) return;
+            _lastSpriteRefresh = now;
+
+            if (SignalManager.Instance == null) return;
+
+            try
+            {
+                int signals = 0;
+                int aspects = 0;
+                foreach (var controller in SignalManager.Instance.AllControllers)
+                {
+                    if (!controller.Exists) continue;
+                    foreach (var signal in controller.AllSignals)
+                    {
+                        if (signal.Definition == null) continue;
+                        signals++;
+                        aspects += signal.AllAspects?.Length ?? 0;
+                        CaptureSignalSprites(signal);
+                    }
+                }
+
+                var summary = $"Sprite sweep: {signals} signals, {aspects} aspects, " +
+                    $"{SignalSpriteCache.AspectIds().Length} aspect sprites, {SignalSpriteCache.OffTypes().Length} off sprites cached.";
+                if (!string.Equals(summary, _lastSpriteSummary, StringComparison.Ordinal))
+                {
+                    _lastSpriteSummary = summary;
+                    LoggingReturn.DebugLog?.Invoke(summary);
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.DebugLog?.Invoke($"RefreshSpriteCache failed: {ex.Message}");
+            }
+        }
+
+        private static string? _lastSpriteSummary;
+
+        /// <summary>
+        /// Captures the HUD sprites of a single signal into the cache: every aspect's
+        /// HUDSprite (keyed by aspect id) and the signal's off-state sprite (keyed by
+        /// its RD type). Main thread only. Best-effort; unreadable textures are skipped.
+        /// </summary>
+        private void CaptureSignalSprites(SgSignal signal)
+        {
+            if (_mainThreadId != System.Threading.Thread.CurrentThread.ManagedThreadId) return;
+            if (signal.Definition == null) return;
+
+            try
+            {
+                var type = TypeToString(signal.Controller?.Type ?? SignalType.NotSet);
+
+                foreach (var aspect in signal.AllAspects)
+                {
+                    if (aspect == null) continue;
+                    var id = aspect.Id;
+                    if (string.IsNullOrEmpty(id) || SignalSpriteCache.HasAspect(id)) continue;
+
+                    var def = aspect.GetDefinition();
+                    if (def == null || def.HUDSprite == null)
+                    {
+                        LoggingReturn.DebugLog?.Invoke($"No HUDSprite for aspect '{id}' on {signal.Name}.");
+                        continue;
+                    }
+                    var png = SpriteToPng(def.HUDSprite);
+                    if (png != null) SignalSpriteCache.SetAspect(id, png);
+                }
+
+                if (!SignalSpriteCache.HasOff(type))
+                {
+                    var offPng = SpriteToPng(signal.Definition.OffStateHUDSprite);
+                    if (offPng != null) SignalSpriteCache.SetOff(type, offPng);
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.DebugLog?.Invoke($"CaptureSignalSprites({signal.Name}) failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Encodes a Unity Sprite to PNG bytes, cropping to the sprite's rect so
+        /// atlas-packed sprites work too. Non-readable textures (common for asset-bundle
+        /// sprites) are copied through a RenderTexture; only the sprite's rect is read
+        /// back to the CPU, so large atlases stay cheap. Returns null when the sprite
+        /// is missing or could not be encoded (the frontend falls back to static pics).
+        /// </summary>
+        private static byte[]? SpriteToPng(Sprite? sprite)
+        {
+            if (sprite == null) return null;
+
+            try
+            {
+                var texture = sprite.texture;
+                if (texture == null) return null;
+
+                var rect = sprite.rect;
+                int x = (int)rect.x;
+                int y = (int)rect.y;
+                int w = (int)rect.width;
+                int h = (int)rect.height;
+                if (w <= 0 || h <= 0) return null;
+                if (w > MaxSpriteSize || h > MaxSpriteSize)
+                {
+                    LoggingReturn.DebugLog?.Invoke($"SpriteToPng skipped ({sprite.name}): size {w}x{h} exceeds {MaxSpriteSize}px cap.");
+                    return null;
+                }
+
+                Texture2D cropped;
+                if (texture.isReadable)
+                {
+                    cropped = new Texture2D(w, h, TextureFormat.RGBA32, false);
+                    cropped.SetPixels(texture.GetPixels(x, y, w, h));
+                    cropped.Apply();
+                }
+                else
+                {
+                    // Non-readable source (typical for asset-bundle sprites). Blit the
+                    // whole source into a RenderTexture on the GPU, then read back ONLY
+                    // the sprite rect (not the whole atlas).
+                    if ((long)texture.width * texture.height > MaxSourcePixels)
+                    {
+                        LoggingReturn.DebugLog?.Invoke($"SpriteToPng skipped ({sprite.name}): source {texture.width}x{texture.height} exceeds {MaxSourcePixels}px cap.");
+                        return null;
+                    }
+
+                    var rt = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.ARGB32);
+                    try
+                    {
+                        Graphics.Blit(texture, rt);
+                        var previous = RenderTexture.active;
+                        RenderTexture.active = rt;
+                        cropped = new Texture2D(w, h, TextureFormat.RGBA32, false);
+                        cropped.ReadPixels(new Rect(x, y, w, h), 0, 0);
+                        cropped.Apply();
+                        RenderTexture.active = previous;
+                    }
+                    finally
+                    {
+                        RenderTexture.active = null;
+                        RenderTexture.ReleaseTemporary(rt);
+                    }
+                }
+
+                var png = cropped.EncodeToPNG();
+                UnityEngine.Object.Destroy(cropped);
+                return (png == null || png.Length == 0) ? null : png;
+            }
+            catch (Exception ex)
+            {
+                LoggingReturn.DebugLog?.Invoke($"SpriteToPng failed ({sprite.name}): {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>Encoded sprite size cap: larger HUD sprites are skipped (static pictures used instead).
+        /// HUD face sprites are tall/narrow (e.g. 160x640), so allow up to 1024px per side.</summary>
+        private const int MaxSpriteSize = 1024;
+
+        /// <summary>Source-texture area cap for the non-readable RenderTexture path (bounds the temporary RT).</summary>
+        private const long MaxSourcePixels = 4096L * 4096L;
+
+        /// <summary>
+        /// Returns the aspect ids and RD types that currently have cached HUD sprites,
+        /// with their natural pixel sizes, serialized as
+        /// { Aspects: { id: { W, H } }, Off: { type: { W, H } } }.
+        /// </summary>
+        internal object? GetSpriteManifest()
+        {
+            var aspects = new Dictionary<string, object>();
+            foreach (var id in SignalSpriteCache.AspectIds())
+            {
+                var size = SignalSpriteCache.PngSize(SignalSpriteCache.GetAspect(id));
+                if (size != null) aspects[id] = new { W = size.Value.Width, H = size.Value.Height };
+            }
+
+            var off = new Dictionary<string, object>();
+            foreach (var type in SignalSpriteCache.OffTypes())
+            {
+                var size = SignalSpriteCache.PngSize(SignalSpriteCache.GetOff(type));
+                if (size != null) off[type] = new { W = size.Value.Width, H = size.Value.Height };
+            }
+
+            return new
+            {
+                Aspects = aspects,
+                Off = off,
+            };
+        }
+
+        /// <summary>Returns the cached PNG bytes for an aspect id, or null.</summary>
+        internal byte[]? GetSpritePng(string aspectId) => SignalSpriteCache.GetAspect(aspectId);
+
+        /// <summary>Returns the cached PNG bytes for a signal type's off sprite, or null.</summary>
+        internal byte[]? GetOffSpritePng(string type) => SignalSpriteCache.GetOff(type);
+
+    }
+
+    /// <summary>
+    /// Thread-safe cache of encoded HUD sprite PNGs, keyed by aspect id (and by RD
+    /// type for off-state sprites). Populated on the Unity main thread, read from
+    /// the HTTP threads.
+    /// </summary>
+    internal static class SignalSpriteCache
+    {
+        private static readonly object s_lock = new object();
+        private static readonly Dictionary<string, byte[]> s_aspectPngs = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, byte[]> s_offPngs = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+
+        internal static void Reset()
+        {
+            lock (s_lock)
+            {
+                s_aspectPngs.Clear();
+                s_offPngs.Clear();
+            }
+        }
+
+        internal static bool HasAspect(string id)
+        {
+            lock (s_lock) return s_aspectPngs.ContainsKey(id);
+        }
+
+        internal static bool HasOff(string type)
+        {
+            lock (s_lock) return s_offPngs.ContainsKey(type);
+        }
+
+        internal static void SetAspect(string id, byte[] png)
+        {
+            lock (s_lock) s_aspectPngs[id] = png;
+        }
+
+        internal static void SetOff(string type, byte[] png)
+        {
+            lock (s_lock) s_offPngs[type] = png;
+        }
+
+        internal static byte[]? GetAspect(string id)
+        {
+            lock (s_lock) return s_aspectPngs.TryGetValue(id, out var png) ? png : null;
+        }
+
+        internal static byte[]? GetOff(string type)
+        {
+            lock (s_lock) return s_offPngs.TryGetValue(type, out var png) ? png : null;
+        }
+
+        internal static string[] AspectIds()
+        {
+            lock (s_lock) return new List<string>(s_aspectPngs.Keys).ToArray();
+        }
+
+        internal static string[] OffTypes()
+        {
+            lock (s_lock) return new List<string>(s_offPngs.Keys).ToArray();
+        }
+
+        /// <summary>Pixel size of an encoded PNG, read from its IHDR header (bytes 16-23).</summary>
+        internal static (int Width, int Height)? PngSize(byte[]? png)
+        {
+            if (png == null || png.Length < 24) return null;
+            if (png[0] != 0x89 || png[1] != 0x50) return null; // PNG signature
+            return (
+                Width: (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19],
+                Height: (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23]);
         }
     }
 }

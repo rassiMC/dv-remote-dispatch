@@ -21,6 +21,10 @@ namespace DvMod.RemoteDispatch
 		private static MethodInfo? _isTrackOccupiedMethod;
 		private static MethodInfo? _getPackKeyMethod;
 		private static MethodInfo? _captureSignalMethod;
+		private static MethodInfo? _getSpriteManifestMethod;
+		private static MethodInfo? _getSpritePngMethod;
+		private static MethodInfo? _getOffSpritePngMethod;
+		private static MethodInfo? _refreshSpritesMethod;
 
 		internal static bool IsInitialized { get; private set; }
 
@@ -252,6 +256,10 @@ namespace DvMod.RemoteDispatch
 			_isTrackOccupiedMethod = bootstrap.GetMethod("IsTrackOccupied", BindingFlags.Public | BindingFlags.Static);
 			_getPackKeyMethod = bootstrap.GetMethod("GetPackKey", BindingFlags.Public | BindingFlags.Static);
 			_captureSignalMethod = bootstrap.GetMethod("CaptureSignal", BindingFlags.Public | BindingFlags.Static);
+			_getSpriteManifestMethod = bootstrap.GetMethod("GetSpriteManifest", BindingFlags.Public | BindingFlags.Static);
+			_getSpritePngMethod = bootstrap.GetMethod("GetSpritePng", BindingFlags.Public | BindingFlags.Static);
+			_getOffSpritePngMethod = bootstrap.GetMethod("GetOffSpritePng", BindingFlags.Public | BindingFlags.Static);
+			_refreshSpritesMethod = bootstrap.GetMethod("RefreshSprites", BindingFlags.Public | BindingFlags.Static);
 
 				PackTableStore.TableDirectory = Path.Combine(Main.mod!.Path, "signalpacks");
 
@@ -430,6 +438,150 @@ namespace DvMod.RemoteDispatch
 		internal static string GetPackTableJson()
 		{
 			return PackTableStore.GetCurrentJson() ?? "{}";
+		}
+
+		/// <summary>
+		/// Returns the HUD sprite manifest for the /signal/sprites endpoint: which aspect
+		/// ids and signal types have cached sprites, mapped to their serving URLs.
+		/// </summary>
+		internal static string GetSpriteManifestJson()
+		{
+			var result = new JObject();
+			if (!IsInitialized || _getSpriteManifestMethod == null)
+			{
+				return JsonConvert.SerializeObject(result);
+			}
+
+			try
+			{
+				var manifest = _getSpriteManifestMethod.Invoke(null, null);
+				var j = manifest != null ? JObject.FromObject(manifest) : new JObject();
+
+				// New shape: { Aspects: { id: { W, H } }, Off: { type: { W, H } } }.
+				// Each entry becomes { u: url, w, h } so the frontend can size icons
+				// proportionally. Also tolerates the legacy string-array shape (url only).
+				var aspects = new JObject();
+				var aspectTok = j["Aspects"];
+				if (aspectTok is JObject aspectObj)
+				{
+					foreach (var kv in aspectObj)
+					{
+						var aspectId = kv.Key;
+						if (string.IsNullOrEmpty(aspectId)) continue;
+						aspects[aspectId] = SpriteEntry(aspectId, kv.Value, $"/signal/sprite/{aspectId}");
+					}
+				}
+				else if (aspectTok is JArray aspectArr)
+				{
+					foreach (var id in aspectArr)
+					{
+						var aspectId = id.ToString();
+						if (!string.IsNullOrEmpty(aspectId)) aspects[aspectId] = $"/signal/sprite/{aspectId}";
+					}
+				}
+
+				var off = new JObject();
+				var offTok = j["Off"];
+				if (offTok is JObject offObj)
+				{
+					foreach (var kv in offObj)
+					{
+						var typeName = kv.Key;
+						if (string.IsNullOrEmpty(typeName)) continue;
+						off[typeName] = SpriteEntry(typeName, kv.Value, $"/signal/sprite/off/{typeName}");
+					}
+				}
+				else if (offTok is JArray offArr)
+				{
+					foreach (var type in offArr)
+					{
+						var typeName = type.ToString();
+						if (!string.IsNullOrEmpty(typeName)) off[typeName] = $"/signal/sprite/off/{typeName}";
+					}
+				}
+
+				result["Aspects"] = aspects;
+				result["Off"] = off;
+			}
+			catch (Exception ex)
+			{
+				Main.Warning($"GetSpriteManifestJson failed: {ex.Message}");
+			}
+
+			// Kick off a main-thread sprite capture pass so the cache populates on demand
+			// (not just on aspect changes). The bridge throttles the actual sweep, and the
+			// next manifest fetch includes any newly captured sprites.
+			try
+			{
+				if (_refreshSpritesMethod != null)
+				{
+					Updater.RunOnMainThread(() =>
+					{
+						try { _refreshSpritesMethod.Invoke(null, null); }
+						catch (Exception ex) { Main.DebugLog($"RefreshSprites failed: {ex.Message}"); }
+					});
+				}
+			}
+			catch (Exception ex)
+			{
+				Main.DebugLog($"Failed to schedule RefreshSprites: {ex.Message}");
+			}
+
+			return JsonConvert.SerializeObject(result);
+		}
+
+		/// <summary>
+		/// Builds a sprite manifest entry: { u: url, w, h } from a dims object { W, H },
+		/// falling back to { u: url } when no dimensions are available.
+		/// </summary>
+		private static JObject SpriteEntry(string key, JToken? dims, string url)
+		{
+			var entry = new JObject { ["u"] = url };
+			if (dims is JObject d)
+			{
+				var w = d["W"]?.Value<int?>() ?? 0;
+				var h = d["H"]?.Value<int?>() ?? 0;
+				if (w > 0 && h > 0)
+				{
+					entry["w"] = w;
+					entry["h"] = h;
+				}
+			}
+			return entry;
+		}
+
+		/// <summary>
+		/// Returns the cached PNG bytes for an aspect id, or null if unavailable.
+		/// </summary>
+		internal static byte[]? GetSpritePng(string aspectId)
+		{
+			if (!IsInitialized || _getSpritePngMethod == null || string.IsNullOrEmpty(aspectId)) return null;
+			try
+			{
+				return _getSpritePngMethod.Invoke(null, new object[] { aspectId }) as byte[];
+			}
+			catch (Exception ex)
+			{
+				Main.Warning($"GetSpritePng({aspectId}) failed: {ex.Message}");
+				return null;
+			}
+		}
+
+		/// <summary>
+		/// Returns the cached PNG bytes for a signal type's off-state sprite, or null.
+		/// </summary>
+		internal static byte[]? GetOffSpritePng(string type)
+		{
+			if (!IsInitialized || _getOffSpritePngMethod == null || string.IsNullOrEmpty(type)) return null;
+			try
+			{
+				return _getOffSpritePngMethod.Invoke(null, new object[] { type }) as byte[];
+			}
+			catch (Exception ex)
+			{
+				Main.Warning($"GetOffSpritePng({type}) failed: {ex.Message}");
+				return null;
+			}
 		}
 
 		private static string? s_currentPackKey;

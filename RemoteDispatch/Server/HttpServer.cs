@@ -221,6 +221,56 @@ namespace DvMod.RemoteDispatch
 			var url = context.Request.Url;
 			var segments = url.Segments;
 
+			// HUD sprite endpoints (pictures shown when hovering a signal in-game).
+			// /signal/sprites                    -> JSON manifest of available sprites
+			// /signal/sprite/{aspectId}          -> PNG of that aspect's sprite
+			// /signal/sprite/off/{type}          -> PNG of that signal type's off sprite
+			if (context.Request.HttpMethod == "GET" && segments.Length >= 3
+				&& segments[2].TrimEnd('/').Equals("sprites", StringComparison.OrdinalIgnoreCase))
+			{
+				Render200(context, ContentTypes.Json, Main.settings.featureFlags.enableSignals ? SignalsShim.GetSpriteManifestJson() : "{}");
+				return;
+			}
+
+			if (context.Request.HttpMethod == "GET" && segments.Length >= 3
+				&& segments[2].TrimEnd('/').Equals("sprite", StringComparison.OrdinalIgnoreCase))
+			{
+				if (!Main.settings.featureFlags.enableSignals)
+				{
+					RenderEmpty(context, 404);
+					return;
+				}
+
+				if (segments.Length >= 4 && segments[3].TrimEnd('/').Equals("off", StringComparison.OrdinalIgnoreCase) && segments.Length >= 5)
+				{
+					var type = segments[4].TrimEnd('/');
+					var offPng = SignalsShim.GetOffSpritePng(type);
+					if (offPng == null)
+					{
+						RenderEmpty(context, 404);
+						return;
+					}
+					Render200(context, ContentTypes.Png, offPng);
+					return;
+				}
+
+				if (segments.Length >= 4)
+				{
+					var aspectId = segments[3].TrimEnd('/');
+					var png = SignalsShim.GetSpritePng(aspectId);
+					if (png == null)
+					{
+						RenderEmpty(context, 404);
+						return;
+					}
+					Render200(context, ContentTypes.Png, png);
+					return;
+				}
+
+				RenderEmpty(context, 404);
+				return;
+			}
+
 			if (segments.Length == 3 && segments[2].TrimEnd('/').Equals("entry", StringComparison.OrdinalIgnoreCase) && context.Request.HttpMethod == "POST")
 			{
 				HandleSignalEntryRequest(context);
@@ -720,10 +770,14 @@ namespace DvMod.RemoteDispatch
 
 		private static void RenderResource(HttpListenerContext context)
 		{
-			var resourceName = context.Request.Url.Segments[2];
-			var extension = Path.GetExtension(resourceName);
+			var segments = context.Request.Url.Segments;
+			// /res/<path...> — embedded resource names use dots for directories
+			// (e.g. frontend/signals/s2.webp -> frontend.signals.s2.webp), so join
+			// the remaining segments and convert slashes to dots before lookup.
+			var resourcePath = string.Join("", segments.Skip(2)).Replace('/', '.');
+			var extension = Path.GetExtension(resourcePath);
 			context.Response.ContentType = ContentTypes.ForExtension(extension);
-			RenderResource(context, $"frontend.{resourceName}");
+			RenderResource(context, $"frontend.{resourcePath}");
 		}
 
 		private static async Task HandlePathRequest(HttpListenerContext context)
@@ -997,6 +1051,7 @@ namespace DvMod.RemoteDispatch
 			public const string Javascript = "application/javascript";
 			public const string Png = "image/png";
 			public const string Svg = "image/svg+xml";
+			public const string Webp = "image/webp";
 
 			public static string ForExtension(string extension)
 			{
@@ -1007,6 +1062,7 @@ namespace DvMod.RemoteDispatch
 					".json" => Json,
 					".png" => Png,
 					".svg" => Svg,
+					".webp" => Webp,
 					_ => "",
 				};
 			}
@@ -1034,6 +1090,16 @@ namespace DvMod.RemoteDispatch
 			{
 				context.Response.Close(bytes, false);
 			}
+		}
+
+		private static void Render200(HttpListenerContext context, string contentType, byte[] bytes)
+		{
+#if DEBUG
+			Main.Log("Render200 (bytes)");
+#endif
+			context.Response.ContentType = contentType;
+			context.Response.Headers.Add("Cache-Control", "max-age=60");
+			context.Response.Close(bytes, false);
 		}
 
 		private static void RenderEmpty(HttpListenerContext context, int statusCode)
